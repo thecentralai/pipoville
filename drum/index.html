@@ -116,6 +116,7 @@ input[type=range]::-moz-range-thumb { width: 10px; height: 10px; border: 0; bord
 .br-item:hover { background: var(--panel2); color: var(--bright); }
 .br-item.cur { color: var(--accent); }
 .br-item small { color: var(--dim2); }
+.br-sub { padding: 6px 12px 2px; color: var(--dim2); font-size: 10px; }
 .br-help { padding: 0 12px; color: var(--dim); line-height: 1.7; font-size: 11px; }
 .br-help b { color: var(--text); font-weight: 500; display: inline-block; min-width: 76px; }
 details.br-sec summary { list-style: none; cursor: pointer; }
@@ -259,6 +260,15 @@ details.br-sec[open] summary .br-title::after { content: "\2013"; }
 .ksel select { height: 20px; }
 .ksel .k-lbl { margin-top: 0; }
 .tog { height: 20px; }
+.dev-tabbed { flex-direction: column; gap: 8px; }
+.dev-tabs { align-self: flex-start; }
+.dev-page { display: flex; gap: 16px; align-items: flex-start; }
+.dev-page .kgroup { padding-right: 14px; border-right: 1px solid #3a3a3a; }
+.dev-page .kgroup:last-child { border-right: 0; }
+.stepper { display: grid; grid-template-columns: repeat(16, 14px); gap: 2px; height: 76px; cursor: ns-resize; touch-action: none; }
+.st-bar { position: relative; background: #262626; border-radius: 1px; }
+.st-bar.beat { background: #2f2f2f; }
+.st-bar i { position: absolute; left: 0; right: 0; bottom: 0; background: var(--accent); border-radius: 1px; }
 .pads { display: grid; grid-template-columns: repeat(4, 64px); gap: 3px; }
 .pad { height: 42px; background: var(--panel2); border-radius: 3px; display: flex; flex-direction: column; justify-content: space-between; padding: 5px 6px; text-align: left; font-weight: 600; font-size: 10px; color: var(--bright); }
 .pad small { font-weight: 400; color: var(--dim); font-size: 10px; }
@@ -282,11 +292,13 @@ details.br-sec[open] summary .br-title::after { content: "\2013"; }
 .mopts { display: flex; flex-wrap: wrap; gap: 14px; }
 .mopts input[type=checkbox] { height: auto; accent-color: var(--accent); }
 .mwarn { margin: 0; padding: 8px 10px 8px 26px; background: #3a3220; color: #f0d29a; border-radius: 4px; line-height: 1.5; }
-.mbtns { display: flex; justify-content: flex-end; gap: 8px; }
+.mbtns { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+.mi-msg { margin-right: auto; color: var(--accent); }
+.mtable td.mi-name { overflow-wrap: anywhere; }
 .mbtns .btn { height: 28px; padding: 0 14px; }
 
 /* status bar (Live's info view) */
-.statusbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0 10px; background: var(--panel); border-top: 1px solid var(--line); color: var(--dim); white-space: nowrap; overflow: hidden; font-size: 11px; }
+.statusbar { position: relative; z-index: 101; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0 10px; background: var(--panel); border-top: 1px solid var(--line); color: var(--dim); white-space: nowrap; overflow: hidden; font-size: 11px; }
 #info { overflow: hidden; text-overflow: ellipsis; }
 #info.flash { color: var(--accent); }
 #kbd-info { color: var(--dim2); }
@@ -305,6 +317,8 @@ details.br-sec[open] summary .br-title::after { content: "\2013"; }
   .hide-sm { display: none !important; }
   .cb-left { width: 150px; }
   #kbd-info { display: none; }
+  .mtable select { min-width: 0; max-width: 130px; }
+  .modal { padding: 14px; }
 }
 </style>
 </head>
@@ -318,7 +332,7 @@ details.br-sec[open] summary .br-title::after { content: "\2013"; }
       <li>8 tracks x 8 scenes clip launcher</li>
       <li>Drum racks, Reese, sub, stabs, pads, hoover</li>
       <li>Piano roll, step grid and arrangement</li>
-      <li>Five templates, WAV export, MIDI input</li>
+      <li>MIDI file import, WAV export, MIDI controllers</li>
     </ul>
     <button id="btn-power" class="btn">Start audio</button>
   </div>
@@ -464,7 +478,7 @@ const KITS = {
 const PAD_BASE = { tune: 0, decay: 1, level: .8, pan: 0, duck: false };
 function makePads(kit) { return KITS[kit].pads.map(([name, voice, o]) => Object.assign({ name, voice }, PAD_BASE, o || {})); }
 
-const SYNTH_BASE = { preset: 'Init', osc: 'sawtooth', voices: 1, detune: 0, oct: 0, sub: 0, glide: 0, mono: false, cutoff: 2000, res: 1, env: 0, fdec: .3,
+const SYNTH_BASE = { engine: 'classic', preset: 'Init', osc: 'sawtooth', voices: 1, detune: 0, oct: 0, sub: 0, glide: 0, mono: false, cutoff: 2000, res: 1, env: 0, fdec: .3,
   a: .005, d: .3, s: .8, r: .15, lfoRate: 'off', lfoShape: 'sine', lfoDepth: 0, drive: 0, level: .8 };
 const SYNTH_PRESETS = {
   'Reese Classic': { osc: 'sawtooth', voices: 3, detune: 22, mono: true, glide: .03, cutoff: 650, res: 4, env: 1400, fdec: .35, a: .005, d: .5, s: .85, r: .12, drive: .35, level: .7 },
@@ -480,19 +494,65 @@ const SYNTH_PRESETS = {
   'Jump Up': { osc: 'square', voices: 2, detune: 9, mono: true, glide: .04, cutoff: 700, res: 9, env: 3000, fdec: .12, a: .002, d: .25, s: .55, r: .06, drive: .6, level: .6 },
   'Liquid Keys': { osc: 'triangle', voices: 2, detune: 5, cutoff: 2400, res: 1, env: 1800, fdec: .45, a: .002, d: 1.2, s: .25, r: .6, level: .5 },
 };
-function makeSynth(name) { return Object.assign({}, SYNTH_BASE, SYNTH_PRESETS[name] || {}, { preset: name }); }
+// Polar VA and Tidal WT defaults (the engines live in section 3b)
+const POLAR_BASE = { engine: 'polar', preset: 'Polar Init', key: 0, mixA: 1, mixB: 1, glide: 0, mono: false, level: .7 };
+for (let k = 1; k <= 4; k++) Object.assign(POLAR_BASE, { ['o' + k + 'wave']: 'sawtooth', ['o' + k + 'oct']: 0, ['o' + k + 'semi']: 0, ['o' + k + 'fine']: 0,
+  ['o' + k + 'vol']: k === 1 ? .8 : 0, ['o' + k + 'voices']: 1, ['o' + k + 'det']: .2, ['o' + k + 'st']: .5 });
+['A', 'B'].forEach(p => Object.assign(POLAR_BASE, { ['f' + p + 'type']: 'lowpass', ['f' + p + 'slope']: 24, ['f' + p + 'cut']: 2000, ['f' + p + 'res']: .2, ['f' + p + 'drive']: 0,
+  ['a' + p]: .005, ['d' + p]: .3, ['s' + p]: .8, ['r' + p]: .2 }));
+[1, 2].forEach(m => Object.assign(POLAR_BASE, { ['m' + m + 'a']: .001, ['m' + m + 'd']: .3, ['m' + m + 's']: 0, ['m' + m + 'r']: .2, ['m' + m + 'dest']: 'off', ['m' + m + 'amt']: 0,
+  ['l' + m + 'wave']: 'sine', ['l' + m + 'rate']: '1/4', ['l' + m + 'dest']: 'off', ['l' + m + 'amt']: 0 }));
+const TIDAL_BASE = { engine: 'tidal', preset: 'Tidal Init', sub: 0, noise: 0, fmRatio: 1, fmAmt: 0,
+  f1type: 'lp24', f1cut: 2000, f1res: .2, f1drive: 0, f2type: 'off', f2cut: 6000, f2res: .1, f2drive: 0, route: 'serial', key: 0,
+  a: .005, d: .3, s: .8, r: .2, e2a: .001, e2d: .3, e2s: 0, e2r: .2, e2dest: 'off', e2amt: 0,
+  stSeq: [1, 0, .5, 0, 1, 0, .5, 0, 1, 0, .5, 0, 1, 0, .5, 0], stRate: '1/16', stDest: 'off', stAmt: 0, stGlide: 0, glide: 0, mono: false, level: .7 };
+for (let k = 1; k <= 3; k++) Object.assign(TIDAL_BASE, { ['w' + k + 'table']: 'Saw > Square', ['w' + k + 'pos']: 0, ['w' + k + 'oct']: 0, ['w' + k + 'semi']: 0, ['w' + k + 'fine']: 0,
+  ['w' + k + 'vol']: k === 1 ? .8 : 0, ['w' + k + 'voices']: 1, ['w' + k + 'det']: .2 });
+[1, 2].forEach(l => Object.assign(TIDAL_BASE, { ['l' + l + 'wave']: 'sine', ['l' + l + 'rate']: '1/4', ['l' + l + 'dest']: 'off', ['l' + l + 'amt']: 0 }));
+const ENGINE_BASE = { classic: SYNTH_BASE, polar: POLAR_BASE, tidal: TIDAL_BASE };
+Object.assign(SYNTH_PRESETS, {
+  'Polar Init': { engine: 'polar' },
+  'Polar Supersaw Stab': { engine: 'polar', o1voices: 7, o1det: .45, o1st: .9, o2oct: 1, o2vol: .45, o2voices: 5, o2det: .35, o2st: .8, fAcut: 2600, fAres: .15,
+    aA: .001, dA: .28, sA: 0, rA: .18, m1dest: 'cutA', m1amt: .35, m1d: .18, level: .5 },
+  'Polar Reese': { engine: 'polar', o1voices: 2, o1det: .3, o1st: .3, o1vol: .7, o2fine: 14, o2vol: .6, o2voices: 2, o2det: .25, o3wave: 'square', o3oct: -1, o3vol: .45,
+    fAcut: 700, fAres: .35, fAdrive: .45, fBcut: 420, fBres: .1, sA: .9, sB: .9, rA: .12, rB: .12, l1wave: 'triangle', l1rate: '1/1', l1dest: 'cut', l1amt: .12, mono: true, glide: .03, level: .6 },
+  'Polar Hoover': { engine: 'polar', o1voices: 8, o1det: .75, o1st: 1, o1vol: .7, o2wave: 'pulse', o2oct: -1, o2vol: .5, o2voices: 4, o2det: .5, o2st: .8, fAcut: 3200, fAres: .1,
+    aA: .02, dA: .5, sA: .8, rA: .3, m1dest: 'pitch', m1amt: -.06, m1d: .12, mono: true, glide: .09, level: .42 },
+  'Polar Pluck': { engine: 'polar', o1wave: 'square', o1vol: .6, o2oct: 1, o2fine: 7, o2vol: .45, fAcut: 380, fAres: .4, aA: .001, dA: .32, sA: 0, rA: .25,
+    m1dest: 'cutA', m1amt: .55, m1d: .22, level: .55 },
+  'Polar Pad Wide': { engine: 'polar', o1voices: 6, o1det: .35, o1st: 1, o1vol: .6, o2oct: 1, o2vol: .35, o2voices: 4, o2det: .3, o2st: 1, o3wave: 'triangle', o3vol: .4,
+    fAcut: 1600, fAres: .1, fBcut: 1400, aA: .8, dA: 1, sA: .9, rA: 1.5, aB: .8, dB: 1, sB: .9, rB: 1.5, l1rate: '1/1', l1dest: 'cut', l1amt: .12, level: .4 },
+  'Polar Sub': { engine: 'polar', o1wave: 'sine', o1vol: .9, o3wave: 'triangle', o3vol: .15, fAcut: 400, fBcut: 400, sA: 1, rA: .08, sB: 1, rB: .08, mono: true, glide: .02, level: .9 },
+  'Tidal Init': { engine: 'tidal' },
+  'Tidal Growl Wobble': { engine: 'tidal', w1table: 'Growl', w1pos: .2, w1voices: 2, w1det: .2, w2pos: .5, w2oct: -1, w2vol: .4, sub: .6, f1cut: 700, f1res: .4, f1drive: .5,
+    l1rate: '1/8', l1dest: 'pos1', l1amt: .8, l2rate: '1/8', l2dest: 'cut1', l2amt: .35, s: .9, r: .1, mono: true, glide: .03, level: .55 },
+  'Tidal Talking Bass': { engine: 'tidal', w1table: 'Vowel A > O', w1voices: 2, w1det: .15, w2table: 'Growl', w2vol: .3, w2oct: -1, sub: .5, f1type: 'lp12', f1cut: 1400, f1res: .35, f1drive: .6,
+    e2dest: 'pos1', e2amt: 1, e2d: .35, e2s: .2, l1wave: 'triangle', l1rate: '1/4', l1dest: 'pos', l1amt: .85, s: .9, r: .1, mono: true, glide: .04, level: .55 },
+  'Tidal Neuro Stepper': { engine: 'tidal', w1table: 'Digital', w1voices: 2, w1det: .25, w2table: 'Growl', w2pos: .6, w2vol: .6, sub: .5, f1cut: 300, f1res: .5, f1drive: .6,
+    stSeq: [1, 0, .6, 0, 1, .3, .8, 0, 1, 0, .5, .2, .9, 0, .7, .4], stDest: 'cut1', stAmt: .7, stGlide: .2, s: .9, r: .08, mono: true, glide: .02, level: .55 },
+  'Tidal Jump Up Morph': { engine: 'tidal', w1pos: .6, w1vol: .7, fmRatio: 2, fmAmt: .3, e2dest: 'fm', e2amt: .9, e2d: .22, sub: .4, f1type: 'lp12', f1cut: 1300, f1res: .5, f1drive: .5,
+    d: .25, s: .6, r: .06, mono: true, glide: .04, level: .55 },
+  'Tidal Gate Pad': { engine: 'tidal', w1table: 'Hollow', w1pos: .3, w1voices: 4, w1det: .3, w2table: 'Sine > Saw', w2pos: .6, w2oct: 1, w2vol: .4, w2voices: 3, w2det: .3,
+    f1cut: 2200, f1res: .15, a: .2, s: 1, r: .4, stSeq: [1, 0, 1, 0, 1, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1], stDest: 'amp', stAmt: 1, stGlide: .1, level: .4 },
+  'Tidal Scream Lead': { engine: 'tidal', w1pos: .7, w1voices: 3, w1det: .3, w2table: 'Metal', w2vol: .25, f1type: 'bp', f1cut: 1600, f1res: .6, f1drive: .8, f2type: 'lp12', f2cut: 6000,
+    l1rate: '1/16T', l1dest: 'pitch', l1amt: .015, mono: true, glide: .06, level: .4 },
+});
+function makeSynth(name) {
+  const pr = SYNTH_PRESETS[name] || {}, eng = pr.engine || 'classic';
+  return Object.assign(clone(ENGINE_BASE[eng]), clone(pr), { preset: name, engine: eng });
+}
 
-const FX_BASE = { ftype: 'lowpass', freq: 20000, res: .7, sat: 0, comp: 0, sc: 0, scRel: .12 };
+const FX_BASE = { ftype: 'lowpass', freq: 20000, res: .7, sat: 0, chorus: 0, comp: 0, sc: 0, scRel: .12 };
 const MIX_BASE = { vol: .75, pan: 0, sendA: 0, sendB: 0, mute: false, solo: false };
 // The eight lanes. Types are fixed per lane, everything else is editable.
 const TRACK_DEFS = [
   { name: 'DRUMS', type: 'drums', kit: 'drums', color: '#ff94a6', fx: { comp: .6, sat: .15 }, mix: { vol: .78 } },
   { name: 'BREAK', type: 'drums', kit: 'breaks', color: '#ffa529', fx: { comp: .45 }, mix: { vol: .72 } },
-  { name: 'REESE', type: 'synth', role: 'bass', preset: 'Reese Classic', color: '#b19cff', kbOct: 2, fx: { sc: .55 }, mix: { vol: .74 } },
+  { name: 'REESE', type: 'synth', role: 'bass', preset: 'Polar Reese', color: '#b19cff', kbOct: 2, fx: { sc: .55 }, mix: { vol: .74 } },
   { name: 'SUB', type: 'synth', role: 'sub', preset: 'Sub Sine', color: '#6e9bff', kbOct: 1, fx: { sc: .65 }, mix: { vol: .78 } },
-  { name: 'STAB', type: 'synth', role: 'stab', preset: 'Rave Stab', color: '#f2e27a', kbOct: 3, mix: { vol: .66, sendA: .25, sendB: .3 } },
-  { name: 'PAD', type: 'synth', role: 'pad', preset: 'Warm Pad', color: '#6ee6d8', kbOct: 3, fx: { sc: .35 }, mix: { vol: .66, sendA: .45 } },
-  { name: 'LEAD', type: 'synth', role: 'lead', preset: 'Hoover', color: '#b8e86a', kbOct: 4, mix: { vol: .62, sendA: .3, sendB: .25 } },
+  { name: 'STAB', type: 'synth', role: 'stab', preset: 'Polar Supersaw Stab', color: '#f2e27a', kbOct: 3, fx: { chorus: .35 }, mix: { vol: .66, sendA: .25, sendB: .3 } },
+  { name: 'PAD', type: 'synth', role: 'pad', preset: 'Polar Pad Wide', color: '#6ee6d8', kbOct: 3, fx: { sc: .35, chorus: .4 }, mix: { vol: .66, sendA: .45 } },
+  { name: 'LEAD', type: 'synth', role: 'lead', preset: 'Polar Hoover', color: '#b8e86a', kbOct: 4, mix: { vol: .62, sendA: .3, sendB: .25 } },
   { name: 'FX', type: 'drums', kit: 'fx', color: '#e08ce6', mix: { vol: .7, sendA: .35 } },
 ];
 
@@ -532,6 +592,7 @@ function normalizeProject(p) {
     scenes: d.scenes.map((s, i) => ({ name: String((p.scenes && p.scenes[i] && p.scenes[i].name) || s.name).slice(0, 20) })),
   });
   out.bpm = clamp(+out.bpm || 174, 60, 220);
+  out.name = String(out.name == null ? 'SET' : out.name).slice(0, 40);
   if (!SCALES[out.scale]) out.scale = 'minor';
   out.tracks = TRACK_DEFS.map((def, i) => {
     const base = makeTrack(def, nSc), src = p.tracks[i];
@@ -540,7 +601,11 @@ function normalizeProject(p) {
     if (def.type === 'drums') {
       t.pads = base.pads.map((bp, k) => Object.assign({}, bp, src.pads && src.pads[k]));
       t.pads.forEach(pd => { if (!DRUM_VOICES[pd.voice]) pd.voice = 'kick'; });
-    } else t.synth = Object.assign({}, SYNTH_BASE, src.synth || base.synth);
+    } else {
+      const ss = src.synth && typeof src.synth === 'object' ? src.synth : base.synth, eng = ENGINE_BASE[ss.engine] ? ss.engine : 'classic';
+      t.synth = Object.assign(clone(ENGINE_BASE[eng]), ss, { engine: eng });
+      if (eng === 'tidal') t.synth.stSeq = Array.from({ length: 16 }, (_, k) => clamp(+(Array.isArray(ss.stSeq) ? ss.stSeq[k] : 0) || 0, 0, 1));
+    }
     t.clips = Array.from({ length: nSc }, (_, s) => sanitizeClip(src.clips && src.clips[s]));
     t.arr = Array.isArray(src.arr) ? src.arr.filter(e => e && Number.isFinite(e.start) && Number.isFinite(e.slot) && e.len > 0)
       .map(e => ({ start: e.start | 0, slot: clamp(e.slot | 0, 0, nSc - 1), len: Math.max(1, e.len | 0), off: e.off | 0 })) : [];
@@ -597,8 +662,8 @@ function buildRave() {
   Object.assign(vox.mix, { vol: .7, sendA: .3, sendB: .3 });
   vox.fx.comp = .3;
   const bass = lane(P, 'REESE');
-  bass.name = 'BASS'; bass.synth = makeSynth('Jump Up'); bass.fx.sc = .5;
-  lane(P, 'LEAD').synth = makeSynth('Hoover');
+  bass.name = 'BASS'; bass.synth = makeSynth('Tidal Jump Up Morph'); bass.fx.sc = .5;
+  lane(P, 'LEAD').synth = makeSynth('Polar Hoover');
   ['INTRO', 'BUILD', 'DROP A', 'MC VERSE', 'DROP B', 'BREAKDOWN', 'OUTRO', 'SCENE 8'].forEach((n, i) => P.scenes[i].name = n);
   const put = (name, sc, clip) => { lane(P, name).clips[sc] = clip; };
   const Fm = ['F3', 'Ab3', 'C4'], Db = ['Db3', 'F3', 'Ab3'], Eb = ['Eb3', 'G3', 'Bb3'], Cm = ['C3', 'Eb3', 'G3'];
@@ -989,11 +1054,12 @@ class Engine {
     T.pan = c.createStereoPanner ? c.createStereoPanner() : c.createGain();
     T.an = c.createAnalyser(); T.an.fftSize = 256;
     T.sA = c.createGain(); T.sB = c.createGain();
-    T.in.connect(T.filt); T.filt.connect(T.sat); T.sat.connect(T.comp); T.comp.connect(T.makeup); T.makeup.connect(T.duck); T.duck.connect(T.mute); T.mute.connect(T.vol); T.vol.connect(T.pan);
+    T.in.connect(T.filt); T.filt.connect(T.sat); T.sat.connect(T.comp); this.buildChorus(T); T.comp.connect(T.makeup); T.makeup.connect(T.duck); T.duck.connect(T.mute); T.mute.connect(T.vol); T.vol.connect(T.pan);
     T.pan.connect(this.m.bus); T.pan.connect(T.an); T.pan.connect(T.sA); T.pan.connect(T.sB);
     T.sA.connect(this.r.in); T.sB.connect(this.d.in);
     // one free-running LFO per track, patched into each voice's filter cutoff
     T.lfo = c.createOscillator(); T.lfoG = c.createGain(); T.lfoG.gain.value = 0; T.lfo.connect(T.lfoG); T.lfo.start();
+    T.stepper = c.createConstantSource(); T.stepper.offset.value = 0; T.stepper.start(); // Tidal's stepper, clocked by stepTick
     return T;
   }
   // ---------- parameter application ----------
@@ -1001,7 +1067,7 @@ class Engine {
   applyTrack(i) {
     const tr = this.p.tracks[i], T = this.t[i], now = this.ctx.currentTime, fx = tr.fx;
     T.filt.type = fx.ftype;
-    T.filt.frequency.setTargetAtTime(clamp(fx.freq, 20, 20000), now, .015);
+    T.filt.frequency.setTargetAtTime(clamp(fx.freq, 20, Math.min(20000, this.ctx.sampleRate * .45)), now, .015);
     T.filt.Q.setTargetAtTime(fx.res, now, .015);
     T.sat.curve = fx.sat > .005 ? this.curve(fx.sat) : null;
     const pc = fx.comp || 0; // 'punch': harder and louder as it goes up, transparent at 0
@@ -1011,7 +1077,8 @@ class Engine {
     if (T.pan.pan) T.pan.pan.setTargetAtTime(tr.mix.pan, now, .015);
     T.sA.gain.setTargetAtTime(tr.mix.sendA, now, .015);
     T.sB.gain.setTargetAtTime(tr.mix.sendB, now, .015);
-    if (tr.synth) {
+    T.chWet.gain.setTargetAtTime((fx.chorus || 0) * .8, now, .02);
+    if (tr.synth && (tr.synth.engine || 'classic') === 'classic') {
       const s = tr.synth, on = s.lfoRate !== 'off' && s.lfoDepth > 0;
       T.lfo.type = s.lfoShape;
       T.lfo.frequency.setTargetAtTime(on ? this.p.bpm / 60 / BEATS[s.lfoRate] : .01, now, .01);
@@ -1054,6 +1121,16 @@ class Engine {
     this.d.l.delayTime.setTargetAtTime(dt, now, .03); this.d.r.delayTime.setTargetAtTime(dt, now, .03);
     this.p.tracks.forEach((tr, i) => { if (tr.synth) this.applyTrack(i); });
   }
+  // Stereo chorus: two short delays swung in opposite directions by one slow LFO, added to the dry signal
+  buildChorus(T) {
+    const c = this.ctx;
+    T.chWet = c.createGain(); T.chWet.gain.value = 0;
+    const dl = c.createDelay(.05), dr = c.createDelay(.05), mg = c.createChannelMerger(2), lfo = c.createOscillator();
+    dl.delayTime.value = .012; dr.delayTime.value = .017; lfo.frequency.value = .33;
+    const gl = this.gain(.0035), gr = this.gain(-.0035);
+    lfo.connect(gl); lfo.connect(gr); gl.connect(dl.delayTime); gr.connect(dr.delayTime); lfo.start();
+    T.sat.connect(dl); T.sat.connect(dr); dl.connect(mg, 0, 0); dr.connect(mg, 0, 1); mg.connect(T.chWet); T.chWet.connect(T.comp);
+  }
   // ---------- building blocks ----------
   makeIR(sec) {
     const c = this.ctx, sr = c.sampleRate, len = Math.max(1, Math.floor(sr * sec)), b = c.createBuffer(2, len, sr);
@@ -1074,7 +1151,7 @@ class Engine {
   }
   osc(type, f, t, dur) { const o = this.ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(f, t); o.start(t); o.stop(t + dur + .02); return o; }
   gain(v) { const g = this.ctx.createGain(); g.gain.value = v; return g; }
-  filt(type, f, q) { const b = this.ctx.createBiquadFilter(); b.type = type; b.frequency.value = f; if (q != null) b.Q.value = q; return b; }
+  filt(type, f, q) { const b = this.ctx.createBiquadFilter(); b.type = type; b.frequency.value = Math.min(f, this.ctx.sampleRate * .45); if (q != null) b.Q.value = q; return b; }
   perc(param, t, peak, dec, att = .001) {
     param.setValueAtTime(.0001, t); param.exponentialRampToValueAtTime(Math.max(.0002, peak), t + att);
     param.exponentialRampToValueAtTime(.0001, t + att + Math.max(.005, dec));
@@ -1138,7 +1215,15 @@ class Engine {
       g.setTargetAtTime(1, t + .03, Math.max(.01, tr.fx.scRel / 3));
     });
   }
+  // Every synth engine returns the same kind of voice; mono and the voice registry live here.
   synthNote(i, midi, vel, t) {
+    const s = this.p.tracks[i].synth;
+    const voice = s.engine === 'polar' ? this.polarNote(i, midi, vel, t) : s.engine === 'tidal' ? this.tidalNote(i, midi, vel, t) : this.classicNote(i, midi, vel, t);
+    if (s.mono) { const prev = this.mono[i]; if (prev && prev !== voice && !prev.ended) prev.release(t, .012); this.mono[i] = voice; }
+    this.voices.add(voice);
+    return voice;
+  }
+  classicNote(i, midi, vel, t) {
     const c = this.ctx, tr = this.p.tracks[i], s = tr.synth, T = this.t[i];
     const f = mtof(midi + s.oct * 12), n = clamp(s.voices | 0, 1, 7);
     const out = c.createGain(); out.gain.value = 0;
@@ -1182,8 +1267,6 @@ class Engine {
       if (lfoOn) { try { T.lfoG.disconnect(filt.frequency); } catch (e) { /* gone */ } }
       try { out.disconnect(); } catch (e) { /* gone */ }
     };
-    if (s.mono) { const prev = this.mono[i]; if (prev && prev !== voice && !prev.ended) prev.release(t, .012); this.mono[i] = voice; }
-    this.voices.add(voice);
     return voice;
   }
   trigger(i, n, t, sd) {
@@ -1202,6 +1285,274 @@ class Engine {
     this.t.forEach(T => { T.duck.gain.cancelScheduledValues(now); T.duck.gain.setValueAtTime(1, now); });
   }
 }
+
+// ===================== 3b. SYNTH ENGINES: POLAR VA + TIDAL WT =====================
+// Two richer instruments next to the classic one. Same voice contract as the classic
+// synth: a voice has t, ended, relAt and release(tOff, r?) and ends itself.
+//  - Polar: virtual analog, 4 oscillators in two parts (A: 1-2, B: 3-4), unison with
+//    stereo spread, a filter per part, an amp envelope per part, 2 mod envelopes, 2 LFOs.
+//  - Tidal: 3 wavetable oscillators whose position morphs between two frames, FM, sub and
+//    noise, two filters in serial or parallel, a mod envelope, 2 LFOs and a 16-step stepper.
+Object.assign(BEATS, { '1/32': .125, '1/4D': 1.5, '1/8D': .75 });
+const SYNC_RATES = ['1/1', '1/2', '1/4', '1/8', '1/16', '1/32', '1/2T', '1/4T', '1/8T', '1/16T', '1/4D', '1/8D'];
+const VA_WAVES = [['sawtooth', 'Saw'], ['square', 'Square'], ['pulse', 'Pulse'], ['triangle', 'Triangle'], ['sine', 'Sine'], ['noise', 'Noise']];
+const LFO_WAVES = [['sine', 'Sine'], ['triangle', 'Triangle'], ['sawtooth', 'Saw'], ['square', 'Square']];
+const VA_FILTERS = [['lowpass', 'Low-pass'], ['highpass', 'High-pass'], ['bandpass', 'Band-pass'], ['notch', 'Notch']];
+const WT_FILTERS = [['lp24', 'LP 24'], ['lp12', 'LP 12'], ['hp', 'High-pass'], ['bp', 'Band-pass'], ['notch', 'Notch'], ['off', 'Off']];
+const POLAR_DESTS = [['off', 'Off'], ['cut', 'Cutoff A+B'], ['cutA', 'Cutoff A'], ['cutB', 'Cutoff B'], ['pitch', 'Pitch'], ['pitchA', 'Pitch A'], ['pitchB', 'Pitch B'],
+  ['mixA', 'Mix A'], ['mixB', 'Mix B'], ['pan', 'Pan'], ['amp', 'Volume']];
+const TIDAL_DESTS = [['off', 'Off'], ['pos', 'WT position 1-3'], ['pos1', 'WT position 1'], ['pos2', 'WT position 2'], ['pos3', 'WT position 3'],
+  ['cut', 'Cutoff 1+2'], ['cut1', 'Cutoff 1'], ['cut2', 'Cutoff 2'], ['pitch', 'Pitch'], ['fm', 'FM amount'], ['amp', 'Volume'], ['pan', 'Pan']];
+// How far a modulation amount of 1 moves each kind of parameter
+const DEST_SCALE = { cut: 6000, pitch: 2400, mix: 1, pan: 1, amp: 1, pos: 1, fm: 1 }; // cents, cents, gain, pan, gain, position, FM (x note freq)
+const destKind = d => d.replace(/[A-Z0-9]+$/, '');
+
+// Wavetables: each has two frames, A and B, given as harmonic amplitudes (1-based n).
+const bump = (n, c, w) => Math.exp(-Math.pow((n - c) / w, 2));
+const WAVETABLES = {
+  'Saw > Square': [n => 1 / n, n => (n % 2 ? 1 / n : 0)],
+  'Sine > Saw': [n => (n === 1 ? 1 : 0), n => 1 / n],
+  'Growl': [n => bump(n, 6, 2.5) + .35 / n, n => bump(n, 15, 4) + .35 / n],
+  'Vowel A > O': [n => bump(n, 7, 1.6) + .55 * bump(n, 11, 1.8) + .3 / n, n => bump(n, 4, 1.4) + .4 * bump(n, 7, 1.5) + .3 / n],
+  'Hollow': [n => (n % 2 ? 1 : .08) / n, n => (n % 2 ? .08 : 1) / n + (n === 1 ? .6 : 0)],
+  'Digital': [n => (n % 3 ? 1 : 0) / Math.sqrt(n), n => (((n * 7) % 5) / 5 + (n % 4 === 0 ? .5 : 0)) / Math.sqrt(n)],
+  'Metal': [n => (n === 1 ? 1 : 0) + (n === 4 ? .7 : 0) + (n === 9 ? .5 : 0) + (n === 16 ? .35 : 0), n => 1 / Math.pow(n, .6)],
+};
+const WT_NAMES = Object.keys(WAVETABLES);
+
+Engine.prototype.periodic = function (key) {
+  this.waves = this.waves || new Map();
+  let w = this.waves.get(key); if (w) return w;
+  const N = 64, real = new Float32Array(N), imag = new Float32Array(N);
+  if (key === 'pulse') for (let n = 1; n < N; n++) real[n] = (2 / (n * Math.PI)) * Math.sin(n * Math.PI * .25); // 25% pulse
+  else { const [name, frame] = key.split('|'), fn = WAVETABLES[name][+frame]; for (let n = 1; n < N; n++) imag[n] = fn(n); }
+  w = this.ctx.createPeriodicWave(real, imag);
+  this.waves.set(key, w); return w;
+};
+Engine.prototype.setWave = function (o, wave) {
+  if (wave === 'pulse' || wave.includes('|')) o.setPeriodicWave(this.periodic(wave)); else o.type = wave;
+};
+// ADSR on a param, from 0 to peak (sustain s is a fraction of peak)
+Engine.prototype.adsr = function (param, t, peak, a, d, s) {
+  param.setValueAtTime(0, t);
+  param.linearRampToValueAtTime(peak, t + Math.max(.001, a));
+  param.setTargetAtTime(peak * s, t + Math.max(.001, a), Math.max(.005, d / 3));
+};
+// Shared voice object. envs: [{ param, r, amp }] go to 0 on release; sources stop after the longest amp release.
+Engine.prototype.makeVoice = function (t, srcs, envs, out, cleanup) {
+  const voice = {
+    t, ended: false, relAt: Infinity,
+    release: (tOff, rOv) => {
+      if (voice.ended || tOff >= voice.relAt) return;
+      voice.relAt = tOff; tOff = Math.max(tOff, t + .003);
+      let maxR = .01;
+      envs.forEach(e => {
+        const r = rOv != null ? rOv : e.r, g = e.param;
+        if (e.amp) maxR = Math.max(maxR, r);
+        if (g.cancelAndHoldAtTime) g.cancelAndHoldAtTime(tOff); else g.cancelScheduledValues(tOff);
+        g.setTargetAtTime(0, tOff, Math.max(.003, r / 4));
+      });
+      const end = tOff + maxR * 1.3 + .05;
+      srcs.forEach(o => { try { o.stop(end); } catch (err) { /* already stopped */ } });
+    },
+  };
+  srcs[0].onended = () => {
+    voice.ended = true; this.voices.delete(voice);
+    try { out.disconnect(); } catch (err) { /* gone */ }
+    if (cleanup) cleanup();
+  };
+  return voice;
+};
+// Patch modulation sources into a voice. D maps destination names to AudioParam lists.
+// sources: [{ node, dest, amt, scale? }]. Returns the gain nodes (for cleanup of shared sources).
+Engine.prototype.patchMods = function (sources, D, f0) {
+  const made = [];
+  sources.forEach(m => {
+    if (!m.node || m.dest === 'off' || !m.amt) return;
+    const params = D[m.dest]; if (!params || !params.length) return;
+    const kind = destKind(m.dest), g = this.ctx.createGain();
+    g.gain.value = m.amt * DEST_SCALE[kind] * (kind === 'fm' ? f0 * 3 : 1);
+    if (kind === 'amp') { // volume moves down from full: unipolar sources (env, stepper) span 1-amt..1, LFOs swing around 1-|amt|/2
+      if (m.uni) { if (m.amt > 0) params.forEach(p => { p.value -= m.amt; }); } else { g.gain.value = m.amt / 2; params.forEach(p => { p.value -= Math.abs(m.amt) / 2; }); }
+    }
+    m.node.connect(g); params.forEach(p => g.connect(p)); made.push({ src: m.node, g });
+  });
+  return made;
+};
+const unisonSpread = (u, n) => (n > 1 ? (u / (n - 1)) * 2 - 1 : 0);
+Engine.prototype.voicePanner = function () { return this.ctx.createStereoPanner ? this.ctx.createStereoPanner() : this.ctx.createGain(); };
+Engine.prototype.lfoNode = function (wave, rate, t) {
+  const o = this.ctx.createOscillator(); o.type = wave;
+  o.frequency.value = this.p.bpm / 60 / (BEATS[rate] || 1); o.start(t); return o;
+};
+Engine.prototype.envNode = function (t, a, d, s) {
+  const cs = this.ctx.createConstantSource(); cs.offset.value = 0; this.adsr(cs.offset, t, 1, a, d, s); cs.start(t); return cs;
+};
+Engine.prototype.noiseSrc = function (t) { const s = this.ctx.createBufferSource(); s.buffer = this.noiseBuf; s.loop = true; s.start(t, Math.random() * 1.5); return s; };
+
+// ---------- Polar VA ----------
+Engine.prototype.polarNote = function (i, midi, vel, t) {
+  const c = this.ctx, s = this.p.tracks[i].synth, T = this.t[i];
+  const f = mtof(midi), prevF = this.lastF[i]; this.lastF[i] = f;
+  const glide = s.glide > 0 && prevF && Math.abs(prevF - f) > .01;
+  const srcs = [], envs = [];
+  const D = { cutA: [], cutB: [], pitchA: [], pitchB: [], mixA: [], mixB: [], pan: [], amp: [] };
+  const out = c.createGain(); out.gain.value = (vel / 127) * s.level;
+  const modAmp = c.createGain(), vpan = this.voicePanner();
+  modAmp.connect(vpan); vpan.connect(out); out.connect(T.in);
+  if (vpan.pan) D.pan.push(vpan.pan); D.amp.push(modAmp.gain);
+  const key = Math.pow(2, ((midi - 60) / 12) * s.key);
+  const parts = {};
+  ['A', 'B'].forEach(P => {
+    const sum = c.createGain(); sum.gain.value = .4;
+    let node = sum;
+    const drive = s['f' + P + 'drive'];
+    if (drive > .01) { const sh = c.createWaveShaper(); sh.curve = this.curve(drive); sum.connect(sh); node = sh; }
+    const fq = clamp(s['f' + P + 'cut'] * key, 20, 20000), q = .5 + s['f' + P + 'res'] * (s['f' + P + 'slope'] === 24 ? 11 : 17);
+    const stages = s['f' + P + 'slope'] === 24 ? 2 : 1;
+    for (let k = 0; k < stages; k++) { const b = this.filt(s['f' + P + 'type'], fq, q); node.connect(b); node = b; D['cut' + P].push(b.detune); }
+    const amp = c.createGain(); amp.gain.value = 0;
+    this.adsr(amp.gain, t, 1, s['a' + P], s['d' + P], s['s' + P]);
+    envs.push({ param: amp.gain, r: s['r' + P], amp: true });
+    const mix = c.createGain(); mix.gain.value = s['mix' + P]; D['mix' + P].push(mix.gain);
+    node.connect(amp); amp.connect(mix); mix.connect(modAmp);
+    parts[P] = sum;
+  });
+  for (let k = 1; k <= 4; k++) {
+    const vol = s['o' + k + 'vol']; if (!(vol > 0)) continue;
+    const P = k <= 2 ? 'A' : 'B', wave = s['o' + k + 'wave'];
+    if (wave === 'noise') { const n = this.noiseSrc(t), g = this.gain(vol * .5); n.connect(g); g.connect(parts[P]); srcs.push(n); continue; }
+    const n = clamp(s['o' + k + 'voices'] | 0, 1, 8), ratio = Math.pow(2, s['o' + k + 'oct'] + s['o' + k + 'semi'] / 12);
+    for (let u = 0; u < n; u++) {
+      const sp = unisonSpread(u, n), o = c.createOscillator();
+      this.setWave(o, wave);
+      o.detune.value = s['o' + k + 'fine'] + sp * s['o' + k + 'det'] * 50;
+      if (glide) { o.frequency.setValueAtTime(prevF * ratio, t); o.frequency.exponentialRampToValueAtTime(f * ratio, t + s.glide); } else o.frequency.setValueAtTime(f * ratio, t);
+      const g = this.gain(vol / Math.sqrt(n));
+      o.connect(g);
+      if (n > 1 && s['o' + k + 'st'] > 0 && c.createStereoPanner) { const pn = c.createStereoPanner(); pn.pan.value = sp * s['o' + k + 'st']; g.connect(pn); pn.connect(parts[P]); } else g.connect(parts[P]);
+      o.start(t); srcs.push(o); D['pitch' + P].push(o.detune);
+    }
+  }
+  D.cut = D.cutA.concat(D.cutB); D.pitch = D.pitchA.concat(D.pitchB);
+  const mods = [];
+  [1, 2].forEach(m => {
+    if (s['m' + m + 'dest'] === 'off' || !s['m' + m + 'amt']) return;
+    const e = this.envNode(t, s['m' + m + 'a'], s['m' + m + 'd'], s['m' + m + 's']);
+    srcs.push(e); envs.push({ param: e.offset, r: s['m' + m + 'r'] });
+    mods.push({ node: e, dest: s['m' + m + 'dest'], amt: s['m' + m + 'amt'], uni: true });
+  });
+  [1, 2].forEach(l => {
+    if (s['l' + l + 'dest'] === 'off' || !s['l' + l + 'amt']) return;
+    const o = this.lfoNode(s['l' + l + 'wave'], s['l' + l + 'rate'], t); srcs.push(o);
+    mods.push({ node: o, dest: s['l' + l + 'dest'], amt: s['l' + l + 'amt'] });
+  });
+  this.patchMods(mods, D, f);
+  if (!srcs.length) { const z = c.createConstantSource(); z.offset.value = 0; z.start(t); srcs.push(z); }
+  return this.makeVoice(t, srcs, envs, out);
+};
+
+// ---------- Tidal WT ----------
+Engine.prototype.clampCurve = function () { return this._clamp || (this._clamp = new Float32Array([0, 0, 1])); }; // -1..0 -> 0, 0..1 -> x
+Engine.prototype.wtFilter = function (type, f, res, drive, into, D, list) {
+  // returns [input, output] of one filter slot; 'off' is a straight wire
+  const c = this.ctx, inp = c.createGain();
+  let node = inp;
+  if (drive > .01) { const sh = c.createWaveShaper(); sh.curve = this.curve(drive); node.connect(sh); node = sh; }
+  if (type !== 'off') {
+    const map = { lp24: 'lowpass', lp12: 'lowpass', hp: 'highpass', bp: 'bandpass', notch: 'notch' };
+    const stages = type === 'lp24' ? 2 : 1, q = .5 + res * (stages === 2 ? 11 : 17);
+    for (let k = 0; k < stages; k++) { const b = this.filt(map[type], f, q); node.connect(b); node = b; D[list].push(b.detune); }
+  }
+  node.connect(into);
+  return inp;
+};
+Engine.prototype.tidalNote = function (i, midi, vel, t) {
+  const c = this.ctx, s = this.p.tracks[i].synth, T = this.t[i];
+  const f = mtof(midi), prevF = this.lastF[i]; this.lastF[i] = f;
+  const glide = s.glide > 0 && prevF && Math.abs(prevF - f) > .01;
+  const srcs = [], envs = [];
+  const D = { pos1: [], pos2: [], pos3: [], cut1: [], cut2: [], pitch: [], fm: [], amp: [], pan: [] };
+  const out = c.createGain(); out.gain.value = (vel / 127) * s.level;
+  const modAmp = c.createGain(), vpan = this.voicePanner();
+  modAmp.connect(vpan); vpan.connect(out); out.connect(T.in);
+  if (vpan.pan) D.pan.push(vpan.pan); D.amp.push(modAmp.gain);
+  const amp = c.createGain(); amp.gain.value = 0; amp.connect(modAmp);
+  this.adsr(amp.gain, t, 1, s.a, s.d, s.s); envs.push({ param: amp.gain, r: s.r, amp: true });
+  // filters
+  const key = Math.pow(2, ((midi - 60) / 12) * s.key), mix = c.createGain(); mix.gain.value = .45;
+  const f2in = this.wtFilter(s.f2type, clamp(s.f2cut * key, 20, 20000), s.f2res, s.f2drive, amp, D, 'cut2');
+  if (s.route === 'parallel') {
+    const f1in = this.wtFilter(s.f1type, clamp(s.f1cut * key, 20, 20000), s.f1res, s.f1drive, amp, D, 'cut1');
+    mix.connect(f1in); mix.connect(f2in);
+  } else {
+    const f1in = this.wtFilter(s.f1type, clamp(s.f1cut * key, 20, 20000), s.f1res, s.f1drive, f2in, D, 'cut1');
+    mix.connect(f1in);
+  }
+  // FM modulator (on oscillator 1)
+  let fm = null;
+  if (s.fmAmt > 0 || s.e2dest === 'fm' || s.l1dest === 'fm' || s.l2dest === 'fm' || s.stDest === 'fm') {
+    const mo = c.createOscillator(); mo.type = 'sine'; mo.frequency.value = f * s.fmRatio; mo.start(t); srcs.push(mo);
+    fm = c.createGain(); fm.gain.value = s.fmAmt * f * 3; mo.connect(fm); D.fm.push(fm.gain);
+  }
+  const clampC = this.clampCurve();
+  for (let k = 1; k <= 3; k++) {
+    const vol = s['w' + k + 'vol']; if (!(vol > 0)) continue;
+    const table = WAVETABLES[s['w' + k + 'table']] ? s['w' + k + 'table'] : WT_NAMES[0];
+    // position: a constant (plus modulation), clamped to 0..1, crossfades frame A and frame B
+    const pos = c.createConstantSource(); pos.offset.value = s['w' + k + 'pos']; pos.start(t); srcs.push(pos); D['pos' + k].push(pos.offset);
+    const cl = c.createWaveShaper(); cl.curve = clampC; pos.connect(cl);
+    const inv = this.gain(-1); cl.connect(inv);
+    const n = clamp(s['w' + k + 'voices'] | 0, 1, 8), ratio = Math.pow(2, s['w' + k + 'oct'] + s['w' + k + 'semi'] / 12);
+    for (let u = 0; u < n; u++) {
+      const sp = unisonSpread(u, n), g = this.gain(vol / Math.sqrt(n));
+      const pn = n > 1 && c.createStereoPanner ? c.createStereoPanner() : null;
+      if (pn) { pn.pan.value = sp * .7; g.connect(pn); pn.connect(mix); } else g.connect(mix);
+      [0, 1].forEach(fr => {
+        const o = c.createOscillator(); this.setWave(o, table + '|' + fr);
+        o.detune.value = s['w' + k + 'fine'] + sp * s['w' + k + 'det'] * 50;
+        if (glide) { o.frequency.setValueAtTime(prevF * ratio, t); o.frequency.exponentialRampToValueAtTime(f * ratio, t + s.glide); } else o.frequency.setValueAtTime(f * ratio, t);
+        const xg = c.createGain(); xg.gain.value = fr ? 0 : 1; (fr ? cl : inv).connect(xg.gain);
+        o.connect(xg); xg.connect(g);
+        if (k === 1 && fm) fm.connect(o.frequency);
+        o.start(t); srcs.push(o); D.pitch.push(o.detune);
+      });
+    }
+  }
+  if (s.sub > 0) {
+    const so = c.createOscillator(); so.type = 'sine';
+    if (glide) { so.frequency.setValueAtTime(prevF / 2, t); so.frequency.exponentialRampToValueAtTime(f / 2, t + s.glide); } else so.frequency.setValueAtTime(f / 2, t);
+    const sg = this.gain(s.sub * .5); so.connect(sg); sg.connect(amp); so.start(t); srcs.push(so);
+  }
+  if (s.noise > 0) { const nz = this.noiseSrc(t), ng = this.gain(s.noise * .4); nz.connect(ng); ng.connect(mix); srcs.push(nz); }
+  D.pos = D.pos1.concat(D.pos2, D.pos3); D.cut = D.cut1.concat(D.cut2);
+  const mods = [];
+  if (s.e2dest !== 'off' && s.e2amt) {
+    const e = this.envNode(t, s.e2a, s.e2d, s.e2s); srcs.push(e); envs.push({ param: e.offset, r: s.e2r });
+    mods.push({ node: e, dest: s.e2dest, amt: s.e2amt, uni: true });
+  }
+  [1, 2].forEach(l => {
+    if (s['l' + l + 'dest'] === 'off' || !s['l' + l + 'amt']) return;
+    const o = this.lfoNode(s['l' + l + 'wave'], s['l' + l + 'rate'], t); srcs.push(o);
+    mods.push({ node: o, dest: s['l' + l + 'dest'], amt: s['l' + l + 'amt'] });
+  });
+  // the stepper is one shared source per track, clocked by the transport (see stepTick)
+  const shared = this.patchMods([{ node: T.stepper, dest: s.stDest, amt: s.stAmt, uni: true }], D, f);
+  this.patchMods(mods, D, f);
+  if (!srcs.length) { const z = c.createConstantSource(); z.offset.value = 0; z.start(t); srcs.push(z); }
+  return this.makeVoice(t, srcs, envs, out, () => shared.forEach(m => { try { m.src.disconnect(m.g); } catch (err) { /* gone */ } }));
+};
+// Called on every 16th by the live scheduler and by the offline renderer.
+Engine.prototype.stepTick = function (tick, time, sd) {
+  this.p.tracks.forEach((tr, i) => {
+    const s = tr.synth;
+    if (!s || s.engine !== 'tidal' || s.stDest === 'off' || !s.stAmt) return;
+    const div = s.stRate === '1/4' ? 4 : s.stRate === '1/8' ? 2 : 1;
+    if (tick % div) return;
+    const v = clamp(+s.stSeq[Math.floor(tick / div) % 16] || 0, 0, 1), p = this.t[i].stepper.offset;
+    if (s.stGlide > .01) p.setTargetAtTime(v, time, s.stGlide * sd * div * .4); else p.setValueAtTime(v, time);
+  });
+};
 
 // ===================== 4. TRANSPORT / SCHEDULER =====================
 let P = null;      // the project (plain JSON, saved as-is)
@@ -1270,6 +1621,7 @@ function scheduleStep() {
       if (tr.type === 'drums' && UI.flashes.length < 64) UI.flashes.push({ i, p: n.p, t: time });
     }
   }
+  E.stepTick(tick, time, sd);
   if (TR.arrRec && song % 16 === 0) arrRecordBar(song / 16);
   if (TR.metro && tick % 4 === 0) E.click(time, song % 16 === 0);
   TR.marks.push(mark);
@@ -1409,7 +1761,7 @@ function toggleRec() {
 // ===================== 5. UI: STATE, TOP BAR, BROWSER, SESSION =====================
 const UI = {
   view: 'session', detail: 'clip', sel: { t: 0, s: 0 }, focusPad: [], noteLen: 2, vel: 100,
-  arrSel: null, bw: 26, brush: [], clipboard: null, flashes: [], edDirty: false, arrDirty: false, midi: false,
+  arrSel: null, bw: 26, devTab: {}, brush: [], clipboard: null, flashes: [], edDirty: false, arrDirty: false, midi: false,
   slotEls: null, tstopEls: [], thEls: [], meters: [], padEls: null,
 };
 const ARR_HEAD = 180;
@@ -1546,7 +1898,11 @@ function renderBrowser() {
   h += `<button class="br-item" data-tpl="empty" data-info="Start from an empty set"><span>Empty Set</span><small>174</small></button></div>`;
   if (tr && tr.type === 'synth') {
     h += `<div class="br-sec"><div class="br-title"><span>Instruments</span><span style="color:${tr.color}">${esc(tr.name)}</span></div>`;
-    h += Object.keys(SYNTH_PRESETS).map(n => `<button class="br-item ${n === tr.synth.preset ? 'cur' : ''}" data-preset="${esc(n)}" data-info="Load the ${esc(n)} preset on ${esc(tr.name)}"><span>${esc(n)}</span></button>`).join('') + '</div>';
+    ENGINES.forEach(([eng, label]) => {
+      h += `<div class="br-sub">${label}</div>` + Object.keys(SYNTH_PRESETS).filter(n => (SYNTH_PRESETS[n].engine || 'classic') === eng)
+        .map(n => `<button class="br-item ${n === tr.synth.preset ? 'cur' : ''}" data-preset="${esc(n)}" data-info="Load the ${esc(n)} preset on ${esc(tr.name)}"><span>${esc(n)}</span></button>`).join('');
+    });
+    h += '</div>';
   } else if (tr) {
     h += `<div class="br-sec"><div class="br-title"><span>Drum kits</span><span style="color:${tr.color}">${esc(tr.name)}</span></div>`;
     h += Object.entries(KITS).map(([k, kit]) => `<button class="br-item ${k === tr.kit ? 'cur' : ''}" data-kit="${k}" data-info="Load the ${esc(kit.name)} pads on ${esc(tr.name)}"><span>${esc(kit.name)}</span></button>`).join('') + '</div>';
@@ -2288,15 +2644,11 @@ function renderDeviceDetail(body) {
   const i = UI.sel.t;
   if (i < 0) { masterDevices(ch); return; }
   const tr = P.tracks[i];
-  ch.append(tr.type === 'drums' ? drumDevice(i) : synthDevice(i), filterDevice(i), satDevice(i), compDevice(i), sidechainDevice(i));
+  ch.append(tr.type === 'drums' ? drumDevice(i) : synthDevice(i), filterDevice(i), satDevice(i), chorusDevice(i), compDevice(i), sidechainDevice(i));
 }
-function synthDevice(i) {
+function classicDevice(i) {
   const tr = P.tracks[i], s = tr.synth, ap = () => E && E.applyTrack(i), c = tr.color;
-  const ps = el('select'); ps.dataset.info = 'Instrument preset';
-  ps.innerHTML = (SYNTH_PRESETS[s.preset] ? '' : `<option>${esc(s.preset)}</option>`) + Object.keys(SYNTH_PRESETS).map(n => `<option>${esc(n)}</option>`).join('');
-  ps.value = s.preset;
-  ps.addEventListener('change', () => applyPreset(i, ps.value));
-  const d = device('POLY SYNTH', c, ps, 'Subtractive synth: detuned unison oscillators into a resonant low-pass with its own envelope and a tempo-synced LFO');
+  const d = device('CLASSIC SYNTH', c, headerControls(i), 'Subtractive synth: detuned unison oscillators into a resonant low-pass with its own envelope and a tempo-synced LFO');
   const K = (key, o) => bindKnob(s, key, Object.assign({ color: c }, o), ap);
   d.body.append(
     kgroup('OSC', [selectCtl('WAVE', WAVES, s.osc, v => { s.osc = v; }, 'Oscillator waveform'),
@@ -2412,6 +2764,168 @@ function masterDevices(ch) {
   ch.append(dj.el, glue.el, cr.el, rv.el, dl.el);
 }
 
+// ===================== 7c. UI: POLAR + TIDAL DEVICES =====================
+const ENGINES = [['classic', 'Classic'], ['polar', 'Polar VA'], ['tidal', 'Tidal WT']];
+const ENGINE_INIT = { classic: 'Reese Classic', polar: 'Polar Init', tidal: 'Tidal Init' };
+const fCents = v => (v > 0 ? '+' : '') + Math.round(v) + '¢';
+const fBi = v => (v > 0 ? '+' : '') + Math.round(v * 100) + '%';
+function engineSelect(i) {
+  const tr = P.tracks[i], s = el('select');
+  s.dataset.info = 'Instrument engine: Classic, Polar VA (multi-oscillator analog, Sylenth-style) or Tidal WT (wavetable, Massive-style)';
+  s.innerHTML = ENGINES.map(([v, n]) => `<option value="${v}">${n}</option>`).join('');
+  s.value = tr.synth.engine || 'classic';
+  s.addEventListener('change', () => applyPreset(i, ENGINE_INIT[s.value]));
+  return s;
+}
+function presetSelect(i) {
+  const tr = P.tracks[i], eng = tr.synth.engine || 'classic', s = el('select');
+  s.dataset.info = 'Preset';
+  const names = Object.keys(SYNTH_PRESETS).filter(n => (SYNTH_PRESETS[n].engine || 'classic') === eng);
+  s.innerHTML = (names.includes(tr.synth.preset) ? '' : `<option>${esc(tr.synth.preset)}</option>`) + names.map(n => `<option>${esc(n)}</option>`).join('');
+  s.value = tr.synth.preset;
+  s.addEventListener('change', () => applyPreset(i, s.value));
+  return s;
+}
+function headerControls(i) { const w = el('span'); w.style.display = 'flex'; w.style.gap = '4px'; w.append(engineSelect(i), presetSelect(i)); return w; }
+// a group with several rows of controls
+function kgroupRows(title, rows) {
+  const g = el('div', 'kgroup'); g.append(el('div', 'kgroup-t', esc(title)));
+  rows.forEach(r => { const row = el('div', 'krow'); r.forEach(it => it && row.append(it)); g.append(row); });
+  return g;
+}
+function devTabs(i, tabs, body) {
+  const cur = UI.devTab[i] && tabs.includes(UI.devTab[i]) ? UI.devTab[i] : tabs[0];
+  const bar = el('div', 'seg dev-tabs');
+  tabs.forEach(t => {
+    const b = el('button', 'btn' + (t === cur ? ' on' : ''), esc(t));
+    b.onclick = () => { UI.devTab[i] = t; renderDetail(); };
+    bar.append(b);
+  });
+  body.append(bar);
+  return cur;
+}
+function synthDevice(i) {
+  const eng = P.tracks[i].synth.engine || 'classic';
+  return eng === 'polar' ? polarDevice(i) : eng === 'tidal' ? tidalDevice(i) : classicDevice(i);
+}
+function polarDevice(i) {
+  const tr = P.tracks[i], s = tr.synth, ap = () => E && E.applyTrack(i);
+  const d = device('POLAR VA', tr.color, headerControls(i), 'Virtual analog: oscillators 1-2 feed part A, 3-4 feed part B. Each part has its own filter and amp envelope');
+  d.body.classList.add('dev-tabbed');
+  const page = devTabs(i, ['Osc', 'Filter', 'Env', 'LFO'], d.body);
+  const K = (key, o) => bindKnob(s, key, o, ap);
+  const sel = (label, key, opts, info) => selectCtl(label, opts, s[key], v => { s[key] = isNaN(+v) || v === '' ? v : +v; ap(); }, info);
+  const wrap = el('div', 'dev-page'); d.body.append(wrap);
+  if (page === 'Osc') {
+    for (let k = 1; k <= 4; k++) {
+      wrap.append(kgroupRows(`Osc ${k} (${k <= 2 ? 'A' : 'B'})`, [
+        [sel('Wave', 'o' + k + 'wave', VA_WAVES), K('o' + k + 'oct', { label: 'OCT', min: -3, max: 3, step: 1, def: 0, bipolar: true, fmt: fSt }),
+          K('o' + k + 'semi', { label: 'SEMI', min: -12, max: 12, step: 1, def: 0, bipolar: true, fmt: fSt }), K('o' + k + 'fine', { label: 'FINE', min: -50, max: 50, def: 0, bipolar: true, fmt: fCents })],
+        [K('o' + k + 'vol', { label: 'VOLUME', min: 0, max: 1, def: k === 1 ? .8 : 0, fmt: fPct }), K('o' + k + 'voices', { label: 'VOICES', min: 1, max: 8, step: 1, def: 1, fmt: fInt, info: 'Unison voices' }),
+          K('o' + k + 'det', { label: 'DETUNE', min: 0, max: 1, def: .2, fmt: fPct, info: 'Unison detune' }), K('o' + k + 'st', { label: 'STEREO', min: 0, max: 1, def: .5, fmt: fPct, info: 'Unison stereo spread' })],
+      ]));
+    }
+  } else if (page === 'Filter') {
+    ['A', 'B'].forEach(P2 => wrap.append(kgroupRows('Filter ' + P2, [
+      [sel('Type', 'f' + P2 + 'type', VA_FILTERS), sel('Slope', 'f' + P2 + 'slope', [[12, '12 dB'], [24, '24 dB']])],
+      [K('f' + P2 + 'cut', { label: 'CUTOFF', min: 20, max: 20000, log: true, def: 2000, fmt: fHz }), K('f' + P2 + 'res', { label: 'RES', min: 0, max: 1, def: .2, fmt: fPct }),
+        K('f' + P2 + 'drive', { label: 'DRIVE', min: 0, max: 1, def: 0, fmt: fPct })],
+    ])));
+    wrap.append(kgroupRows('Mix', [[K('mixA', { label: 'PART A', min: 0, max: 1, def: 1, fmt: fPct }), K('mixB', { label: 'PART B', min: 0, max: 1, def: 1, fmt: fPct })],
+      [K('key', { label: 'KEYTRACK', min: 0, max: 1, def: 0, fmt: fPct, info: 'How much the cutoff follows the note' })]]));
+    wrap.append(kgroupRows('Voice', [[K('glide', { label: 'GLIDE', min: 0, max: .3, def: 0, fmt: fS }), K('level', { label: 'LEVEL', min: 0, max: 1.2, def: .7, fmt: fPct })],
+      [toggleCtl('MONO', s.mono, v => { s.mono = v; }, 'Mono: a new note cuts the previous one')]]));
+  } else if (page === 'Env') {
+    ['A', 'B'].forEach(P2 => wrap.append(kgroupRows('Amp env ' + P2, [[
+      K('a' + P2, { label: 'ATT', min: .001, max: 3, log: true, def: .005, fmt: fS }), K('d' + P2, { label: 'DEC', min: .01, max: 4, log: true, def: .3, fmt: fS }),
+      K('s' + P2, { label: 'SUS', min: 0, max: 1, def: .8, fmt: fPct }), K('r' + P2, { label: 'REL', min: .01, max: 4, log: true, def: .2, fmt: fS })]])));
+    [1, 2].forEach(m => wrap.append(kgroupRows('Mod env ' + m, [
+      [K('m' + m + 'a', { label: 'ATT', min: .001, max: 3, log: true, def: .001, fmt: fS }), K('m' + m + 'd', { label: 'DEC', min: .01, max: 4, log: true, def: .3, fmt: fS }),
+        K('m' + m + 's', { label: 'SUS', min: 0, max: 1, def: 0, fmt: fPct }), K('m' + m + 'r', { label: 'REL', min: .01, max: 4, log: true, def: .2, fmt: fS })],
+      [sel('Target', 'm' + m + 'dest', POLAR_DESTS), K('m' + m + 'amt', { label: 'AMOUNT', min: -1, max: 1, def: 0, bipolar: true, fmt: fBi })],
+    ])));
+  } else {
+    [1, 2].forEach(l => wrap.append(kgroupRows('LFO ' + l, [
+      [sel('Wave', 'l' + l + 'wave', LFO_WAVES), sel('Rate', 'l' + l + 'rate', SYNC_RATES.map(r => [r, r]))],
+      [sel('Target', 'l' + l + 'dest', POLAR_DESTS), K('l' + l + 'amt', { label: 'AMOUNT', min: -1, max: 1, def: 0, bipolar: true, fmt: fBi })],
+    ])));
+  }
+  return d.el;
+}
+function tidalDevice(i) {
+  const tr = P.tracks[i], s = tr.synth, ap = () => E && E.applyTrack(i);
+  const d = device('TIDAL WT', tr.color, headerControls(i), 'Wavetable synth: each oscillator morphs between two frames with its POSITION knob. Modulate the position for talking and growling basses');
+  d.body.classList.add('dev-tabbed');
+  const page = devTabs(i, ['Osc', 'Filter', 'Mod', 'Stepper'], d.body);
+  const K = (key, o) => bindKnob(s, key, o, ap);
+  const sel = (label, key, opts, info) => selectCtl(label, opts, s[key], v => { s[key] = isNaN(+v) || v === '' ? v : +v; ap(); }, info);
+  const wrap = el('div', 'dev-page'); d.body.append(wrap);
+  if (page === 'Osc') {
+    for (let k = 1; k <= 3; k++) {
+      wrap.append(kgroupRows(`Osc ${k}`, [
+        [sel('Table', 'w' + k + 'table', WT_NAMES.map(n => [n, n])), K('w' + k + 'pos', { label: 'POSITION', min: 0, max: 1, def: 0, fmt: fPct, info: 'Morph from frame A (0%) to frame B (100%)' }),
+          K('w' + k + 'oct', { label: 'OCT', min: -3, max: 3, step: 1, def: 0, bipolar: true, fmt: fSt }), K('w' + k + 'semi', { label: 'SEMI', min: -12, max: 12, step: 1, def: 0, bipolar: true, fmt: fSt })],
+        [K('w' + k + 'vol', { label: 'VOLUME', min: 0, max: 1, def: k === 1 ? .8 : 0, fmt: fPct }), K('w' + k + 'voices', { label: 'VOICES', min: 1, max: 8, step: 1, def: 1, fmt: fInt }),
+          K('w' + k + 'det', { label: 'DETUNE', min: 0, max: 1, def: .2, fmt: fPct }), K('w' + k + 'fine', { label: 'FINE', min: -50, max: 50, def: 0, bipolar: true, fmt: fCents })],
+      ]));
+    }
+    wrap.append(kgroupRows('Extra', [[K('sub', { label: 'SUB', min: 0, max: 1, def: 0, fmt: fPct, info: 'Sine one octave down, after the filters' }), K('noise', { label: 'NOISE', min: 0, max: 1, def: 0, fmt: fPct })],
+      [K('fmRatio', { label: 'FM RATIO', min: .5, max: 8, step: .5, def: 1, fmt: v => v + 'x', info: 'Frequency of the FM modulator, relative to the note' }), K('fmAmt', { label: 'FM', min: 0, max: 1, def: 0, fmt: fPct, info: 'Frequency modulation of oscillator 1' })]]));
+  } else if (page === 'Filter') {
+    [1, 2].forEach(n => wrap.append(kgroupRows('Filter ' + n, [
+      [sel('Type', 'f' + n + 'type', WT_FILTERS)],
+      [K('f' + n + 'cut', { label: 'CUTOFF', min: 20, max: 20000, log: true, def: 2000, fmt: fHz }), K('f' + n + 'res', { label: 'RES', min: 0, max: 1, def: .2, fmt: fPct }),
+        K('f' + n + 'drive', { label: 'DRIVE', min: 0, max: 1, def: 0, fmt: fPct })],
+    ])));
+    wrap.append(kgroupRows('Routing', [[sel('Route', 'route', [['serial', 'Serial 1 > 2'], ['parallel', 'Parallel']])], [K('key', { label: 'KEYTRACK', min: 0, max: 1, def: 0, fmt: fPct })]]));
+    wrap.append(kgroupRows('Amp env', [[K('a', { label: 'ATT', min: .001, max: 3, log: true, def: .005, fmt: fS }), K('d', { label: 'DEC', min: .01, max: 4, log: true, def: .3, fmt: fS }),
+      K('s', { label: 'SUS', min: 0, max: 1, def: .8, fmt: fPct }), K('r', { label: 'REL', min: .01, max: 4, log: true, def: .2, fmt: fS })]]));
+    wrap.append(kgroupRows('Voice', [[K('glide', { label: 'GLIDE', min: 0, max: .3, def: 0, fmt: fS }), K('level', { label: 'LEVEL', min: 0, max: 1.2, def: .7, fmt: fPct })],
+      [toggleCtl('MONO', s.mono, v => { s.mono = v; }, 'Mono: a new note cuts the previous one')]]));
+  } else if (page === 'Mod') {
+    wrap.append(kgroupRows('Mod env', [
+      [K('e2a', { label: 'ATT', min: .001, max: 3, log: true, def: .001, fmt: fS }), K('e2d', { label: 'DEC', min: .01, max: 4, log: true, def: .3, fmt: fS }),
+        K('e2s', { label: 'SUS', min: 0, max: 1, def: 0, fmt: fPct }), K('e2r', { label: 'REL', min: .01, max: 4, log: true, def: .2, fmt: fS })],
+      [sel('Target', 'e2dest', TIDAL_DESTS), K('e2amt', { label: 'AMOUNT', min: -1, max: 1, def: 0, bipolar: true, fmt: fBi })],
+    ]));
+    [1, 2].forEach(l => wrap.append(kgroupRows('LFO ' + l, [
+      [sel('Wave', 'l' + l + 'wave', LFO_WAVES), sel('Rate', 'l' + l + 'rate', SYNC_RATES.map(r => [r, r]))],
+      [sel('Target', 'l' + l + 'dest', TIDAL_DESTS), K('l' + l + 'amt', { label: 'AMOUNT', min: -1, max: 1, def: 0, bipolar: true, fmt: fBi })],
+    ])));
+  } else {
+    wrap.append(stepperEditor(i));
+    wrap.append(kgroupRows('Stepper', [
+      [sel('Rate', 'stRate', [['1/16', '1/16'], ['1/8', '1/8'], ['1/4', '1/4']]), sel('Target', 'stDest', TIDAL_DESTS)],
+      [K('stAmt', { label: 'AMOUNT', min: -1, max: 1, def: 0, bipolar: true, fmt: fBi }), K('stGlide', { label: 'SMOOTH', min: 0, max: 1, def: 0, fmt: fPct, info: 'Glide between steps' })],
+    ]));
+  }
+  return d.el;
+}
+// 16 bars, drag up and down to draw the sequence
+function stepperEditor(i) {
+  const s = P.tracks[i].synth, g = el('div', 'kgroup');
+  g.append(el('div', 'kgroup-t', 'Sequence'));
+  const box = el('div', 'stepper'); box.dataset.info = 'Draw the 16 step values. The stepper moves its target in time with the song';
+  const bars = s.stSeq.map((v, k) => { const b = el('div', 'st-bar' + (k % 4 === 0 ? ' beat' : '')); b.innerHTML = '<i></i>'; box.append(b); return b; });
+  const draw = () => bars.forEach((b, k) => { b.firstChild.style.height = Math.round(clamp(s.stSeq[k], 0, 1) * 100) + '%'; });
+  let drag = false;
+  const setAt = e => {
+    const r = box.getBoundingClientRect(), k = clamp(Math.floor((e.clientX - r.left) / (r.width / 16)), 0, 15);
+    s.stSeq[k] = Math.round(clamp(1 - (e.clientY - r.top) / r.height, 0, 1) * 20) / 20; draw();
+  };
+  box.addEventListener('pointerdown', e => { box.setPointerCapture(e.pointerId); pushUndo(); drag = true; setAt(e); });
+  box.addEventListener('pointermove', e => { if (drag) setAt(e); });
+  box.addEventListener('pointerup', () => { if (drag) { drag = false; save(); } });
+  draw(); g.append(box);
+  return g;
+}
+function chorusDevice(i) {
+  const fx = P.tracks[i].fx;
+  const d = device('CHORUS', '#5cffe8', null, 'Stereo chorus: widens supersaws, pads and stabs');
+  d.body.append(kgroup('', [bindKnob(fx, 'chorus', { label: 'AMOUNT', min: 0, max: 1, def: 0, fmt: fPct }, () => E && E.applyTrack(i))]));
+  return d.el;
+}
+
 // ===================== 9. MIDI IMPORT =====================
 // Reads a Standard MIDI File (format 0 or 1, PPQ timing) and turns it into a new set:
 // one scene per section, one clip per lane per section, and the whole song laid out
@@ -2452,7 +2966,6 @@ function parseMidi(buf) {
       const on = q.shift();
       byCh.get(ch).push({ tick: on.tick, dur: Math.max(1, at - on.tick), pitch, vel: on.vel });
     };
-    let broken = false;
     try { while (p < end) {
       tick += vlq();
       let b = u8[p];
@@ -2461,13 +2974,13 @@ function parseMidi(buf) {
       else throw new Error(`track ${t + 1} uses running status before any status byte`);
       if (b === 0xFF) {                            // meta event
         const type = byte(), l = vlq(), data = u8.subarray(p, Math.min(end, p + l)); p += l;
-        if (type === 0x03 && !name) name = String.fromCharCode.apply(null, data).replace(/[^\x20-\x7e]/g, '').trim();
-        else if (type === 0x51 && l === 3) tempos.push({ tick, bpm: 60e6 / ((data[0] << 16) | (data[1] << 8) | data[2]) });
+        if (type === 0x03 && !name) name = String.fromCharCode.apply(null, data.subarray(0, 64)).replace(/[^\x20-\x7e]/g, '').trim();
+        else if (type === 0x51 && l === 3) { const us = (data[0] << 16) | (data[1] << 8) | data[2]; if (us > 0) tempos.push({ tick, bpm: 60e6 / us }); }
         else if (type === 0x58 && l >= 2) timesigs.push({ tick, num: data[0], den: Math.pow(2, data[1]) });
         else if (type === 0x2F) p = end;
-        status = 0; continue;
+        continue; // many writers keep using running status after a meta event
       }
-      if (b === 0xF0 || b === 0xF7) { const l = vlq(); p += l; status = 0; continue; } // sysex: skip
+      if (b === 0xF0 || b === 0xF7) { const l = vlq(); p += l; continue; } // sysex: skip
       if (b > 0xF0) { p += b === 0xF2 ? 2 : (b === 0xF1 || b === 0xF3) ? 1 : 0; status = 0; continue; } // stray system messages
       status = b;
       const type = b & 0xF0, ch = b & 0x0F, d1 = byte() & 0x7f, d2 = (type === 0xC0 || type === 0xD0) ? 0 : byte() & 0x7f;
@@ -2477,32 +2990,44 @@ function parseMidi(buf) {
         if (!open.has(k)) open.set(k, []);
         open.get(k).push({ tick, vel: d2 });
       } else if (type === 0x80 || type === 0x90) close(ch, d1, tick);
-    } } catch (err) { broken = true; warnings.push(err.message + ': the notes before that point are kept'); }
+    } } catch (err) { warnings.push(err.message + ': the notes before that point are kept'); }
     open.forEach((q, k) => { while (q.length) close(Math.floor(k / 128), k % 128, Math.max(tick, q[0].tick + ppq / 4)); });
     p = end;
+    const noteChannels = [...byCh.values()].filter(n => n.length).length;
     byCh.forEach((notes, ch) => {
       if (!notes.length) return;
       notes.sort((a, b) => a.tick - b.tick || a.pitch - b.pitch);
       const tn = name || `Track ${t + 1}`;
-      parts.push({ track: t, ch, name: byCh.size > 1 || format === 0 ? `${tn} ch${ch + 1}` : tn, notes });
+      parts.push({ track: t, ch, name: noteChannels > 1 || format === 0 ? `${tn} ch${ch + 1}` : tn, notes });
     });
-    if (broken) break; // past a broken event the byte positions can no longer be trusted
   }
   if (!parts.length) throw new Error('no notes found in this file');
   tempos.sort((a, b) => a.tick - b.tick); timesigs.sort((a, b) => a.tick - b.tick);
-  if (tempos.length > 1 && tempos.some(x => Math.abs(x.bpm - tempos[0].bpm) > .5)) warnings.push('the file changes tempo: only the first tempo is used');
+  let tempo = null;
+  if (tempos.length) {
+    const first = tempos.filter(x => x.tick === tempos[0].tick);
+    tempo = first[first.length - 1].bpm;
+    const later = tempos.filter(x => x.tick > tempos[0].tick);
+    if (later.some(x => Math.abs(x.bpm - tempo) > .5) || (tempos[0].tick > 0 && Math.abs(tempo - 120) > .5))
+      warnings.push('the file changes tempo: only the opening tempo is used');
+  }
   if (timesigs.some(x => x.num !== 4 || x.den !== 4)) warnings.push('the file is not all in 4/4: bars are counted as 4/4');
   if (format === 2) warnings.push('format 2 file: its patterns are read as if they played together');
   parts.forEach(pt => {
-    const ps = pt.notes.map(n => n.pitch);
-    pt.count = pt.notes.length; pt.lo = Math.min(...ps); pt.hi = Math.max(...ps);
-    pt.avg = ps.reduce((a, b) => a + b, 0) / ps.length;
+    let lo = 127, hi = 0, sum = 0;
+    pt.notes.forEach(n => { lo = Math.min(lo, n.pitch); hi = Math.max(hi, n.pitch); sum += n.pitch; });
+    pt.count = pt.notes.length; pt.lo = lo; pt.hi = hi; pt.avg = sum / pt.count;
+    // how many notes sound at once at most (chords need a polyphonic lane)
+    const edges = [];
+    pt.notes.forEach(n => { edges.push([n.tick, 1], [n.tick + n.dur, -1]); });
+    edges.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    let cur = 0; pt.poly = 0; edges.forEach(e => { cur += e[1]; pt.poly = Math.max(pt.poly, cur); });
     pt.drum = pt.ch === 9;
     // off-grid share: how much of the part does not sit on 16ths (triplets, swing, live playing)
     const q = ppq / 4;
     pt.offGrid = pt.notes.filter(n => Math.abs(n.tick / q - Math.round(n.tick / q)) > .2).length / pt.count;
   });
-  return { format, ppq, tempo: tempos.length ? tempos[0].bpm : null, parts, warnings };
+  return { format, ppq, tempo, parts, warnings };
 }
 
 // General MIDI drum notes -> sound category -> the pad voices that can play it
@@ -2526,10 +3051,15 @@ function autoAssign(parts) {
   const used = new Set(), out = parts.map(() => -1);
   const order = parts.map((pt, i) => i).sort((a, b) => parts[b].count - parts[a].count);
   const take = prefs => { const k = prefs.find(x => !used.has(x)); if (k == null) return -1; used.add(k); return k; };
+  const hasCh10 = parts.some(pt => pt.drum);
+  const drumName = /\b(drums?|kick|snare|hi-?hats?|hats?|perc(ussion)?|breaks?|beats?)\b/i;
   order.forEach(i => {
     const pt = parts[i];
-    const isDrum = pt.drum || /drum|kick|snare|hat|perc|break|beat/i.test(pt.name);
-    out[i] = take(isDrum ? [0, 1, 7] : pt.avg < 38 ? [3, 2] : pt.avg < 52 ? [2, 3] : pt.avg < 67 ? [5, 4, 6] : [6, 4, 5]);
+    // ch10 is the drum channel; names only count when the file has no ch10 part
+    const isDrum = pt.drum || (!hasCh10 && drumName.test(pt.name));
+    if (isDrum) { out[i] = 0; return; } // GM drums are absolute, so every drum part can share the DRUMS kit
+    const poly = pt.poly > 1; // chords go to the polyphonic lanes (STAB, PAD)
+    out[i] = take(poly ? (pt.avg < 60 ? [5, 4] : [4, 5]) : pt.avg < 38 ? [3, 2] : pt.avg < 52 ? [2, 3] : pt.avg < 67 ? [6, 4, 5] : [6, 4, 5]);
   });
   return out;
 }
@@ -2537,13 +3067,17 @@ function autoAssign(parts) {
 function midiToProject(m, assign, opts) {
   const sec = opts.sectionBars, L = sec * 16, stepT = m.ppq / 4;
   const lanes = TRACK_DEFS.map(() => []);
-  const stats = { notes: 0, dropped: 0, merged: 0, truncated: false };
+  const stats = { notes: 0, dropped: 0, merged: 0, truncated: false, polyLanes: [] };
   let maxEnd = 0;
+  const laneOrder = TRACK_DEFS.map((_, li) => {
+    const ps = new Set(); m.parts.forEach((pt, i) => { if (assign[i] === li) pt.notes.forEach(n => ps.add(n.pitch)); });
+    return new Map([...ps].sort((a, b) => a - b).map((p, k) => [p, k]));
+  });
   m.parts.forEach((pt, i) => {
     const li = assign[i]; if (li == null || li < 0) return;
     const def = TRACK_DEFS[li];
     const pads = def.type === 'drums' ? makePads(def.kit) : null;
-    const orderMap = new Map([...new Set(pt.notes.map(n => n.pitch))].sort((a, b) => a - b).map((p, k) => [p, k]));
+    const orderMap = laneOrder[li];
     pt.notes.forEach(n => {
       const s = Math.round(n.tick / stepT);
       let p = n.pitch;
@@ -2573,6 +3107,11 @@ function midiToProject(m, assign, opts) {
     notes.forEach(n => { const k = n.s * 128 + n.p, o = best.get(k); if (!o) best.set(k, n); else { stats.merged++; if (n.v > o.v) best.set(k, Object.assign(n, { l: Math.max(n.l, o.l) })); else o.l = Math.max(o.l, n.l); } });
     const clean = [...best.values()].filter(n => n.s < bars * 16);
     stats.notes += clean.length;
+    if (tr.synth && tr.synth.mono) { // a mono preset would cut chords down to one note
+      const byStart = clean.slice().sort((x, y) => x.s - y.s);
+      let end = -1;
+      for (const n of byStart) { if (n.s < end) { tr.synth.mono = false; stats.polyLanes.push(tr.name); break; } end = Math.max(end, n.s + n.l); }
+    }
     for (let k = 0; k < nSec; k++) {
       const a = k * L, b = a + L, cn = [];
       clean.forEach(n => {
@@ -2580,7 +3119,8 @@ function midiToProject(m, assign, opts) {
         else if (tr.type === 'synth' && n.s < a && n.s + n.l > a) cn.push({ s: 0, p: n.p, l: Math.min(n.s + n.l - a, L), v: n.v }); // held across the section line
       });
       if (!cn.length) continue;
-      tr.clips[k] = { name: `${tr.name} ${k + 1}`, bars: sec, notes: cn };
+      const left = Math.min(sec, bars - k * sec);
+      tr.clips[k] = { name: `${tr.name} ${k + 1}`, bars: [1, 2, 4, 8].find(x => x >= left) || sec, notes: cn };
       tr.arr.push({ start: k * sec, slot: k, len: Math.min(sec, bars - k * sec), off: 0 });
     }
   });
@@ -2618,21 +3158,28 @@ function openMidiDialog(m, baseName) {
       ${m.tempo ? `<label class="field"><input type="checkbox" id="mi-tempo" checked><span>Use the file tempo</span></label>` : ''}
     </div>
     ${warns.length ? `<ul class="mwarn">${warns.map(w => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}
-    <div class="mbtns"><button class="btn" id="mi-cancel">Cancel</button><button class="btn on" id="mi-ok">Import as a new set</button></div>
+    <div class="mbtns"><span id="mi-msg" class="mi-msg"></span><button class="btn" id="mi-cancel">Cancel</button><button class="btn on" id="mi-ok">Import as a new set</button></div>
   </div>`;
   document.body.append(ov);
-  const close = () => ov.remove();
+  const close = () => { ov.remove(); $('#app').inert = false; };
+  ov.close = close;
   $('#mi-cancel', ov).onclick = close;
-  ov.addEventListener('pointerdown', e => { if (e.target === ov) close(); });
+  let downOnBackdrop = false; // close on a full click on the backdrop, so a tap never reaches the app underneath
+  ov.addEventListener('pointerdown', e => { downOnBackdrop = e.target === ov; });
+  ov.addEventListener('click', e => { if (downOnBackdrop && e.target === ov) close(); });
+  $('#app').inert = true;
+  setTimeout(() => { const ok = $('#mi-ok', ov); if (ok) ok.focus(); }, 0);
   $('#mi-ok', ov).onclick = () => {
     const a = $$('select[data-part]', ov).map(s => +s.value);
-    if (a.every(x => x < 0)) { flash('Pick a lane for at least one part'); return; }
+    if (a.every(x => x < 0)) { $('#mi-msg', ov).textContent = 'Pick a lane for at least one part'; return; }
     const tempoBox = $('#mi-tempo', ov);
     const res = midiToProject(m, a, { sectionBars: +$('#mi-sec', ov).value, drumMap: $('#mi-dmap', ov).value, useTempo: tempoBox ? tempoBox.checked : false, name: baseName });
     close();
     pushUndo(); setProject(res.project); setView('arr');
     const s = res.stats;
-    flash(`Imported ${s.notes} notes, ${s.bars} bars in ${s.sections} scenes` + (s.dropped ? `. ${s.dropped} drum notes had no matching pad` : '') + (s.truncated ? '. The song was cut at the scene limit' : '') + '. CTRL+Z to undo');
+    const pl = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+    flash(`Imported ${pl(s.notes, 'note')}, ${pl(s.bars, 'bar')} in ${pl(s.sections, 'scene')}` + (s.dropped ? `. ${pl(s.dropped, 'drum note')} had no matching pad` : '') +
+      (s.polyLanes.length ? `. ${s.polyLanes.join(', ')} set to poly for the chords` : '') + (s.truncated ? '. The song was cut at the scene limit' : '') + '. CTRL+Z to undo');
   };
 }
 function initMidiImport() {
@@ -2642,6 +3189,7 @@ function initMidiImport() {
   document.addEventListener('drop', e => {
     const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (!f) return;
     e.preventDefault();
+    if ($('#midi-dialog')) return; // finish or cancel the open import first
     if (/\.(mid|midi|smf)$/i.test(f.name)) importMidiFile(f);
     else if (/\.json$/i.test(f.name)) loadFile({ target: { files: [f], value: '' } });
     else flash('Drop a .mid file to import it, or a .json set to open it');
@@ -2674,9 +3222,9 @@ function deleteSelection() {
 }
 function initKeys() {
   document.addEventListener('keydown', e => {
-    if (!E) return;
     const dlg = $('#midi-dialog');
-    if (dlg) { if (e.key === 'Escape') dlg.remove(); return; }
+    if (dlg) { if (e.key === 'Escape') dlg.close(); return; }
+    if (!E) return;
     const tag = e.target.tagName;
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') { if (e.key === 'Escape') e.target.blur(); return; }
     if (e.ctrlKey || e.metaKey) {
@@ -2793,6 +3341,7 @@ async function renderArrangementOffline(project, sr = 44100, onProgress = null) 
   const scheduleBar = b => {
     for (let st = b * 16; st < (b + 1) * 16; st++) {
       const time = t0 + st * sd + (st % 2 ? (project.swing / 100) * sd * .66 : 0);
+      OE.stepTick(st, time, sd);
       project.tracks.forEach((tr, i) => {
         const e = arrEntryAt(tr, st); if (!e) return;
         const clip = tr.clips[e.slot]; if (!clip) return;
