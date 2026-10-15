@@ -597,12 +597,15 @@ function normalizeProject(p) {
   out.tracks = TRACK_DEFS.map((def, i) => {
     const base = makeTrack(def, nSc), src = p.tracks[i];
     if (!src || src.type !== def.type) return base;
-    const t = Object.assign(base, src, { type: def.type, color: def.color, fx: Object.assign(base.fx, src.fx), mix: Object.assign(base.mix, src.mix) });
+    const baseSynth = base.synth; // kept before the merge below can overwrite it
+    // a loaded track keeps its own sound: new defaults such as the STAB/PAD chorus only reach new sets
+    const fx = Object.assign(base.fx, src.fx && typeof src.fx === 'object' ? Object.assign({ chorus: 0 }, src.fx) : {});
+    const t = Object.assign(base, src, { type: def.type, color: def.color, fx, mix: Object.assign(base.mix, src.mix) });
     if (def.type === 'drums') {
       t.pads = base.pads.map((bp, k) => Object.assign({}, bp, src.pads && src.pads[k]));
       t.pads.forEach(pd => { if (!DRUM_VOICES[pd.voice]) pd.voice = 'kick'; });
     } else {
-      const ss = src.synth && typeof src.synth === 'object' ? src.synth : base.synth, eng = ENGINE_BASE[ss.engine] ? ss.engine : 'classic';
+      const ss = src.synth && typeof src.synth === 'object' && !Array.isArray(src.synth) ? src.synth : baseSynth, eng = ENGINE_BASE[ss.engine] ? ss.engine : 'classic';
       t.synth = Object.assign(clone(ENGINE_BASE[eng]), ss, { engine: eng });
       if (eng === 'tidal') t.synth.stSeq = Array.from({ length: 16 }, (_, k) => clamp(+(Array.isArray(ss.stSeq) ? ss.stSeq[k] : 0) || 0, 0, 1));
     }
@@ -1093,7 +1096,8 @@ class Engine {
     const m = this.p.master, M = this.m, now = this.ctx.currentTime, f = m.filter;
     M.out.gain.setTargetAtTime(faderGain(m.vol), now, .015);
     // one-knob DJ filter: left = lowpass sweep, right = highpass sweep
-    M.lp.frequency.setTargetAtTime(f < 0 ? 20000 * Math.pow(.004, -f) : 20000, now, .02);
+    const top = Math.min(20000, this.ctx.sampleRate * .45); // below Nyquist at any sample rate
+    M.lp.frequency.setTargetAtTime(f < 0 ? top * Math.pow(.004, -f) : top, now, .02);
     M.hp.frequency.setTargetAtTime(f > 0 ? 15 * Math.pow(500, f) : 10, now, .02);
     M.lp.Q.setTargetAtTime(f < -.02 ? 4 : .7, now, .02); M.hp.Q.setTargetAtTime(f > .02 ? 4 : .7, now, .02);
     M.glue.threshold.setTargetAtTime(m.glue, now, .02);
@@ -1219,7 +1223,7 @@ class Engine {
   synthNote(i, midi, vel, t) {
     const s = this.p.tracks[i].synth;
     const voice = s.engine === 'polar' ? this.polarNote(i, midi, vel, t) : s.engine === 'tidal' ? this.tidalNote(i, midi, vel, t) : this.classicNote(i, midi, vel, t);
-    if (s.mono) { const prev = this.mono[i]; if (prev && prev !== voice && !prev.ended) prev.release(t, .012); this.mono[i] = voice; }
+    if (s.mono) { const prev = this.mono[i]; if (prev && prev !== voice && !prev.ended) prev.release(t, .012, true); this.mono[i] = voice; }
     this.voices.add(voice);
     return voice;
   }
@@ -1253,8 +1257,8 @@ class Engine {
     if (s.lfoRate !== 'off' && s.lfoDepth > 0) { T.lfoG.connect(filt.frequency); lfoOn = true; }
     const voice = {
       t, ended: false, relAt: Infinity,
-      release: (tOff, r = s.r) => {
-        if (voice.ended || tOff >= voice.relAt) return;
+      release: (tOff, r = s.r, force) => {
+        if (voice.ended || (!force && tOff >= voice.relAt)) return;
         voice.relAt = tOff; tOff = Math.max(tOff, t + .003);
         if (g.cancelAndHoldAtTime) g.cancelAndHoldAtTime(tOff); else g.cancelScheduledValues(tOff);
         g.setTargetAtTime(0, tOff, Math.max(.003, r / 4));
@@ -1323,7 +1327,7 @@ const WT_NAMES = Object.keys(WAVETABLES);
 Engine.prototype.periodic = function (key) {
   this.waves = this.waves || new Map();
   let w = this.waves.get(key); if (w) return w;
-  const N = 64, real = new Float32Array(N), imag = new Float32Array(N);
+  const N = 256, real = new Float32Array(N), imag = new Float32Array(N);
   if (key === 'pulse') for (let n = 1; n < N; n++) real[n] = (2 / (n * Math.PI)) * Math.sin(n * Math.PI * .25); // 25% pulse
   else { const [name, frame] = key.split('|'), fn = WAVETABLES[name][+frame]; for (let n = 1; n < N; n++) imag[n] = fn(n); }
   w = this.ctx.createPeriodicWave(real, imag);
@@ -1342,8 +1346,8 @@ Engine.prototype.adsr = function (param, t, peak, a, d, s) {
 Engine.prototype.makeVoice = function (t, srcs, envs, out, cleanup) {
   const voice = {
     t, ended: false, relAt: Infinity,
-    release: (tOff, rOv) => {
-      if (voice.ended || tOff >= voice.relAt) return;
+    release: (tOff, rOv, force) => { // force: the mono cut, which must win over a release that is already scheduled
+      if (voice.ended || (!force && tOff >= voice.relAt)) return;
       voice.relAt = tOff; tOff = Math.max(tOff, t + .003);
       let maxR = .01;
       envs.forEach(e => {
@@ -1380,6 +1384,16 @@ Engine.prototype.patchMods = function (sources, D, f0) {
   return made;
 };
 const unisonSpread = (u, n) => (n > 1 ? (u / (n - 1)) * 2 - 1 : 0);
+// A gain driven by a control signal clamped to 0..1, so stacked modulation can never flip its polarity
+Engine.prototype.ctlGain = function (gainParam, base, t, srcs) {
+  const cs = this.ctx.createConstantSource(), cl = this.ctx.createWaveShaper();
+  cs.offset.value = base; cl.curve = this.clampCurve(); gainParam.value = 0;
+  cs.connect(cl); cl.connect(gainParam); cs.start(t); srcs.push(cs);
+  return cs.offset;
+};
+// Unison voices start at random points of their cycle, so they do not add up in phase. A note played live starts now,
+// so it cannot start early: then the voice starts up to one cycle late, at the same phase.
+Engine.prototype.freeStart = function (t, f) { const per = 1 / Math.max(20, f), ph = Math.random() * per; return t - ph >= this.ctx.currentTime ? t - ph : t + per - ph; };
 Engine.prototype.voicePanner = function () { return this.ctx.createStereoPanner ? this.ctx.createStereoPanner() : this.ctx.createGain(); };
 Engine.prototype.lfoNode = function (wave, rate, t) {
   const o = this.ctx.createOscillator(); o.type = wave;
@@ -1400,7 +1414,9 @@ Engine.prototype.polarNote = function (i, midi, vel, t) {
   const out = c.createGain(); out.gain.value = (vel / 127) * s.level;
   const modAmp = c.createGain(), vpan = this.voicePanner();
   modAmp.connect(vpan); vpan.connect(out); out.connect(T.in);
-  if (vpan.pan) D.pan.push(vpan.pan); D.amp.push(modAmp.gain);
+  const used = new Set([s.m1dest, s.m2dest, s.l1dest, s.l2dest]);
+  if (vpan.pan) D.pan.push(vpan.pan);
+  D.amp.push(used.has('amp') ? this.ctlGain(modAmp.gain, 1, t, srcs) : modAmp.gain);
   const key = Math.pow(2, ((midi - 60) / 12) * s.key);
   const parts = {};
   ['A', 'B'].forEach(P => {
@@ -1414,7 +1430,8 @@ Engine.prototype.polarNote = function (i, midi, vel, t) {
     const amp = c.createGain(); amp.gain.value = 0;
     this.adsr(amp.gain, t, 1, s['a' + P], s['d' + P], s['s' + P]);
     envs.push({ param: amp.gain, r: s['r' + P], amp: true });
-    const mix = c.createGain(); mix.gain.value = s['mix' + P]; D['mix' + P].push(mix.gain);
+    const mix = c.createGain(); mix.gain.value = s['mix' + P];
+    D['mix' + P].push(used.has('mix' + P) ? this.ctlGain(mix.gain, s['mix' + P], t, srcs) : mix.gain);
     node.connect(amp); amp.connect(mix); mix.connect(modAmp);
     parts[P] = sum;
   });
@@ -1427,11 +1444,13 @@ Engine.prototype.polarNote = function (i, midi, vel, t) {
       const sp = unisonSpread(u, n), o = c.createOscillator();
       this.setWave(o, wave);
       o.detune.value = s['o' + k + 'fine'] + sp * s['o' + k + 'det'] * 50;
+      o.frequency.value = (glide ? prevF : f) * ratio;
       if (glide) { o.frequency.setValueAtTime(prevF * ratio, t); o.frequency.exponentialRampToValueAtTime(f * ratio, t + s.glide); } else o.frequency.setValueAtTime(f * ratio, t);
       const g = this.gain(vol / Math.sqrt(n));
       o.connect(g);
       if (n > 1 && s['o' + k + 'st'] > 0 && c.createStereoPanner) { const pn = c.createStereoPanner(); pn.pan.value = sp * s['o' + k + 'st']; g.connect(pn); pn.connect(parts[P]); } else g.connect(parts[P]);
-      o.start(t); srcs.push(o); D['pitch' + P].push(o.detune);
+      o.start(n > 1 ? this.freeStart(t, f * ratio) : t);
+      srcs.push(o); D['pitch' + P].push(o.detune);
     }
   }
   D.cut = D.cutA.concat(D.cutB); D.pitch = D.pitchA.concat(D.pitchB);
@@ -1476,23 +1495,28 @@ Engine.prototype.tidalNote = function (i, midi, vel, t) {
   const out = c.createGain(); out.gain.value = (vel / 127) * s.level;
   const modAmp = c.createGain(), vpan = this.voicePanner();
   modAmp.connect(vpan); vpan.connect(out); out.connect(T.in);
-  if (vpan.pan) D.pan.push(vpan.pan); D.amp.push(modAmp.gain);
+  const used = new Set([s.e2dest, s.l1dest, s.l2dest, s.stDest]);
+  if (vpan.pan) D.pan.push(vpan.pan);
+  D.amp.push(used.has('amp') ? this.ctlGain(modAmp.gain, 1, t, srcs) : modAmp.gain);
   const amp = c.createGain(); amp.gain.value = 0; amp.connect(modAmp);
   this.adsr(amp.gain, t, 1, s.a, s.d, s.s); envs.push({ param: amp.gain, r: s.r, amp: true });
   // filters
   const key = Math.pow(2, ((midi - 60) / 12) * s.key), mix = c.createGain(); mix.gain.value = .45;
-  const f2in = this.wtFilter(s.f2type, clamp(s.f2cut * key, 20, 20000), s.f2res, s.f2drive, amp, D, 'cut2');
-  if (s.route === 'parallel') {
-    const f1in = this.wtFilter(s.f1type, clamp(s.f1cut * key, 20, 20000), s.f1res, s.f1drive, amp, D, 'cut1');
-    mix.connect(f1in); mix.connect(f2in);
+  if (s.route === 'parallel') { // an Off slot is not a dry path here; two active filters share the level
+    const on = [1, 2].filter(n => s['f' + n + 'type'] !== 'off'), sum = this.gain(on.length > 1 ? .6 : 1); sum.connect(amp);
+    if (!on.length) mix.connect(sum);
+    on.forEach(n => mix.connect(this.wtFilter(s['f' + n + 'type'], clamp(s['f' + n + 'cut'] * key, 20, 20000), s['f' + n + 'res'], s['f' + n + 'drive'], sum, D, 'cut' + n)));
   } else {
+    const f2in = this.wtFilter(s.f2type, clamp(s.f2cut * key, 20, 20000), s.f2res, s.f2drive, amp, D, 'cut2');
     const f1in = this.wtFilter(s.f1type, clamp(s.f1cut * key, 20, 20000), s.f1res, s.f1drive, f2in, D, 'cut1');
     mix.connect(f1in);
   }
   // FM modulator (on oscillator 1)
   let fm = null;
   if (s.fmAmt > 0 || s.e2dest === 'fm' || s.l1dest === 'fm' || s.l2dest === 'fm' || s.stDest === 'fm') {
-    const mo = c.createOscillator(); mo.type = 'sine'; mo.frequency.value = f * s.fmRatio; mo.start(t); srcs.push(mo);
+    const mo = c.createOscillator(); mo.type = 'sine'; mo.frequency.value = (glide ? prevF : f) * s.fmRatio;
+    if (glide) { mo.frequency.setValueAtTime(prevF * s.fmRatio, t); mo.frequency.exponentialRampToValueAtTime(f * s.fmRatio, t + s.glide); }
+    mo.start(t); srcs.push(mo); D.pitch.push(mo.detune);
     fm = c.createGain(); fm.gain.value = s.fmAmt * f * 3; mo.connect(fm); D.fm.push(fm.gain);
   }
   const clampC = this.clampCurve();
@@ -1505,24 +1529,25 @@ Engine.prototype.tidalNote = function (i, midi, vel, t) {
     const inv = this.gain(-1); cl.connect(inv);
     const n = clamp(s['w' + k + 'voices'] | 0, 1, 8), ratio = Math.pow(2, s['w' + k + 'oct'] + s['w' + k + 'semi'] / 12);
     for (let u = 0; u < n; u++) {
-      const sp = unisonSpread(u, n), g = this.gain(vol / Math.sqrt(n));
+      const sp = unisonSpread(u, n), g = this.gain(vol / Math.sqrt(n)), st = n > 1 ? this.freeStart(t, f * ratio) : t; // both frames share the start
       const pn = n > 1 && c.createStereoPanner ? c.createStereoPanner() : null;
       if (pn) { pn.pan.value = sp * .7; g.connect(pn); pn.connect(mix); } else g.connect(mix);
       [0, 1].forEach(fr => {
         const o = c.createOscillator(); this.setWave(o, table + '|' + fr);
         o.detune.value = s['w' + k + 'fine'] + sp * s['w' + k + 'det'] * 50;
+        o.frequency.value = (glide ? prevF : f) * ratio;
         if (glide) { o.frequency.setValueAtTime(prevF * ratio, t); o.frequency.exponentialRampToValueAtTime(f * ratio, t + s.glide); } else o.frequency.setValueAtTime(f * ratio, t);
         const xg = c.createGain(); xg.gain.value = fr ? 0 : 1; (fr ? cl : inv).connect(xg.gain);
         o.connect(xg); xg.connect(g);
         if (k === 1 && fm) fm.connect(o.frequency);
-        o.start(t); srcs.push(o); D.pitch.push(o.detune);
+        o.start(st); srcs.push(o); D.pitch.push(o.detune);
       });
     }
   }
   if (s.sub > 0) {
     const so = c.createOscillator(); so.type = 'sine';
     if (glide) { so.frequency.setValueAtTime(prevF / 2, t); so.frequency.exponentialRampToValueAtTime(f / 2, t + s.glide); } else so.frequency.setValueAtTime(f / 2, t);
-    const sg = this.gain(s.sub * .5); so.connect(sg); sg.connect(amp); so.start(t); srcs.push(so);
+    const sg = this.gain(s.sub * .5); so.connect(sg); sg.connect(amp); so.start(t); srcs.push(so); D.pitch.push(so.detune);
   }
   if (s.noise > 0) { const nz = this.noiseSrc(t), ng = this.gain(s.noise * .4); nz.connect(ng); ng.connect(mix); srcs.push(nz); }
   D.pos = D.pos1.concat(D.pos2, D.pos3); D.cut = D.cut1.concat(D.cut2);
@@ -1537,13 +1562,24 @@ Engine.prototype.tidalNote = function (i, midi, vel, t) {
     mods.push({ node: o, dest: s['l' + l + 'dest'], amt: s['l' + l + 'amt'] });
   });
   // the stepper is one shared source per track, clocked by the transport (see stepTick)
-  const shared = this.patchMods([{ node: T.stepper, dest: s.stDest, amt: s.stAmt, uni: true }], D, f);
+  let stepSrc = T.stepper;
+  if (s.stDest !== 'off' && s.stAmt && !(this.clockUntil > t)) { // transport stopped: run the sequence from this note's start
+    stepSrc = c.createConstantSource();
+    const sd = 15 / this.p.bpm, div = s.stRate === '1/4' ? 4 : s.stRate === '1/8' ? 2 : 1;
+    for (let k = 0; k < 64; k++) {
+      const tt = t + k * sd * div, v = clamp(+s.stSeq[k % 16] || 0, 0, 1);
+      if (s.stGlide > .01 && k) stepSrc.offset.setTargetAtTime(v, tt, s.stGlide * sd * div * .4); else stepSrc.offset.setValueAtTime(v, tt);
+    }
+    stepSrc.start(t); srcs.push(stepSrc);
+  }
+  const shared = this.patchMods([{ node: stepSrc, dest: s.stDest, amt: s.stAmt, uni: true }], D, f).filter(m => m.src === T.stepper);
   this.patchMods(mods, D, f);
   if (!srcs.length) { const z = c.createConstantSource(); z.offset.value = 0; z.start(t); srcs.push(z); }
   return this.makeVoice(t, srcs, envs, out, () => shared.forEach(m => { try { m.src.disconnect(m.g); } catch (err) { /* gone */ } }));
 };
 // Called on every 16th by the live scheduler and by the offline renderer.
 Engine.prototype.stepTick = function (tick, time, sd) {
+  this.clockUntil = time + 4 * sd; // notes before this time follow the shared, transport-clocked stepper
   this.p.tracks.forEach((tr, i) => {
     const s = tr.synth;
     if (!s || s.engine !== 'tidal' || s.stDest === 'off' || !s.stAmt) return;
@@ -1596,6 +1632,7 @@ function scheduleStep() {
   const tick = TR.tick, song = TR.song, sd = stepDur();
   const time = TR.grid + (tick % 2 ? (P.swing / 100) * sd * .66 : 0);
   const mark = { time, grid: TR.grid, tick, song, pos: [] };
+  E.stepTick(song, time, sd); // before the notes, like the offline export: they read the stepper at this song position
   for (let i = 0; i < P.tracks.length; i++) {
     const r = RT[i], tr = P.tracks[i];
     if (r.queued && r.queued.at <= tick) {
@@ -1621,7 +1658,6 @@ function scheduleStep() {
       if (tr.type === 'drums' && UI.flashes.length < 64) UI.flashes.push({ i, p: n.p, t: time });
     }
   }
-  E.stepTick(tick, time, sd);
   if (TR.arrRec && song % 16 === 0) arrRecordBar(song / 16);
   if (TR.metro && tick % 4 === 0) E.click(time, song % 16 === 0);
   TR.marks.push(mark);
@@ -1650,7 +1686,7 @@ function stop() {
   if (!TR.playing) { TR.startBar = 0; uiTransport(); renderArrMarkers(); return; } // second stop = back to bar 1
   TR.playing = false; timerStop();
   RT.forEach(r => { r.playing = null; r.queued = null; });
-  endHeldNotes(); E.panic(); TR.marks = []; skipOnce.clear();
+  endHeldNotes(); E.panic(); E.clockUntil = 0; TR.marks = []; skipOnce.clear(); // notes played now run their own stepper
   uiTransport();
 }
 const togglePlay = () => (TR.playing ? stop() : play());
@@ -2813,7 +2849,7 @@ function polarDevice(i) {
   const d = device('POLAR VA', tr.color, headerControls(i), 'Virtual analog: oscillators 1-2 feed part A, 3-4 feed part B. Each part has its own filter and amp envelope');
   d.body.classList.add('dev-tabbed');
   const page = devTabs(i, ['Osc', 'Filter', 'Env', 'LFO'], d.body);
-  const K = (key, o) => bindKnob(s, key, o, ap);
+  const K = (key, o) => bindKnob(s, key, Object.assign({}, o, { def: POLAR_BASE[key] }), ap); // double-click resets to the engine default
   const sel = (label, key, opts, info) => selectCtl(label, opts, s[key], v => { s[key] = isNaN(+v) || v === '' ? v : +v; ap(); }, info);
   const wrap = el('div', 'dev-page'); d.body.append(wrap);
   if (page === 'Osc') {
@@ -2857,7 +2893,7 @@ function tidalDevice(i) {
   const d = device('TIDAL WT', tr.color, headerControls(i), 'Wavetable synth: each oscillator morphs between two frames with its POSITION knob. Modulate the position for talking and growling basses');
   d.body.classList.add('dev-tabbed');
   const page = devTabs(i, ['Osc', 'Filter', 'Mod', 'Stepper'], d.body);
-  const K = (key, o) => bindKnob(s, key, o, ap);
+  const K = (key, o) => bindKnob(s, key, Object.assign({}, o, { def: TIDAL_BASE[key] }), ap);
   const sel = (label, key, opts, info) => selectCtl(label, opts, s[key], v => { s[key] = isNaN(+v) || v === '' ? v : +v; ap(); }, info);
   const wrap = el('div', 'dev-page'); d.body.append(wrap);
   if (page === 'Osc') {
@@ -2913,9 +2949,11 @@ function stepperEditor(i) {
     const r = box.getBoundingClientRect(), k = clamp(Math.floor((e.clientX - r.left) / (r.width / 16)), 0, 15);
     s.stSeq[k] = Math.round(clamp(1 - (e.clientY - r.top) / r.height, 0, 1) * 20) / 20; draw();
   };
-  box.addEventListener('pointerdown', e => { box.setPointerCapture(e.pointerId); pushUndo(); drag = true; setAt(e); });
+  box.addEventListener('pointerdown', e => { if (e.button !== 0) return; box.setPointerCapture(e.pointerId); pushUndo(); drag = true; setAt(e); });
   box.addEventListener('pointermove', e => { if (drag) setAt(e); });
-  box.addEventListener('pointerup', () => { if (drag) { drag = false; save(); } });
+  const end = () => { if (drag) { drag = false; save(); } };
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(n => box.addEventListener(n, end));
+  box.addEventListener('contextmenu', e => e.preventDefault());
   draw(); g.append(box);
   return g;
 }
@@ -2973,14 +3011,16 @@ function parseMidi(buf) {
       else if (status) b = status;                // running status: reuse the last channel status
       else throw new Error(`track ${t + 1} uses running status before any status byte`);
       if (b === 0xFF) {                            // meta event
-        const type = byte(), l = vlq(), data = u8.subarray(p, Math.min(end, p + l)); p += l;
+        const type = byte(), l = vlq();
+        if (p + l > end) throw new Error(`track ${t + 1} ends in the middle of an event`);
+        const data = u8.subarray(p, p + l); p += l;
         if (type === 0x03 && !name) name = String.fromCharCode.apply(null, data.subarray(0, 64)).replace(/[^\x20-\x7e]/g, '').trim();
         else if (type === 0x51 && l === 3) { const us = (data[0] << 16) | (data[1] << 8) | data[2]; if (us > 0) tempos.push({ tick, bpm: 60e6 / us }); }
         else if (type === 0x58 && l >= 2) timesigs.push({ tick, num: data[0], den: Math.pow(2, data[1]) });
         else if (type === 0x2F) p = end;
         continue; // many writers keep using running status after a meta event
       }
-      if (b === 0xF0 || b === 0xF7) { const l = vlq(); p += l; continue; } // sysex: skip
+      if (b === 0xF0 || b === 0xF7) { const l = vlq(); if (p + l > end) throw new Error(`track ${t + 1} ends in the middle of an event`); p += l; continue; } // sysex: skip
       if (b > 0xF0) { p += b === 0xF2 ? 2 : (b === 0xF1 || b === 0xF3) ? 1 : 0; status = 0; continue; } // stray system messages
       status = b;
       const type = b & 0xF0, ch = b & 0x0F, d1 = byte() & 0x7f, d2 = (type === 0xC0 || type === 0xD0) ? 0 : byte() & 0x7f;
@@ -2988,17 +3028,21 @@ function parseMidi(buf) {
       if (type === 0x90 && d2 > 0) {
         const k = ch * 128 + d1;
         if (!open.has(k)) open.set(k, []);
-        open.get(k).push({ tick, vel: d2 });
+        const q = open.get(k);
+        if (q.length && q[q.length - 1].tick === tick) continue; // the same note written twice: one note
+        while (q.length) close(ch, d1, tick);                  // a new note-on of a sounding pitch ends it (retrigger)
+        q.push({ tick, vel: d2 });
       } else if (type === 0x80 || type === 0x90) close(ch, d1, tick);
     } } catch (err) { warnings.push(err.message + ': the notes before that point are kept'); }
-    open.forEach((q, k) => { while (q.length) close(Math.floor(k / 128), k % 128, Math.max(tick, q[0].tick + ppq / 4)); });
+    open.forEach((q, k) => { while (q.length) close(Math.floor(k / 128), k % 128, q[0].tick + ppq); }); // never closed: one beat, not the rest of the track
     p = end;
     const noteChannels = [...byCh.values()].filter(n => n.length).length;
     byCh.forEach((notes, ch) => {
       if (!notes.length) return;
       notes.sort((a, b) => a.tick - b.tick || a.pitch - b.pitch);
       const tn = name || `Track ${t + 1}`;
-      parts.push({ track: t, ch, name: noteChannels > 1 || format === 0 ? `${tn} ch${ch + 1}` : tn, notes });
+      // ownName: the track name names this part alone (not a song title shared by channels)
+      parts.push({ track: t, ch, name: noteChannels > 1 || format === 0 ? `${tn} ch${ch + 1}` : tn, ownName: noteChannels === 1 && format !== 0 && !!name, notes });
     });
   }
   if (!parts.length) throw new Error('no notes found in this file');
@@ -3017,11 +3061,11 @@ function parseMidi(buf) {
     let lo = 127, hi = 0, sum = 0;
     pt.notes.forEach(n => { lo = Math.min(lo, n.pitch); hi = Math.max(hi, n.pitch); sum += n.pitch; });
     pt.count = pt.notes.length; pt.lo = lo; pt.hi = hi; pt.avg = sum / pt.count;
-    // how many notes sound at once at most (chords need a polyphonic lane)
-    const edges = [];
-    pt.notes.forEach(n => { edges.push([n.tick, 1], [n.tick + n.dur, -1]); });
-    edges.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-    let cur = 0; pt.poly = 0; edges.forEach(e => { cur += e[1]; pt.poly = Math.max(pt.poly, cur); });
+    // chords: the most different pitches that start on the same 16th (legato overlaps are not chords)
+    const q16 = ppq / 4, starts = new Map();
+    pt.notes.forEach(n => { const k = Math.round(n.tick / q16); if (!starts.has(k)) starts.set(k, new Set()); starts.get(k).add(n.pitch); });
+    pt.poly = 0; starts.forEach(set => { pt.poly = Math.max(pt.poly, set.size); });
+    pt.chordFrac = starts.size ? [...starts.values()].filter(set => set.size > 1).length / starts.size : 0; // share of onsets that are chords
     pt.drum = pt.ch === 9;
     // off-grid share: how much of the part does not sit on 16ths (triplets, swing, live playing)
     const q = ppq / 4;
@@ -3056,10 +3100,12 @@ function autoAssign(parts) {
   order.forEach(i => {
     const pt = parts[i];
     // ch10 is the drum channel; names only count when the file has no ch10 part
-    const isDrum = pt.drum || (!hasCh10 && drumName.test(pt.name));
+    const isDrum = pt.drum || (!hasCh10 && pt.ownName && drumName.test(pt.name));
     if (isDrum) { out[i] = 0; return; } // GM drums are absolute, so every drum part can share the DRUMS kit
-    const poly = pt.poly > 1; // chords go to the polyphonic lanes (STAB, PAD)
-    out[i] = take(poly ? (pt.avg < 60 ? [5, 4] : [4, 5]) : pt.avg < 38 ? [3, 2] : pt.avg < 52 ? [2, 3] : pt.avg < 67 ? [6, 4, 5] : [6, 4, 5]);
+    // chord parts go to the polyphonic lanes (STAB, PAD); a melody with an odd harmony stays melodic (its lane turns poly on import)
+    const poly = pt.poly > 1 && pt.chordFrac >= .25;
+    // mono presets switch to poly on import when chords land on them, so chord parts can fall back to any free synth lane
+    out[i] = take(poly ? (pt.avg < 60 ? [5, 4, 6, 2, 3] : [4, 5, 6, 2, 3]) : pt.avg < 38 ? [3, 2, 6, 4, 5] : pt.avg < 52 ? [2, 3, 6, 4, 5] : [6, 4, 5, 2, 3]);
   });
   return out;
 }
@@ -3107,10 +3153,9 @@ function midiToProject(m, assign, opts) {
     notes.forEach(n => { const k = n.s * 128 + n.p, o = best.get(k); if (!o) best.set(k, n); else { stats.merged++; if (n.v > o.v) best.set(k, Object.assign(n, { l: Math.max(n.l, o.l) })); else o.l = Math.max(o.l, n.l); } });
     const clean = [...best.values()].filter(n => n.s < bars * 16);
     stats.notes += clean.length;
-    if (tr.synth && tr.synth.mono) { // a mono preset would cut chords down to one note
-      const byStart = clean.slice().sort((x, y) => x.s - y.s);
-      let end = -1;
-      for (const n of byStart) { if (n.s < end) { tr.synth.mono = false; stats.polyLanes.push(tr.name); break; } end = Math.max(end, n.s + n.l); }
+    if (tr.synth && tr.synth.mono) { // a mono preset would cut chords down to one note; legato overlaps stay mono for glide
+      const perStep = new Map(); clean.forEach(n => perStep.set(n.s, (perStep.get(n.s) || 0) + 1));
+      if ([...perStep.values()].some(c => c > 1)) { tr.synth.mono = false; stats.polyLanes.push(tr.name); }
     }
     for (let k = 0; k < nSec; k++) {
       const a = k * L, b = a + L, cn = [];
@@ -3145,6 +3190,7 @@ function openMidiDialog(m, baseName) {
     <td>${pt.drum ? '-' : esc(noteName(pt.lo) + '-' + noteName(pt.hi))}</td><td><select data-part="${i}">${laneOpts(assign[i])}</select></td></tr>`).join('');
   const offGrid = m.parts.filter(pt => pt.offGrid > .15).map(pt => pt.name);
   const warns = m.warnings.slice();
+  if (m.tempo && (m.tempo < 60 || m.tempo > 220)) warns.push(`the file tempo (${Math.round(m.tempo)} BPM) is outside 60-220: the set will use ${clamp(Math.round(m.tempo), 60, 220)} BPM`);
   if (offGrid.length) warns.push(`${offGrid.join(', ')}: notes off the 16th grid (triplets or swing) get moved to the nearest 16th`);
   const ov = el('div', 'overlay');
   ov.id = 'midi-dialog';
