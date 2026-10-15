@@ -427,7 +427,8 @@ const NUM_SCENES = 8;
 const DRUM_VOICES = {
   kick: 'Kick', kick2: 'Tight Kick', snare: 'Snare', snare2: 'Roll Snare', clap: 'Clap', chat: 'Closed Hat',
   ohat: 'Open Hat', ride: 'Ride', shaker: 'Shaker', rim: 'Rim', tom: 'Tom', crash: 'Crash',
-  riser: 'Riser', downer: 'Downlifter', impact: 'Impact', swell: 'Rev Swell', siren: 'Siren', laser: 'Laser', airhorn: 'Airhorn'
+  riser: 'Riser', downer: 'Downlifter', impact: 'Impact', swell: 'Rev Swell', siren: 'Siren', laser: 'Laser', airhorn: 'Airhorn',
+  voxa: 'Vox Ah', voxo: 'Vox Oh', voxe: 'Vox Eh', voxhey: 'Vox Hey'
 };
 const KITS = {
   drums: { name: 'DnB Kit', pads: [['KICK', 'kick', { duck: true }], ['SNARE', 'snare'], ['CLAP', 'clap', { level: .65 }], ['C-HAT', 'chat', { level: .55 }],
@@ -436,6 +437,8 @@ const KITS = {
     ['O-HAT', 'ohat', { decay: .6, level: .45 }], ['RIDE', 'ride', { tune: -2, level: .4 }], ['TOM', 'tom', { level: .7 }], ['CRASH', 'crash', { level: .45 }]] },
   fx: { name: 'Rave FX', pads: [['RISER', 'riser', { decay: 2, level: .65 }], ['DOWNER', 'downer', { level: .7 }], ['IMPACT', 'impact', { duck: true }], ['CRASH', 'crash', { level: .55 }],
     ['SWELL', 'swell', { level: .7 }], ['SIREN', 'siren', { level: .45 }], ['LASER', 'laser', { level: .45 }], ['AIRHORN', 'airhorn', { level: .55 }]] },
+  vox: { name: 'Vox Chops', pads: [['AH', 'voxa'], ['AH UP', 'voxa', { tune: 3 }], ['AH HI', 'voxa', { tune: 7 }], ['OH', 'voxo'], ['OH LO', 'voxo', { tune: -5 }],
+    ['EH', 'voxe'], ['HEY', 'voxhey', { level: .9 }], ['AAH', 'voxa', { decay: 3, tune: -2, level: .7 }]] },
 };
 const PAD_BASE = { tune: 0, decay: 1, level: .8, pan: 0, duck: false };
 function makePads(kit) { return KITS[kit].pads.map(([name, voice, o]) => Object.assign({ name, voice }, PAD_BASE, o || {})); }
@@ -453,16 +456,17 @@ const SYNTH_PRESETS = {
   'Hoover': { osc: 'sawtooth', voices: 7, detune: 42, mono: true, glide: .09, cutoff: 2600, res: 2, env: 1200, fdec: .4, a: .02, d: .5, s: .75, r: .25, lfoRate: '1/16', lfoDepth: .08, drive: .2, level: .42 },
   'Warm Pad': { osc: 'sawtooth', voices: 5, detune: 16, cutoff: 850, res: 1.2, env: 400, fdec: 1.2, a: .6, d: 1, s: .85, r: 1.4, lfoRate: '1/1', lfoDepth: .15, level: .32 },
   'Pluck': { osc: 'square', voices: 2, detune: 7, cutoff: 550, res: 6, env: 4200, fdec: .15, a: .001, d: .25, s: 0, r: .25, level: .45 },
+  'Jump Up': { osc: 'square', voices: 2, detune: 9, mono: true, glide: .04, cutoff: 700, res: 9, env: 3000, fdec: .12, a: .002, d: .25, s: .55, r: .06, drive: .6, level: .6 },
   'Liquid Keys': { osc: 'triangle', voices: 2, detune: 5, cutoff: 2400, res: 1, env: 1800, fdec: .45, a: .002, d: 1.2, s: .25, r: .6, level: .5 },
 };
 function makeSynth(name) { return Object.assign({}, SYNTH_BASE, SYNTH_PRESETS[name] || {}, { preset: name }); }
 
-const FX_BASE = { ftype: 'lowpass', freq: 20000, res: .7, sat: 0, sc: 0, scRel: .12 };
+const FX_BASE = { ftype: 'lowpass', freq: 20000, res: .7, sat: 0, comp: 0, sc: 0, scRel: .12 };
 const MIX_BASE = { vol: .75, pan: 0, sendA: 0, sendB: 0, mute: false, solo: false };
 // The eight lanes. Types are fixed per lane, everything else is editable.
 const TRACK_DEFS = [
-  { name: 'DRUMS', type: 'drums', kit: 'drums', color: '#ff94a6', mix: { vol: .8 } },
-  { name: 'BREAK', type: 'drums', kit: 'breaks', color: '#ffa529', mix: { vol: .72 } },
+  { name: 'DRUMS', type: 'drums', kit: 'drums', color: '#ff94a6', fx: { comp: .6, sat: .15 }, mix: { vol: .78 } },
+  { name: 'BREAK', type: 'drums', kit: 'breaks', color: '#ffa529', fx: { comp: .45 }, mix: { vol: .72 } },
   { name: 'REESE', type: 'synth', role: 'bass', preset: 'Reese Classic', color: '#b19cff', kbOct: 2, fx: { sc: .55 }, mix: { vol: .74 } },
   { name: 'SUB', type: 'synth', role: 'sub', preset: 'Sub Sine', color: '#6e9bff', kbOct: 1, fx: { sc: .65 }, mix: { vol: .78 } },
   { name: 'STAB', type: 'synth', role: 'stab', preset: 'Rave Stab', color: '#f2e27a', kbOct: 3, mix: { vol: .66, sendA: .25, sendB: .3 } },
@@ -596,7 +600,8 @@ const GENRES = {
     stab: [[8, ['F3', 'Ab3', 'C4'], 2], [24, ['Db3', 'F3', 'Ab3'], 2]],
   },
 };
-const TEMPLATE_IDS = ['chase', 'neuro', 'jungle', 'liquid', 'halftime'];
+GENRES.rave = { name: 'Baddadan-Style Rave', bpm: 174, build: buildRave };
+const TEMPLATE_IDS = ['rave', 'chase', 'neuro', 'jungle', 'liquid', 'halftime'];
 
 function lane(P, name) { return P.tracks[TRACK_DEFS.findIndex(d => d.name === name)]; }
 // Lay a scene into the arrangement: each clip repeats to fill `bars`.
@@ -607,8 +612,9 @@ function arrScene(P, sc, start, bars) {
   });
 }
 function buildTemplate(id) {
+  const g = GENRES[id]; if (!g) return makeProject();
+  if (g.build) return g.build();
   const P = makeProject();
-  const g = GENRES[id]; if (!g) return P;
   P.name = g.name.toUpperCase(); P.bpm = g.bpm; P.swing = g.swing || 0;
   lane(P, 'REESE').synth = makeSynth(g.reese);
   if (g.lead) lane(P, 'LEAD').synth = makeSynth(g.lead);
@@ -654,6 +660,92 @@ function buildTemplate(id) {
 
   let bar = 0;
   [[0, 8], [1, 4], [2, 16], [4, 8], [1, 4], [3, 16], [5, 8]].forEach(([sc, len]) => { arrScene(P, sc, bar, len); bar += len; });
+  P.arr.len = Math.max(64, bar);
+  return P;
+}
+
+// An original track in the style of Chase & Status' 2023 rave / jump-up sound:
+// 174 BPM, rolling 2-step drums, a bouncing jump-up bass, rave stabs, hoover,
+// synthesized vocal chants and space for MCs. No melody or vocal is copied.
+const VK = { AH: 0, AHU: 1, AHH: 2, OH: 3, OHL: 4, EH: 5, HEY: 6, AAH: 7 }; // VOX lane pads
+function buildRave() {
+  const P = makeProject();
+  P.name = 'BADDADAN-STYLE RAVE'; P.bpm = 174;
+  const vox = lane(P, 'BREAK');
+  vox.name = 'VOX'; vox.kit = 'vox'; vox.pads = makePads('vox');
+  Object.assign(vox.mix, { vol: .7, sendA: .3, sendB: .3 });
+  vox.fx.comp = .3;
+  const bass = lane(P, 'REESE');
+  bass.name = 'BASS'; bass.synth = makeSynth('Jump Up'); bass.fx.sc = .5;
+  lane(P, 'LEAD').synth = makeSynth('Hoover');
+  ['INTRO', 'BUILD', 'DROP A', 'MC VERSE', 'DROP B', 'BREAKDOWN', 'OUTRO', 'SCENE 8'].forEach((n, i) => P.scenes[i].name = n);
+  const put = (name, sc, clip) => { lane(P, name).clips[sc] = clip; };
+  const Fm = ['F3', 'Ab3', 'C4'], Db = ['Db3', 'F3', 'Ab3'], Eb = ['Eb3', 'G3', 'Bb3'], Cm = ['C3', 'Eb3', 'G3'];
+  const prog = [[0, Fm, 16], [16, Db, 16], [32, Eb, 16], [48, Cm, 16]];
+  const roots = [[0, 'F1', 16], [16, 'Db1', 16], [32, 'Eb1', 16], [48, 'C1', 16]];
+  // jump-up bass: short notes, octave hops, glide between them
+  const jump = [[0, 'F2', 2], [3, 'F3', 1], [4, 'F2', 2], [6, 'Ab2', 2], [8, 'F2', 1], [10, 'C3', 2], [12, 'Bb2', 2], [14, 'Ab2', 2],
+    [16, 'F2', 2], [19, 'F3', 1], [20, 'F2', 2], [22, 'Eb3', 2], [24, 'Db3', 3], [27, 'C3', 2], [30, 'Ab2', 2]];
+  const jumpB = [[0, 'F2', 1], [2, 'F2', 1], [3, 'F3', 1], [4, 'F2', 2], [7, 'C3', 1], [8, 'Ab2', 2], [10, 'F3', 1], [11, 'Eb3', 1], [12, 'C3', 2], [14, 'Bb2', 2],
+    [16, 'Db2', 2], [19, 'Db3', 1], [20, 'Db2', 2], [22, 'Eb3', 2], [24, 'Eb2', 2], [26, 'G2', 2], [28, 'C3', 2], [30, 'C2', 2]];
+  const sub = [[0, 'F1', 8], [8, 'F1', 6], [16, 'Db1', 8], [24, 'Eb1', 4], [28, 'C1', 4]];
+  const hoover = [[0, 'C5', 3], [3, 'Ab4', 3], [6, 'F4', 2], [8, 'G4', 4], [12, 'Ab4', 4], [16, 'C5', 3], [19, 'Eb5', 3], [22, 'Db5', 2], [24, 'C5', 6], [30, 'Bb4', 2]];
+
+  // 0 INTRO
+  put('DRUMS', 0, clipOf('INTRO TOPS', 2, dp(DK, { CH: '..x...x...x...x.|..x...x...x.x.x.', SH: 'o.o.o.o.o.o.o.o.|o.o.o.o.o.o.o.o.', RM: '..........x.....|......x...x.....' })));
+  put('BREAK', 0, clipOf('CHANT', 2, dp(VK, { AH: 'x...x...........|x...x.......x...', OH: '........x.......|........x.......', HEY: '..............X.|................' })));
+  put('PAD', 0, clipOf('ATMOS', 4, chords(prog, 80)));
+  put('FX', 0, clipOf('INTRO FX', 8, dp(FK, { CRASH: 'x', SWELL: at(112) })));
+  // 1 BUILD: everything speeds up for 4 bars
+  put('DRUMS', 1, clipOf('BUILD ROLL', 4, dp(DK, {
+    K: 'x...x...x...x...|x...x...x...x...|x...x...x...x...|x...x...x.x.x.x.',
+    S: '....o.......o...|....x.......x...|x...x...x...x...|x.x.x.x.xxxxXXXX',
+    CH: '..x...x...x...x.|..x...x...x...x.|..x...x...x...x.|..x...x.........' })));
+  put('BREAK', 1, clipOf('CHANT ROLL', 4, dp(VK, {
+    AH: 'x.......x.......|x...x...x...x...|................|................',
+    AHU: '................|................|x.x.x.x.........|................',
+    AHH: '................|................|........x.x.x.x.|xxxxxxxxxxxx....', HEY: at(60, 'X') })));
+  put('PAD', 1, clipOf('ATMOS', 4, chords(prog, 80)));
+  put('FX', 1, clipOf('RISER', 4, dp(FK, { RISER: 'x', LASER: at(56) + '.x.x.x' })));
+  // 2 DROP A
+  put('DRUMS', 2, clipOf('DROP', 2, dp(DK, {
+    K: 'x.........x.....|x.........x..x..', S: '....X..o....X..o|....X..o....X.o.', C: '....x.......x...|....x.......x...',
+    CH: 'x.xox.x.x.xox.xo|x.xox.x.x.xox.x.', OH: '......x.......x.|......x.........', SH: 'oooooooooooooooo|oooooooooooooooo' })));
+  put('BREAK', 2, clipOf('DROP VOX', 4, dp(VK, { HEY: 'X', AH: at(30) + '..|' + at(14) + '.x', OH: at(46) + 'x' })));
+  put('REESE', 2, clipOf('JUMP UP', 2, ml(jump)));
+  put('SUB', 2, clipOf('SUB', 2, ml(sub)));
+  put('STAB', 2, clipOf('STABS', 2, chords([[2, Fm, 1], [6, Fm, 1], [18, Db, 1], [22, Eb, 1]], 105)));
+  put('FX', 2, clipOf('IMPACT', 8, dp(FK, { IMPACT: 'x', CRASH: 'x', HORN: 'x..x..x' })));
+  // 3 MC VERSE: stripped back, room for vocals
+  put('DRUMS', 3, clipOf('MC BEAT', 2, dp(DK, { K: 'x.........x.....|x.........x.....', S: '....x.......x...|....x.......x...', CH: '..x...x...x...x.|..x...x...x...x.', RM: '...........x....|...........x..x.' })));
+  put('REESE', 3, clipOf('VERSE BASS', 2, ml([[0, 'F2', 1], [10, 'F2', 1], [16, 'Db2', 1], [26, 'Eb2', 1]])));
+  put('SUB', 3, clipOf('VERSE SUB', 4, ml(roots, 0, 75)));
+  put('STAB', 3, clipOf('VERSE STABS', 4, chords([[0, Fm, 1], [16, Db, 1], [32, Eb, 1], [48, Cm, 1]], 95)));
+  // 4 DROP B: busier drums, second bass riff, hoover on top
+  put('DRUMS', 4, clipOf('DROP B', 2, dp(DK, {
+    K: 'x.........x.....|x.........xx....', S: '....X..o.o..X..o|....X..o....X.oo', C: '....x.......x...|....x.......x...',
+    CH: '..x...x...x...x.|..x...x...x...x.', RD: 'x.x.x.x.x.x.x.x.|x.x.x.x.x.x.x.x.', OH: '......x.........|......x.......x.' })));
+  put('BREAK', 4, clipOf('HEY HEY', 2, dp(VK, { HEY: 'X.......X.......|X...........X...', OHL: at(28) + 'x' })));
+  put('REESE', 4, clipOf('JUMP UP B', 2, ml(jumpB)));
+  put('SUB', 4, clipOf('SUB B', 2, ml(sub)));
+  put('STAB', 4, clipOf('STABS B', 2, chords([[2, Fm, 1], [6, Fm, 1], [10, Fm, 1], [18, Db, 1], [22, Eb, 1], [26, Eb, 1]], 105)));
+  put('LEAD', 4, clipOf('HOOVER', 2, ml(hoover, 0, 95)));
+  put('FX', 4, clipOf('IMPACT', 8, dp(FK, { IMPACT: 'x', CRASH: 'x', SIREN: at(64) })));
+  // 5 BREAKDOWN
+  put('DRUMS', 5, clipOf('HALFTIME', 2, dp(DK, { K: 'x.........x.....|x.........x.....', S: '........x.......|........x.....o.', CH: 'x...x...x...x...|x...x...x...x.x.' })));
+  put('BREAK', 5, clipOf('AAH', 4, dp(VK, { AAH: 'x...............|x...............|x...............|x.......x.......' })));
+  put('PAD', 5, clipOf('ATMOS', 4, chords(prog, 85)));
+  put('SUB', 5, clipOf('ROOTS', 4, ml(roots)));
+  put('LEAD', 5, clipOf('HOOVER SLOW', 4, ml([[0, 'C5', 12], [16, 'Ab4', 12], [32, 'Bb4', 12], [48, 'G4', 16]], 0, 85)));
+  put('FX', 5, clipOf('SWELL', 8, dp(FK, { DOWNER: 'x', SWELL: at(112) })));
+  // 6 OUTRO
+  put('DRUMS', 6, clipOf('OUTRO', 2, dp(DK, { K: 'x.........x.....|x.........x.....', S: '....x.......x...|....x.......x...', CH: '..x...x...x...x.|..x...x...x...x.' })));
+  put('PAD', 6, clipOf('ATMOS', 4, chords(prog, 75)));
+  put('BREAK', 6, clipOf('CHANT', 2, dp(VK, { AH: 'x...x...........|x...x.......x...', OH: '........x.......|........x.......' })));
+  put('FX', 6, clipOf('CRASH', 8, dp(FK, { CRASH: 'x' })));
+
+  let bar = 0;
+  [[0, 8], [1, 4], [2, 16], [3, 16], [1, 4], [4, 16], [5, 8], [1, 4], [2, 16], [6, 8]].forEach(([sc, len]) => { arrScene(P, sc, bar, len); bar += len; });
   P.arr.len = Math.max(64, bar);
   return P;
 }
@@ -761,15 +853,18 @@ const getCrushURL = () => crushURL || (crushURL = URL.createObjectURL(new Blob([
 
 // Synthesized drum voices: (engine, out, time, velocity 0..1, pad, pitch ratio, decay mult) -> duration (s)
 const DRUM_FN = {
+  // Punchy DnB kick: fast pitch drop, short hold, warm soft clip, click on top
   kick(E, out, t, v, p, r, d) {
     const c = E.ctx, o = c.createOscillator(); o.type = 'sine';
-    o.frequency.setValueAtTime(190 * r, t); o.frequency.exponentialRampToValueAtTime(52 * r, t + .06); o.frequency.exponentialRampToValueAtTime(42 * r, t + .35 * d);
-    const sh = c.createWaveShaper(); sh.curve = E.curve(.3);
-    const g = E.gain(0); g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(v, t + .003); g.gain.setTargetAtTime(.0001, t + .05, .09 * d);
-    o.connect(sh); sh.connect(g); g.connect(out); o.start(t); o.stop(t + .7 * d + .1);
-    const n = E.noise(t, .02), hp = E.filt('highpass', 2500), cg = E.gain(0); E.perc(cg.gain, t, v * .35, .012);
-    n.connect(hp); hp.connect(cg); cg.connect(out);
-    return .7 * d;
+    o.frequency.setValueAtTime(230 * r, t); o.frequency.exponentialRampToValueAtTime(62 * r, t + .035); o.frequency.exponentialRampToValueAtTime(46 * r, t + .3 * d);
+    const pre = E.gain(.6), sh = c.createWaveShaper(); sh.curve = E.curve(.15);
+    const g = E.gain(0); g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(v, t + .002); g.gain.setValueAtTime(v, t + .03); g.gain.setTargetAtTime(.0001, t + .03, .1 * d);
+    o.connect(pre); pre.connect(sh); sh.connect(g); g.connect(out); o.start(t); o.stop(t + .8 * d + .1);
+    const ck = E.osc('square', 1400 * r, t, .012); ck.frequency.exponentialRampToValueAtTime(300 * r, t + .01);
+    const cg = E.gain(0); E.perc(cg.gain, t, v * .22, .008); ck.connect(cg); cg.connect(out);
+    const n = E.noise(t, .02), bp = E.filt('bandpass', 4500, .8), ng = E.gain(0); E.perc(ng.gain, t, v * .3, .01);
+    n.connect(bp); bp.connect(ng); ng.connect(out);
+    return .8 * d;
   },
   kick2(E, out, t, v, p, r, d) {
     const o = E.osc('sine', 240 * r, t, .4 * d); o.frequency.exponentialRampToValueAtTime(60 * r, t + .04); o.frequency.exponentialRampToValueAtTime(50 * r, t + .2 * d);
@@ -779,11 +874,20 @@ const DRUM_FN = {
     n.connect(hp); hp.connect(cg); cg.connect(out);
     return .4 * d;
   },
+  // Big layered snare: two-tone body, mid crack, top sizzle and a short gated room, all lightly saturated
   snare(E, out, t, v, p, r, d) {
-    const o = E.osc('triangle', 220 * r, t, .2 * d); o.frequency.exponentialRampToValueAtTime(140 * r, t + .07);
-    const og = E.gain(0); E.perc(og.gain, t, v * .7, .1 * d); o.connect(og); og.connect(out);
-    const n = E.noise(t, .3 * d), hp = E.filt('highpass', 1400 * r), ng = E.gain(0); E.perc(ng.gain, t, v * .9, .17 * d);
-    n.connect(hp); hp.connect(ng); ng.connect(out);
+    const bus = E.gain(1), sh = E.ctx.createWaveShaper(); sh.curve = E.curve(.12); bus.connect(sh); sh.connect(out);
+    [[185, 1], [330, .5]].forEach(([f, a]) => {
+      const o = E.osc('triangle', f * 1.5 * r, t, .2 * d); o.frequency.exponentialRampToValueAtTime(f * r, t + .025);
+      const g = E.gain(0); E.perc(g.gain, t, v * .55 * a, .11 * d); o.connect(g); g.connect(bus);
+    });
+    const n = E.noise(t, .35 * d), hp = E.filt('highpass', 800 * r), bp = E.filt('bandpass', 2400 * r, .7), cg = E.gain(0);
+    E.perc(cg.gain, t, v * 1.1, .13 * d); n.connect(hp); hp.connect(bp); bp.connect(cg); cg.connect(bus);
+    const n2 = E.noise(t, .3 * d), hp2 = E.filt('highpass', 6500), sg = E.gain(0);
+    E.perc(sg.gain, t, v * .45, .17 * d); n2.connect(hp2); hp2.connect(sg); sg.connect(bus);
+    const n3 = E.noise(t, .3 * d), bp3 = E.filt('bandpass', 1700 * r, .5), rg = E.gain(0), tl = .16 * d;
+    rg.gain.setValueAtTime(.0001, t); rg.gain.linearRampToValueAtTime(v * .28, t + .012); rg.gain.setValueAtTime(v * .22, t + tl); rg.gain.linearRampToValueAtTime(.0001, t + tl + .02);
+    n3.connect(bp3); bp3.connect(rg); rg.connect(bus);
     return .3 * d;
   },
   snare2(E, out, t, v, p, r, d) {
@@ -795,16 +899,16 @@ const DRUM_FN = {
     return .18 * d;
   },
   clap(E, out, t, v, p, r, d) {
-    const n = E.noise(t, .35 * d), bp = E.filt('bandpass', 1300 * r, 1.4), g = E.gain(0), G = g.gain;
+    const n = E.noise(t, .35 * d), bp = E.filt('bandpass', 1500 * r, 1.1), hp = E.filt('highpass', 700), g = E.gain(0), G = g.gain;
     G.setValueAtTime(.0001, t);
     for (let k = 0; k < 3; k++) { const tk = t + k * .011; G.setValueAtTime(v, tk); G.exponentialRampToValueAtTime(v * .2, tk + .009); }
     const tt = t + .033; G.setValueAtTime(v * .85, tt); G.exponentialRampToValueAtTime(.0001, tt + .2 * d);
-    n.connect(bp); bp.connect(g); g.connect(out);
+    n.connect(hp); hp.connect(bp); bp.connect(g); g.connect(out);
     return .25 * d;
   },
   chat(E, out, t, v, p, r, d) {
-    const n = E.noise(t, .08 * d + .02), hp = E.filt('highpass', 7000 * r), bp = E.filt('bandpass', 10500 * r, .9), g = E.gain(0);
-    E.perc(g.gain, t, v * .9, .045 * d); n.connect(hp); hp.connect(bp); bp.connect(g); g.connect(out);
+    const n = E.noise(t, .06 * d + .02), hp = E.filt('highpass', 8000 * r), bp = E.filt('bandpass', 11000 * r, .7), g = E.gain(0);
+    E.perc(g.gain, t, v * .95, .035 * d); n.connect(hp); hp.connect(bp); bp.connect(g); g.connect(out);
     return .08 * d;
   },
   ohat(E, out, t, v, p, r, d) {
@@ -890,6 +994,16 @@ const DRUM_FN = {
     lp.connect(sh); sh.connect(g); g.connect(out);
     return len;
   },
+  voxa(E, out, t, v, p, r, d) { return E.vox(out, t, v, r, d, 'a'); },
+  voxo(E, out, t, v, p, r, d) { return E.vox(out, t, v, r, d, 'o'); },
+  voxe(E, out, t, v, p, r, d) { return E.vox(out, t, v, r, d, 'e'); },
+  voxhey(E, out, t, v, p, r, d) { return E.vox(out, t, v, r, d, 'e', true); },
+};
+// Formants (Hz, gain, Q) for the synthesized vocal chops
+const VOWELS = {
+  a: [[800, 1, 10], [1150, .5, 13], [2900, .25, 24]],
+  o: [[450, 1, 8], [800, .35, 10], [2830, .12, 22]],
+  e: [[550, 1, 8], [1770, .45, 16], [2490, .25, 20]],
 };
 
 class Engine {
@@ -925,10 +1039,11 @@ class Engine {
     M.crush = crusher; M.crushNode = crusher || c.createGain();
     M.drive = c.createWaveShaper(); M.drive.oversample = '2x';
     M.out = c.createGain();
-    M.lim = c.createDynamicsCompressor(); M.lim.threshold.value = -1.5; M.lim.knee.value = 0; M.lim.ratio.value = 20; M.lim.attack.value = .002; M.lim.release.value = .08;
+    M.lim = c.createDynamicsCompressor(); M.lim.threshold.value = -3; M.lim.knee.value = 0; M.lim.ratio.value = 20; M.lim.attack.value = .001; M.lim.release.value = .06;
+    M.trim = c.createGain(); M.trim.gain.value = .88; // the limiter is not a brickwall: leave headroom for its overshoot
     M.an = c.createAnalyser(); M.an.fftSize = 1024;
     M.bus.connect(M.lp); M.lp.connect(M.hp); M.hp.connect(M.glue); M.glue.connect(M.crushNode); M.crushNode.connect(M.drive);
-    M.drive.connect(M.out); M.out.connect(M.lim); M.lim.connect(M.an); M.an.connect(c.destination);
+    M.drive.connect(M.out); M.out.connect(M.lim); M.lim.connect(M.trim); M.trim.connect(M.an); M.an.connect(c.destination);
     // return A: reverb
     const R = this.r = {};
     R.in = c.createGain(); R.hp = this.filt('highpass', 280); R.conv = c.createConvolver(); R.out = c.createGain();
@@ -948,11 +1063,12 @@ class Engine {
     const c = this.ctx, T = {};
     T.in = c.createGain(); T.filt = c.createBiquadFilter();
     T.sat = c.createWaveShaper(); T.sat.oversample = '2x';
+    T.comp = c.createDynamicsCompressor(); T.comp.knee.value = 4; T.comp.attack.value = .006; T.comp.release.value = .09; T.makeup = c.createGain();
     T.duck = c.createGain(); T.mute = c.createGain(); T.vol = c.createGain();
     T.pan = c.createStereoPanner ? c.createStereoPanner() : c.createGain();
     T.an = c.createAnalyser(); T.an.fftSize = 256;
     T.sA = c.createGain(); T.sB = c.createGain();
-    T.in.connect(T.filt); T.filt.connect(T.sat); T.sat.connect(T.duck); T.duck.connect(T.mute); T.mute.connect(T.vol); T.vol.connect(T.pan);
+    T.in.connect(T.filt); T.filt.connect(T.sat); T.sat.connect(T.comp); T.comp.connect(T.makeup); T.makeup.connect(T.duck); T.duck.connect(T.mute); T.mute.connect(T.vol); T.vol.connect(T.pan);
     T.pan.connect(this.m.bus); T.pan.connect(T.an); T.pan.connect(T.sA); T.pan.connect(T.sB);
     T.sA.connect(this.r.in); T.sB.connect(this.d.in);
     // one free-running LFO per track, patched into each voice's filter cutoff
@@ -967,6 +1083,9 @@ class Engine {
     T.filt.frequency.setTargetAtTime(clamp(fx.freq, 20, 20000), now, .015);
     T.filt.Q.setTargetAtTime(fx.res, now, .015);
     T.sat.curve = fx.sat > .005 ? this.curve(fx.sat) : null;
+    const pc = fx.comp || 0; // 'punch': harder and louder as it goes up, transparent at 0
+    T.comp.threshold.setTargetAtTime(-6 - 24 * pc, now, .02); T.comp.ratio.setTargetAtTime(1 + 9 * pc, now, .02);
+    T.makeup.gain.setTargetAtTime(1 + 1.3 * pc, now, .02);
     T.vol.gain.setTargetAtTime(faderGain(tr.mix.vol), now, .015);
     if (T.pan.pan) T.pan.pan.setTargetAtTime(tr.mix.pan, now, .015);
     T.sA.gain.setTargetAtTime(tr.mix.sendA, now, .015);
@@ -1048,6 +1167,26 @@ class Engine {
     mix.connect(bp); bp.connect(hp); hp.connect(g); g.connect(out);
     if (noiseAmt) { const n = this.noise(t, dur), ng = this.gain(0); this.perc(ng.gain, t, v * noiseAmt, dur * .7); n.connect(ng); ng.connect(hp); }
     return dur;
+  }
+  // Vocal chop: a buzzy source through three formant band-passes, shaped like one sung syllable.
+  // shout = breathy 'h' attack and a rising pitch (a 'hey!')
+  vox(out, t, v, r, d, vowel, shout) {
+    const len = .17 * d + (shout ? .05 : 0), f = 150 * r, src = this.gain(1);
+    ['sawtooth', 'square'].forEach((type, k) => {
+      const o = this.osc(type, f, t, len + .05);
+      o.frequency.setValueAtTime(f * (shout ? .88 : 1.04), t);
+      o.frequency.exponentialRampToValueAtTime(f * (shout ? 1.12 : 1), t + (shout ? .08 : .03));
+      o.frequency.exponentialRampToValueAtTime(f * (shout ? 1.05 : .94), t + len);
+      if (k) o.detune.value = 6;
+      o.connect(src);
+    });
+    const g = this.gain(0);
+    g.gain.setValueAtTime(.0001, t); g.gain.linearRampToValueAtTime(v * .9, t + .012);
+    g.gain.setValueAtTime(v * .8, t + len * .7); g.gain.linearRampToValueAtTime(.0001, t + len);
+    VOWELS[vowel].forEach(([F, a, q]) => { const b = this.filt('bandpass', F, q), bg = this.gain(a * 3); src.connect(b); b.connect(bg); bg.connect(g); });
+    if (shout) { const n = this.noise(t, .06), bp = this.filt('bandpass', 1500, 1), ng = this.gain(0); this.perc(ng.gain, t, v * .5, .05, .005); n.connect(bp); bp.connect(ng); ng.connect(g); }
+    g.connect(out);
+    return len;
   }
   // ---------- instruments ----------
   drumHit(i, padIdx, vel, t) {
@@ -2227,7 +2366,7 @@ function renderDeviceDetail(body) {
   const i = UI.sel.t;
   if (i < 0) { masterDevices(ch); return; }
   const tr = P.tracks[i];
-  ch.append(tr.type === 'drums' ? drumDevice(i) : synthDevice(i), filterDevice(i), satDevice(i), sidechainDevice(i));
+  ch.append(tr.type === 'drums' ? drumDevice(i) : synthDevice(i), filterDevice(i), satDevice(i), compDevice(i), sidechainDevice(i));
 }
 function synthDevice(i) {
   const tr = P.tracks[i], s = tr.synth, ap = () => E && E.applyTrack(i), c = tr.color;
@@ -2311,6 +2450,12 @@ function satDevice(i) {
   const fx = P.tracks[i].fx;
   const d = device('SATURATOR', '#ff8a1f', null, 'Soft-clip distortion on the whole track');
   d.body.append(kgroup('', [bindKnob(fx, 'sat', { label: 'DRIVE', min: 0, max: 1, def: 0, fmt: fPct, color: '#ff8a1f' }, () => E && E.applyTrack(i))]));
+  return d.el;
+}
+function compDevice(i) {
+  const fx = P.tracks[i].fx;
+  const d = device('COMPRESSOR', '#ffa64d', null, 'Track compressor. PUNCH squashes and lifts the track: the tight, loud drum sound');
+  d.body.append(kgroup('', [bindKnob(fx, 'comp', { label: 'PUNCH', min: 0, max: 1, def: 0, fmt: fPct }, () => E && E.applyTrack(i))]));
   return d.el;
 }
 function sidechainDevice(i) {
@@ -2451,7 +2596,7 @@ function toggleCapture() {
   if (!E) return;
   if (capture) { capture.stop(); return; }
   if (!window.MediaRecorder) return flash('Live capture is not supported in this browser. Use EXPORT WAV instead');
-  if (!E.recDest) { E.recDest = ctx.createMediaStreamDestination(); E.m.lim.connect(E.recDest); }
+  if (!E.recDest) { E.recDest = ctx.createMediaStreamDestination(); E.m.trim.connect(E.recDest); }
   const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg', 'audio/mp4'].find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
   const chunks = [], rec = new MediaRecorder(E.recDest.stream, type ? { mimeType: type } : undefined);
   rec.ondataavailable = ev => { if (ev.data.size) chunks.push(ev.data); };
