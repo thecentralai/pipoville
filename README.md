@@ -67,6 +67,7 @@ screen (character names stay the same in both).
 | `sw.js` | Offline cache |
 | `manifest.webmanifest`, `icon.svg`, `apple-touch-icon.png` | PWA install |
 | `DESIGN.md` | Architecture & experimentation guide |
+| `drum/` | DNB-808 Live, a separate drum & bass DAW served at `/drum` |
 
 See `DESIGN.md` for the engine map, level mask language, sprite pipeline,
 tuning knobs, and test hooks.
