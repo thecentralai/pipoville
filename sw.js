@@ -16,8 +16,6 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
-  // /drum is the DNB-808 Live DAW, a separate app: never cache or serve it from here
-  if (new URL(e.request.url).pathname.startsWith('/drum')) return;
   e.respondWith(
     caches.match(e.request, { ignoreSearch: true }).then(hit =>
       hit ||
