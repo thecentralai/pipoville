@@ -47,8 +47,9 @@ A static server works too, for example `npx serve .`
 
 **Devices**
 - Drum Rack: 8 synthesized pads per kit, with tune, decay, level, pan,
-  open hat choke and sidechain trigger. Five kits: DnB Kit, Pro DnB Kit,
-  Break Kit, Rave FX and Vox Chops
+  open hat choke and sidechain trigger. Seven kits: DnB Kit, Pro DnB Kit,
+  Break Kit, Rave FX, Vox Chops, Jungle Breaks and Acoustic Kit (the last two
+  play CC0 samples)
 - **Pro DnB Kit**: eight new voices for a modern two-step.
   - KICK: a fast pitch drop for the punch, then a clean sub tail on Ab1.
   - SNARE: a tonal body on Ab3, wires, a clap layer and a short gated room.

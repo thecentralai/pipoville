@@ -553,7 +553,7 @@ details.br-sec[open] summary .br-title::after { content: "\2013"; }
 /* =====================================================================
    DNB-808 LIVE
    A small Ableton-style session DAW for drum & bass. One file, Web Audio
-   only, every sound is synthesized (no samples).
+   only. Most sounds are synthesized; the sampled kits use CC0 samples.
 
    Sections:
      1. utils + constants          5. UI: top bar, browser, session, mixer
@@ -733,7 +733,7 @@ function makeSynth(name) {
   return Object.assign(clone(ENGINE_BASE[eng]), clone(pr), { preset: name, engine: eng });
 }
 
-const FX_BASE = { ftype: 'lowpass', freq: 20000, res: .7, sat: 0, chorus: 0, comp: 0, sc: 0, scRel: .12 };
+const FX_BASE = { ftype: 'lowpass', freq: 20000, res: .7, sat: 0, chorus: 0, comp: 0, sc: 0, scRel: .12, scHold: .03 };
 const MIX_BASE = { vol: .75, pan: 0, sendA: 0, sendB: 0, mute: false, solo: false };
 // The eight lanes. Types are fixed per lane, everything else is editable.
 const TRACK_DEFS = [
@@ -808,6 +808,7 @@ function normalizeProject(p) {
     const baseSynth = base.synth; // kept before the merge below can overwrite it
     // a loaded track keeps its own sound: new defaults such as the STAB/PAD chorus only reach new sets
     const fx = Object.assign(base.fx, src.fx && typeof src.fx === 'object' ? Object.assign({ chorus: 0 }, src.fx) : {});
+    fx.scHold = clamp(+fx.scHold || .03, .01, .3); // sidechain hold: 30 ms for every set made before it existed
     const t = Object.assign(base, src, { type: def.type, color: def.color, fx, mix: Object.assign(base.mix, src.mix) });
     if (def.type === 'drums') {
       t.pads = base.pads.map((bp, k) => Object.assign({}, bp, src.pads && src.pads[k]));
@@ -862,7 +863,7 @@ function arrScene(P, sc, start, bars) {
 }
 function buildTemplate(id) { const g = GENRES[id]; return g ? g.build() : makeProject(); }
 
-const VK = { HEY: 6, AAH: 7 }; // the masterclass FX lane's vocal-chop pads
+const VK = { AH: 0, AHU: 1, AHH: 2, OH: 3, OHL: 4, EH: 5, HEY: 6, AAH: 7 }; // Vox Chops pads (the masterclass FX lane uses HEY and AAH)
 // ---------- Pro DnB Kit grooves (row keys are PK pads; one 16-character block per bar) ----------
 const DRUM_GROOVES = {
   // DROP A: the main two-step. Ghost snares on steps 8, 10 and 16 (1-based) between the backbeats, and hats with a
@@ -1036,12 +1037,14 @@ function raveSounds(P) {
   Object.assign(P.ret, { revSize: 1.8, revLevel: .55, delTime: '3/16', delFb: .38, delTone: 3200, delLevel: .7 });
   // no clipper on the master (DRIVE 0) and a light glue: the crest factor stays near that of a released DnB mix
   Object.assign(P.master, { vol: .71, filter: 0, glue: -3, drive: 0, bits: 8, down: 1, crush: 0 });
+  P.tracks.forEach(t => { if (t.fx.sc > 0) t.fx.scHold = .08; }); // the kick owns its first 80 ms
 }
 // The BREAK lane's kit: the Jungle Breaks chops, or stand-ins from the Pro DnB Kit voices in a build without samples.
 // The stand-ins follow the usual eighth-note map of a break: kick, hat, snare, kick, kick, ghost, snare, snare
-const raveBreakKit = () => (KITS.jungle ? 'jungle' : 'pro');
+const samplerOn = () => typeof smpHit === 'function' && typeof SAMPLE_BANK === 'object'; // a build without the sampler falls back to synth pads
+const raveBreakKit = () => (samplerOn() ? 'jungle' : 'pro');
 function raveBreakPads() {
-  if (KITS.jungle) return makePads('jungle').map(pd => Object.assign(pd, { level: .7 }));
+  if (samplerOn()) return makePads('jungle').map(pd => Object.assign(pd, { level: .7 }));
   const pro = makePads('pro');
   return [[PK.K, .45], [PK.CH, .45], [PK.S, .6], [PK.K, .3], [PK.K, .4], [PK.G, .7], [PK.S, .6], [PK.S, .4]]
     .map(([k, level], i) => Object.assign({}, pro[k], { name: 'CHOP ' + (i + 1), level, pan: 0, duck: false }));
@@ -1852,6 +1855,7 @@ class Engine {
   buildTrack() {
     const c = this.ctx, T = {};
     T.in = c.createGain(); T.filt = c.createBiquadFilter();
+    const hold = c.createConstantSource(); hold.offset.value = 0; hold.connect(T.in); hold.start(); // keeps the track input live, so renders repeat exactly
     T.sat = c.createWaveShaper(); T.sat.oversample = '2x';
     T.comp = c.createDynamicsCompressor(); T.comp.knee.value = 4; T.comp.attack.value = .006; T.comp.release.value = .09; T.makeup = c.createGain();
     T.duck = c.createGain(); T.mute = c.createGain(); T.vol = c.createGain();
@@ -2019,8 +2023,9 @@ class Engine {
     this.p.tracks.forEach((tr, i) => {
       if (i === src || !(tr.fx.sc > 0)) return;
       const g = this.t[i].duck.gain;
+      if (g.cancelAndHoldAtTime) g.cancelAndHoldAtTime(t); else g.cancelScheduledValues(t); // a close kick restarts the duck
       g.setTargetAtTime(1 - tr.fx.sc * .92, t, .003);
-      g.setTargetAtTime(1, t + .08, Math.max(.01, tr.fx.scRel / 3));
+      g.setTargetAtTime(1, t + (tr.fx.scHold > 0 ? tr.fx.scHold : .03), Math.max(.01, tr.fx.scRel / 3));
     });
   }
   // Every synth engine returns the same kind of voice; mono and the voice registry live here.
