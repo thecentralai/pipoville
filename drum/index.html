@@ -216,6 +216,10 @@ details.br-sec[open] summary .br-title::after { content: "\2013"; }
 .aclip { position: absolute; top: 2px; bottom: 2px; background: var(--c); color: #161616; border-radius: 2px; padding: 0 5px; overflow: hidden; white-space: nowrap; cursor: grab; line-height: 36px; font-size: 11px; font-weight: 500; touch-action: none; box-shadow: inset 0 0 0 1px rgba(0,0,0,.35); }
 .aclip.sel { box-shadow: inset 0 0 0 2px #fff; z-index: 2; }
 .aclip.dragging { opacity: .7; cursor: grabbing; }
+.aclip .aname { position: relative; pointer-events: none; }
+.aclip .loopmark { position: absolute; top: 0; bottom: 0; border-left: 1px dashed rgba(0,0,0,.5); pointer-events: none; }
+.aclip .ahandle { position: absolute; top: 0; right: 0; bottom: 0; width: 8px; cursor: ew-resize; background: rgba(0,0,0,.2); }
+@media (pointer: coarse) { .aclip .ahandle { width: 16px; } }
 .arr-playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--bright); pointer-events: none; z-index: 5; display: none; }
 
 /* ---------- detail ---------- */
@@ -2876,7 +2880,8 @@ function renderArrangement() {
     <button id="a-zout" class="btn" data-info="Zoom out">&minus;</button><button id="a-zin" class="btn" data-info="Zoom in">+</button>
     <button id="a-fill" class="btn" data-info="Rebuild the timeline from the scenes: every scene that has clips gets 8 bars, in order">SCENES &#8594; ARR</button>
     <button id="a-clear" class="btn" data-info="Clear the whole arrangement">CLEAR</button>
-    <span class="cb-hint">Click a lane to paint the clip chosen in its menu. Drag to move, double-click to delete. Click the ruler to set the start.</span>
+    <button id="a-uniq" class="btn" data-info="Make the selected arrangement clip unique: copy its clip into a free slot, so editing it no longer changes the other copies">UNIQUE</button>
+    <span class="cb-hint">Click a lane to paint the clip chosen in its menu. Drag to move, drag the right edge to loop, double-click to delete. Every copy and loop plays the same clip: edit it once, they all change.</span>
   </div>`;
   let rows = `<div class="arr-row ruler-row"><div class="lane-head">BAR</div><div class="arr-ruler" id="a-ruler" style="width:${A.len * bw}px" data-info="Click to set where playback starts">`;
   const every = bw < 12 ? 8 : bw < 20 ? 4 : bw < 30 ? 2 : 1;
@@ -2891,8 +2896,10 @@ function renderArrangement() {
       <div class="lane-body ${tr.mix.mute ? 'muted' : ''}" data-t="${i}" style="width:${A.len * bw}px">`;
     tr.arr.forEach((e, k) => {
       const c = tr.clips[e.slot]; if (!c) return;
-      const sel = UI.arrSel && UI.arrSel.t === i && UI.arrSel.k === k;
-      rows += `<div class="aclip ${sel ? 'sel' : ''}" data-t="${i}" data-k="${k}" style="left:${e.start * bw}px;width:${Math.max(4, e.len * bw - 2)}px;--c:${tr.color}" data-info="${esc(c.name)}: linked to slot ${e.slot + 1}. Drag to move, double-click to delete">${esc(c.name)}</div>`;
+      const sel = UI.arrSel && UI.arrSel.t === i && UI.arrSel.k === k, L = c.bars * 16, loops = Math.round(e.len * 16 / L * 10) / 10;
+      let marks = ''; // a dashed line where the clip starts again
+      for (let b = 1; b < e.len; b++) if ((b * 16 + (e.off || 0)) % L === 0) marks += `<i class="loopmark" style="left:${b * bw - 1}px"></i>`;
+      rows += `<div class="aclip ${sel ? 'sel' : ''}" data-t="${i}" data-k="${k}" style="left:${e.start * bw}px;width:${Math.max(4, e.len * bw - 2)}px;--c:${tr.color}" data-info="${esc(c.name)}: linked to slot ${e.slot + 1}${loops > 1 ? `, looped ${loops} times` : ''}. Drag to move, drag the right edge to loop, double-click to delete">${marks}<span class="aname">${esc(c.name)}${loops > 1 ? ` &times;${loops}` : ''}</span><b class="ahandle" data-info="Drag to loop the clip over more or fewer bars"></b></div>`;
     });
     rows += `</div></div>`;
   });
@@ -2923,6 +2930,18 @@ function arrDelete(i, k) {
   const tr = P.tracks[i]; if (!tr.arr[k]) return;
   pushUndo(); tr.arr.splice(k, 1); UI.arrSel = null; renderArrangement(); save();
 }
+// Point the selected arrangement clip at its own copy of the clip, so edits stop reaching the other copies.
+function arrMakeUnique() {
+  const a = UI.arrSel, tr = a && P.tracks[a.t], en = tr && tr.arr[a.k];
+  if (!en || !tr.clips[en.slot]) return flash('Select a clip in the arrangement first');
+  const free = tr.clips.findIndex(c => !c);
+  if (free < 0) return flash(`${tr.name} has no free slot: delete a clip in Session view first`);
+  pushUndo();
+  const c = clone(tr.clips[en.slot]); c.name = (c.name + ' B').slice(0, 24);
+  tr.clips[free] = c; en.slot = free; UI.brush[a.t] = free;
+  renderArrangement(); renderSession(); select(a.t, free, 'clip'); save();
+  flash(`${c.name} is now its own clip in slot ${free + 1}: edits no longer change the other copies`);
+}
 function scenesToArr() {
   pushUndo();
   P.tracks.forEach(tr => { tr.arr = []; });
@@ -2941,6 +2960,7 @@ function initArrangement() {
     else if (id === 'a-zin') { UI.bw = clamp(Math.round(UI.bw * 1.35), 8, 64); renderArrangement(); }
     else if (id === 'a-zout') { UI.bw = clamp(Math.round(UI.bw / 1.35), 8, 64); renderArrangement(); }
     else if (id === 'a-fill') scenesToArr();
+    else if (id === 'a-uniq') arrMakeUnique();
     else if (id === 'a-clear') { pushUndo(); P.tracks.forEach(t => { t.arr = []; }); UI.arrSel = null; renderArrangement(); save(); flash('Arrangement cleared. CTRL+Z to undo'); }
     else if (e.target.classList.contains('ln')) select(+e.target.dataset.t, null, 'device');
   });
@@ -2967,7 +2987,8 @@ function initArrangement() {
     if (clip) {
       const i = +clip.dataset.t, k = +clip.dataset.k, en = P.tracks[i].arr[k]; if (!en) return;
       clip.setPointerCapture(e.pointerId);
-      UI.arrDrag = { i, k, x0: e.clientX, start0: en.start, db: 0, el: clip };
+      // the right edge loops the clip; the rest of it moves the clip
+      UI.arrDrag = { i, k, x0: e.clientX, start0: en.start, len0: en.len, db: 0, el: clip, loop: !!e.target.closest('.ahandle') };
       $$('.aclip.sel', v).forEach(x => x.classList.remove('sel')); clip.classList.add('sel');
       UI.arrSel = { t: i, k };
       return;
@@ -2979,7 +3000,8 @@ function initArrangement() {
     const d = UI.arrDrag; if (!d) return;
     d.db = Math.round((e.clientX - d.x0) / UI.bw);
     if (d.db) d.el.classList.add('dragging');
-    d.el.style.left = Math.max(0, d.start0 + d.db) * UI.bw + 'px';
+    if (d.loop) { d.db = Math.max(1, d.len0 + d.db) - d.len0; d.el.style.width = Math.max(4, (d.len0 + d.db) * UI.bw - 2) + 'px'; }
+    else d.el.style.left = Math.max(0, d.start0 + d.db) * UI.bw + 'px';
   });
   const end = () => {
     const d = UI.arrDrag; if (!d) return; UI.arrDrag = null;
@@ -2987,7 +3009,8 @@ function initArrangement() {
     if (d.db && en) {
       pushUndo();
       tr.arr.splice(d.k, 1);
-      en.start = Math.max(0, d.start0 + d.db);
+      if (d.loop) en.len = Math.max(1, d.len0 + d.db); // a longer entry plays its clip again and again
+      else en.start = Math.max(0, d.start0 + d.db);
       carve(tr, en.start, en.start + en.len); tr.arr.push(en);
       if (en.start + en.len > P.arr.len) P.arr.len = en.start + en.len;
       UI.arrSel = { t: d.i, k: tr.arr.length - 1 };
@@ -3034,6 +3057,12 @@ function initDetail() {
     sp.addEventListener('pointermove', move); sp.addEventListener('pointerup', up);
   });
 }
+// Where this clip plays in the arrangement: every copy and loop is the same clip, so one edit changes all of them.
+function linkedInfo(tr, s) {
+  const es = tr.arr.filter(e => e.slot === s); if (!es.length) return '';
+  const L = tr.clips[s].bars * 16, bars = es.reduce((a, e) => a + e.len, 0), loops = Math.round(es.reduce((a, e) => a + e.len * 16 / L, 0) * 10) / 10;
+  return `<div class="cb-hint cb-linked" data-info="To change one copy only, select it in the arrangement and press UNIQUE">Plays ${loops} time${loops === 1 ? '' : 's'} in the arrangement (${bars} bar${bars === 1 ? '' : 's'}): an edit here changes every copy</div>`;
+}
 function renderClipDetail(body) {
   const { t, s } = UI.sel;
   if (t < 0) { body.innerHTML = '<div class="empty-detail">Master selected. Click a clip to edit its notes, or open DEVICE for the master effects.</div>'; return; }
@@ -3056,6 +3085,7 @@ function renderClipDetail(body) {
     <div class="cb-row"><button class="btn" data-cb="t-12" data-info="Transpose down an octave">-12</button><button class="btn" data-cb="t-1" data-info="Transpose down a semitone">-1</button><button class="btn" data-cb="t1" data-info="Transpose up a semitone">+1</button><button class="btn" data-cb="t12" data-info="Transpose up an octave">+12</button></div>` : ''}
     <div class="cb-row"><button class="btn gen" data-cb="gen" data-info="Replace the notes with a generated DnB pattern, in key">&#9889; GENERATE</button></div>
     <div class="cb-row"><button class="btn go" data-cb="launch" data-info="Launch this clip [ENTER]">&#9654; LAUNCH</button><button class="btn" data-cb="del" data-info="Delete this clip [DEL]">DEL</button></div>
+    ${linkedInfo(tr, s)}
     <div class="cb-hint">${synth ? 'Click to draw, drag right for length. Drag a note to move it, click it to delete, drag its right edge to resize.' : 'Click or drag to paint hits. Shift+click a hit: ghost, normal, accent. Drag in VEL to set velocity.'}</div>
   </div>
   <div class="ed-scroll" id="ed-scroll"><div class="ed-inner">

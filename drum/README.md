@@ -26,6 +26,9 @@ A static server works too, for example `npx serve .`
 **Arrangement view**
 - Timeline lanes per track. Paint clips with a click, drag to move,
   double-click to delete
+- **Loop a clip**: drag its right edge. A dashed line marks each new loop.
+  Every copy and every loop plays the same clip, so one edit changes all
+  of them. **UNIQUE** gives the selected copy its own clip
 - **ARR REC**: launch clips in Session view and they are written into the
   timeline bar by bar
 - Loop brace, start marker, **SCENES → ARR** to sketch a song in one click.
