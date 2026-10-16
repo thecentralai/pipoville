@@ -5,11 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#1e1e1e">
 <title>DNB-808 Live</title>
-<meta name="description" content="A session-view DAW for drum and bass, synthesized with the Web Audio API. No samples.">
+<meta name="description" content="A session-view DAW for drum and bass, made with the Web Audio API: synthesized sounds plus CC0 drum samples.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23262626'/%3E%3Crect x='6' y='7' width='9' height='5' rx='1' fill='%23ff94a6'/%3E%3Crect x='17' y='7' width='9' height='5' rx='1' fill='%23ffa529'/%3E%3Crect x='6' y='14' width='9' height='5' rx='1' fill='%2392a7ff'/%3E%3Crect x='17' y='14' width='9' height='5' rx='1' fill='%23464646'/%3E%3Crect x='6' y='21' width='9' height='5' rx='1' fill='%23464646'/%3E%3Crect x='17' y='21' width='9' height='5' rx='1' fill='%235cffe8'/%3E%3C/svg%3E" type="image/svg+xml">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root {
   --bg: #161616;          /* gaps and the window behind everything */
@@ -99,8 +96,8 @@ input[type=range]::-moz-range-thumb { width: 10px; height: 10px; border: 0; bord
 .scope-wrap { width: 110px; height: 24px; border-radius: 3px; overflow: hidden; background: var(--surface); }
 #scope { width: 100%; height: 100%; display: block; }
 .vbtn { height: 24px; }
-#t-backarr { display: none; }
-#t-backarr.on { display: inline-flex; background: var(--accent); color: #1a1a1a; }
+#t-backarr { visibility: hidden; } /* hidden, but its space stays: the bar does not re-flow (and move the grid under a finger) when it shows */
+#t-backarr.on { visibility: visible; background: var(--accent); color: #1a1a1a; }
 #v-mix.on { background: var(--hover); color: var(--bright); }
 .seg { display: inline-flex; background: var(--surface); border-radius: 4px; padding: 2px; gap: 2px; }
 .seg .btn { height: 20px; background: transparent; color: var(--dim); }
@@ -436,8 +433,16 @@ details.br-sec[open] summary .br-title::after { content: "\2013"; }
 @media (max-width: 980px) {
   .browser { position: absolute; z-index: 20; left: 0; top: 0; bottom: 0; transform: translateX(-105%); transition: transform .15s; box-shadow: 8px 0 24px rgba(0,0,0,.5); }
   .browser.open { transform: none; }
-  .topbar { display: flex; flex-wrap: wrap; }
-  .tb-right { justify-content: flex-start; }
+  .topbar { display: flex; flex-wrap: wrap; column-gap: 8px; }
+  /* the right group's buttons wrap one by one: "Arrangement" (its space kept) after the tempo controls, the views after the transport */
+  .tb-right { display: contents; }
+  #t-backarr { order: 1; }
+  .tb-mid { order: 2; }
+  .tb-right > .seg, #v-mix { order: 3; }
+  /* the status line gets two lines; the detail panel gives up the 8 px, so the session area and the splitter drag stay the same */
+  #app { grid-template-rows: auto auto minmax(0, 1fr) 5px calc(var(--detail-h) - 8px) 30px; }
+  #info { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 13px; }
+  #kbd-info { flex: none; }
 }
 @media (max-width: 640px) {
   :root { --colw: 104px; --mastw: 110px; --detail-h: 250px; }
@@ -454,7 +459,7 @@ details.br-sec[open] summary .br-title::after { content: "\2013"; }
 <div id="power" class="overlay">
   <div class="power-box">
     <h1>DNB-808 Live</h1>
-    <p>A small session-view DAW for drum &amp; bass. Every sound is synthesized in your browser.</p>
+    <p>A small session-view DAW for drum &amp; bass. It runs in your browser: synthesized sounds plus CC0 drum samples.</p>
     <ul>
       <li>8 tracks x 8 scenes clip launcher</li>
       <li>Drum racks, Reese, sub, stabs, pads, hoover</li>
@@ -1210,6 +1215,9 @@ function buildRave() {
 // ---------- lesson: Rave DnB Masterclass ----------
 // check: { path, eq } | { path, min, max } | { notes: [lane, slot], has: [[step, pitch]], none: [[step, pitch]], empty: [fromStep, toStep] }
 // measure: { tap: 'master' | 'lane', track, from, bars, lufs: [lo, hi], tp, mono } (from = 0-based bar)
+// open: what Show me opens { view, track, scene, detail, bar, dev: the device head to bring into view }
+// play: what Listen plays when Show me opens something else { bar, bars } (0-based bar; no bars: as long as the measure that
+// starts there, or to the end of the song)
 // A fader target: 0.5 dB either side of the template value (the fader law is 1.6 p^2, so the range is p * 10^(+-0.5/40))
 const lessonFader = (path, v) => ({ path, min: Math.ceil(v * 1000 / 10 ** (.5 / 40)) / 1000, max: Math.floor(v * 1000 * 10 ** (.5 / 40)) / 1000 });
 const RAVE_LESSON = {
@@ -1221,7 +1229,7 @@ const RAVE_LESSON = {
         en: 'Drum and bass runs at 174 BPM, in 4/4. A bar has 16 steps. Each step is a 16th note and lasts 86 milliseconds. The music is counted in phrases of 4, 8, 16 and 32 bars. Every section of the track starts on one of these phrases.' },
       listen: { it: 'Conta le battute dell\'intro. Un crash arriva ogni 8 battute: 1, 9, 17 e 25. Il break entra sulla battuta 9, la cassa sulla 17.',
         en: 'Count the bars of the intro. A crash lands every 8 bars: 1, 9, 17 and 25. The break comes in on bar 9, the kick on bar 17.' },
-      open: { view: 'arr', track: 0, scene: 0, detail: 'clip', bar: 0 },
+      open: { view: 'arr', track: 0, scene: 0, detail: 'clip', bar: 0 }, play: { bar: 0, bars: 32 },
       check: [{ path: 'bpm', eq: 174 }, { path: 'swing', eq: 0 }, { path: 'key', eq: 5 }, { path: 'scale', eq: 'minor' }],
       measure: [{ tap: 'master', from: 0, bars: 16, lufs: [-19.1, -17.9] }] },
     { id: 'twostep', title: { it: 'La batteria: il two-step', en: 'Drums: the two-step' },
@@ -1235,7 +1243,7 @@ const RAVE_LESSON = {
       text: { it: 'Le ghost note sono colpi di rullante molto deboli tra i colpi principali. Qui cadono sugli step 8, 10 e 16 della battuta. Gli hi-hat sono forti in levare e deboli in battere. Quasi ogni colpo ha una velocity diversa, come in una parte suonata. Il bus della batteria ha solo un filtro passa-alto a 30 Hz. Non ha saturatore e non ha compressore. Così cassa e rullante tengono il loro attacco. Il limiter del master prende solo i picchi.',
         en: 'Ghost notes are very soft snare hits between the main hits. Here they fall on steps 8, 10 and 16 of the bar. The hi-hats are loud on the offbeats and soft on the beats. Almost every hit has its own velocity, like a played part. The drum bus has only a high-pass filter at 30 Hz. It has no saturator and no compressor. So the kick and the snare keep their attack. The master limiter only catches the peaks.' },
       listen: { it: 'Porta PUNCH al 40% e ascolta il rullante: perde lo schiocco e la coda si alza. Poi riportalo a 0.', en: 'Set PUNCH to 40% and listen to the snare: it loses its crack and the tail comes up. Then set it back to 0.' },
-      open: { view: 'session', track: 0, scene: 2, detail: 'device' },
+      open: { view: 'session', track: 0, scene: 2, detail: 'device', dev: 'Compressor' },
       check: [{ path: 'tracks.0.fx.ftype', eq: 'highpass' }, { path: 'tracks.0.fx.freq', min: 25, max: 35 }, { path: 'tracks.0.fx.sat', min: 0, max: .02 },
         { path: 'tracks.0.fx.comp', min: 0, max: .05 }, { notes: [0, 2], has: [[7, 7], [9, 7], [15, 7], [2, 3], [6, 3]] }],
       measure: [{ tap: 'lane', track: 0, from: 104, bars: 16, lufs: [-11.2, -9.2] }] },
@@ -1251,15 +1259,15 @@ const RAVE_LESSON = {
       text: { it: 'Il sub è una sinusoide mono con un filo di saturazione. La terza armonica sta circa 18 dB sotto la fondamentale, così il sub si sente anche su casse piccole. Il filtro passa-basso a 180 Hz tiene fuori il resto. Il sub suona solo le fondamentali, tra F1 e Eb2 (44-78 Hz). Ogni colpo di cassa abbassa il sub di 22 dB e lo tiene giù per 80 millisecondi: è il tempo della cassa. Poi il sub risale in circa 0,3 secondi. La coda della cassa è accordata su F1, come il sub. Così cassa e sub non si scontrano mai.',
         en: 'The sub is a mono sine with a touch of saturation. Its third harmonic sits about 18 dB under the root, so the sub can be heard on small speakers too. The low-pass filter at 180 Hz keeps the rest out. The sub plays only the roots, between F1 and Eb2 (44-78 Hz). Each kick ducks the sub by 22 dB and holds it down for 80 milliseconds: that is the length of the kick. Then the sub comes back over about 0.3 seconds. The kick\'s tail is tuned to F1, like the sub. So kick and sub never clash.' },
       listen: { it: 'Metti in solo DRUMS e SUB. Porta il SIDECHAIN a 0: cassa e sub si scontrano e il fondo pulsa. Rimettilo a 100%.', en: 'Solo DRUMS and SUB. Set SIDECHAIN to 0: kick and sub clash and the low end pumps. Put it back to 100%.' },
-      open: { view: 'session', track: 3, scene: 2, detail: 'device' },
+      open: { view: 'session', track: 3, scene: 2, detail: 'device', dev: 'Sidechain' },
       check: [{ path: 'tracks.3.fx.ftype', eq: 'lowpass' }, { path: 'tracks.3.fx.freq', min: 160, max: 200 }, { path: 'tracks.3.fx.sc', min: .9, max: 1 },
         { path: 'tracks.3.fx.scRel', min: .25, max: .35 }, { path: 'tracks.0.pads.0.duck', eq: true }, { path: 'tracks.0.pads.0.tune', eq: -3 },
         { path: 'tracks.3.synth.drive', min: .05, max: .1 }, { path: 'tracks.3.mix.sendA', eq: 0 }],
       measure: [{ tap: 'lane', track: 3, from: 40, bars: 16, lufs: [-21.2, -19.2] }, { tap: 'master', from: 40, bars: 32, mono: { below: 120, maxDb: -25 } }] },
     { id: 'midbass', title: { it: 'Il mid-bass jump-up: domanda e risposta', en: 'The jump-up mid-bass: call and response' },
-      text: { it: 'Il mid-bass "parla". È una wavetable di vocali (A > O) che un LFO fa muovere. Tre voci in unisono, un po\' scordate, lo allargano sopra i 150 Hz. Una seconda wavetable, quasi una sinusoide, gli dà il corpo tra 90 e 180 Hz. Il filtro passa-alto a 70 Hz lascia il fondo al sub. Il ritmo lo decide lo stepper: un gate di 16 step, chiuso sui rullanti. Gli step 5 e 13 dello stepper cadono su 1.2.1 e 1.4.1. Le note decidono solo l\'altezza. Nel DROP A il basso chiama nelle battute dispari. Nelle battute pari lascia più di un secondo di spazio. Quello spazio è per l\'MC.',
-        en: 'The mid-bass "talks". It is a vowel wavetable (A > O) moved by an LFO. Three slightly detuned unison voices make it wide above 150 Hz. A second wavetable, almost a sine, gives it body between 90 and 180 Hz. The high-pass filter at 70 Hz leaves the bottom to the sub. The stepper decides the rhythm: a 16-step gate, closed on the snares. Stepper steps 5 and 13 fall on 1.2.1 and 1.4.1. The notes decide only the pitch. In DROP A the bass calls in the odd bars. In the even bars it leaves more than one second of space. That space is for the MC.' },
-      listen: { it: 'Ascolta le battute 42, 44 e 46: solo batteria, break, sub e gli stab. Prova a parlare o rappare sopra.', en: 'Listen to bars 42, 44 and 46: only drums, break, sub and the stabs. Try to talk or rap over them.' },
+      text: { it: 'Il mid-bass "parla". È una wavetable di vocali (A > O) che un LFO fa muovere. Tre voci in unisono, un po\' scordate, lo allargano sopra i 150 Hz. Una seconda wavetable, quasi una sinusoide, gli dà il corpo tra 90 e 180 Hz. Il filtro passa-alto a 70 Hz lascia il fondo al sub. Il ritmo lo decide lo stepper: un gate di 16 step, chiuso sui rullanti. Gli step 5 e 13 dello stepper cadono su 1.2.1 e 1.4.1. Le note decidono solo l\'altezza. La clip CALL A dura 8 battute e si ripete per tutto il DROP A. Il basso chiama con un riff pieno nelle battute dispari. Nelle battute 42 e 46 suona solo una nota corta, F2, sul primo movimento. Poi lascia circa 1,3 secondi di spazio per l\'MC. La battuta 44 lascia 0,86 secondi, poi tre note portano alla battuta 45. La battuta 48 suona un riff pieno e torna all\'inizio della clip.',
+        en: 'The mid-bass "talks". It is a vowel wavetable (A > O) moved by an LFO. Three slightly detuned unison voices make it wide above 150 Hz. A second wavetable, almost a sine, gives it body between 90 and 180 Hz. The high-pass filter at 70 Hz leaves the bottom to the sub. The stepper decides the rhythm: a 16-step gate, closed on the snares. Stepper steps 5 and 13 fall on 1.2.1 and 1.4.1. The notes decide only the pitch. The clip CALL A is 8 bars long and repeats over the whole DROP A. The bass calls with a full riff in the odd bars. In bars 42 and 46 it plays only one short note, F2, on beat 1. Then it leaves about 1.3 seconds of space for the MC. Bar 44 leaves 0.86 seconds, then three notes lead into bar 45. Bar 48 plays a full riff and goes back to the top of the clip.' },
+      listen: { it: 'Ascolta le battute 42 e 46. Dopo la nota corta sul primo movimento suonano solo batteria, break, sub e stab. Prova a parlare o rappare sopra.', en: 'Listen to bars 42 and 46. After the short note on beat 1, only the drums, the break, the sub and the stabs play. Try to talk or rap over them.' },
       open: { view: 'arr', track: 2, scene: 2, detail: 'clip', bar: 40 },
       check: [{ path: 'tracks.2.synth.preset', eq: 'Tidal Talker Gate' }, { path: 'tracks.2.synth.stDest', eq: 'amp' }, { path: 'tracks.2.synth.stSeq.4', eq: 0 },
         { path: 'tracks.2.synth.stSeq.12', eq: 0 }, { path: 'tracks.2.synth.w1voices', eq: 3 }, { path: 'tracks.2.fx.freq', min: 60, max: 80 }, { notes: [2, 2], has: [[16, 41]], empty: [17, 31] }],
@@ -1289,8 +1297,8 @@ const RAVE_LESSON = {
         { path: 'tracks.7.pads.0.decay', min: 1.8, max: 1.9 }, { notes: [0, 1], none: [[0, 0], [32, 0], [96, 0]], empty: [124, 127] }, { notes: [1, 1], empty: [124, 127] }],
       measure: [{ tap: 'master', from: 32, bars: 8, lufs: [-15.3, -14.1] }] },
     { id: 'arrangement', title: { it: 'L\'arrangiamento', en: 'The arrangement' },
-      text: { it: 'Il brano dura 160 battute, circa 3 minuti e 40 secondi. Le 8 scene sono i mattoni e l\'arrangiamento le riusa. L\'intro dura 32 battute: prima pad e hi-hat, poi il break, poi la cassa. Così il DJ può mixare. Il DROP A dura 32 battute: 16 con lo spazio per l\'MC, 16 con le risposte dell\'hoover. La breakdown dura 16 battute. Le prime 8 non hanno batteria e sub: sono il punto più basso del brano, circa 8 LU sotto il drop. Poi tornano il beat halftime e il sub. Il secondo drop cambia il basso, poi arrivano lo switch-up e il drop finale. L\'outro dura 24 battute, per il DJ. Non premere SCENES > ARR: riscrive l\'arrangiamento con 8 battute per scena. Se succede, premi Ctrl+Z. La scena 9 è vuota: lì puoi provare clip nuove.',
-        en: 'The track lasts 160 bars, about 3 minutes 40 seconds. The 8 scenes are the building blocks, and the arrangement reuses them. The intro lasts 32 bars: first pad and hi-hats, then the break, then the kick. So a DJ can mix it in. DROP A lasts 32 bars: 16 with space for the MC, 16 with the hoover answers. The breakdown lasts 16 bars. Its first 8 bars have no drums and no sub: they are the lowest point of the track, about 8 LU under the drop. Then the halftime beat and the sub come back. The second drop switches the bass, then come the switch-up and the final drop. The outro lasts 24 bars, for the DJ. Do not press SCENES > ARR: it rewrites the arrangement with 8 bars per scene. If it happens, press Ctrl+Z. Scene 9 is empty: use it to sketch new clips.' },
+      text: { it: 'Il brano dura 160 battute, circa 3 minuti e 40 secondi. Le 8 scene sono i mattoni e l\'arrangiamento le riusa. L\'intro dura 32 battute: prima pad e hi-hat, poi il break, poi la cassa. Così il DJ può mixare. Il DROP A dura 32 battute: 16 con lo spazio per l\'MC, 16 con le risposte dell\'hoover. La breakdown dura 16 battute. Le prime 8 non hanno batteria e sub: sono il punto più basso tra l\'intro e l\'outro, circa 8 LU sotto il drop. Poi tornano il beat halftime e il sub. Il secondo drop cambia il basso, poi arrivano lo switch-up e il drop finale. L\'outro dura 24 battute, per il DJ. Non premere SCENES > ARR: riscrive l\'arrangiamento con 8 battute per scena. Se succede, premi Ctrl+Z. La scena 9 è vuota: lì puoi provare clip nuove.',
+        en: 'The track lasts 160 bars, about 3 minutes 40 seconds. The 8 scenes are the building blocks, and the arrangement reuses them. The intro lasts 32 bars: first pad and hi-hats, then the break, then the kick. So a DJ can mix it in. DROP A lasts 32 bars: 16 with space for the MC, 16 with the hoover answers. The breakdown lasts 16 bars. Its first 8 bars have no drums and no sub: they are the lowest point between the intro and the outro, about 8 LU under the drop. Then the halftime beat and the sub come back. The second drop switches the bass, then come the switch-up and the final drop. The outro lasts 24 bars, for the DJ. Do not press SCENES > ARR: it rewrites the arrangement with 8 bars per scene. If it happens, press Ctrl+Z. Scene 9 is empty: use it to sketch new clips.' },
       listen: { it: 'Segui l\'energia. Sale nel build, crolla nella breakdown, poi risale fino al drop finale.', en: 'Follow the energy. It rises in the build, drops away in the breakdown, then rises again up to the final drop.' },
       open: { view: 'arr', track: 0, scene: 0, detail: 'clip', bar: 0 },
       check: [{ path: 'arr.len', eq: 160 }, { path: 'tracks.0.arr.length', eq: 28 }, { path: 'scenes.4.name', eq: 'SWITCH-UP' }],
@@ -1308,7 +1316,7 @@ const RAVE_LESSON = {
         en: 'The master has three stages. The GLUE COMP glues the mix together: here it only works on the peaks above -3 dB. DRIVE is a soft clipper: it raises the average level, but it cuts the attack of the kick and the snare. Here it is at 0. The master fader decides how hard the limiter works. The track reaches about -12.7 LUFS, with no clipping. In the drops the crest factor stays around 11 dB, like in the reference DnB mixes. So the kick and the snare stay hits, not blocks. The breakdown stays about 8 LU under the drop.' },
       listen: { it: 'Ascolta dalla battuta 105, il DROP B. Porta DRIVE al 5%: il brano sale di circa 4,5 LU, ma il rullante si appiattisce e la breakdown resta solo 6 LU sotto il drop. Poi riportalo a 0.',
         en: 'Listen from bar 105, DROP B. Set DRIVE to 5%: the track gets about 4.5 LU louder, but the snare goes flat and the breakdown sits only 6 LU under the drop. Then set it back to 0.' },
-      open: { view: 'arr', track: -1, scene: 5, detail: 'device', bar: 104 },
+      open: { view: 'session', track: -1, scene: 5, detail: 'device', bar: 104 }, play: { bar: 104 },
       check: [lessonFader('master.vol', .71), { path: 'master.glue', eq: -3 }, { path: 'master.drive', eq: 0 }, { path: 'master.crush', eq: 0 }],
       measure: [{ tap: 'master', from: 0, bars: 160, lufs: [-13.4, -12.2], tp: -.5 }] },
     { id: 'reference', title: { it: 'Confronta con un riferimento e rendilo tuo', en: 'Compare with a reference and make it your own' },
@@ -1332,14 +1340,14 @@ const RAVE_LESSON = {
     { it: 'Prova sul BASS i preset Tidal FM Growl, Tidal Donk o Polar Switch Reese con le loro impostazioni FX.', en: 'Try the presets Tidal FM Growl, Tidal Donk or Polar Switch Reese on BASS, with their FX settings.' },
     { it: 'Scrivi un nuovo tema con un altro ritmo, per esempio 2+2+3+3+2+2+2.', en: 'Write a new hook with another rhythm, for example 2+2+3+3+2+2+2.' },
     { it: 'Riordina le fette della clip DROP A del BREAK. Tieni CHOP 1 sul primo battito e cambia le altre. Nell\'ultima battuta prova uno stutter: una fetta ripetuta in sedicesimi.', en: 'Reorder the chops of the BREAK clip DROP A. Keep CHOP 1 on the first beat and change the others. In the last bar try a stutter: one chop repeated in 16th notes.' },
-    { it: 'Registra un vero MC sul DROP A e sul verse. Togli gli HEY dalle clip FX e spegni la clip ANSWER dell\'hoover.', en: 'Record a real MC over DROP A and the verse. Take the HEY hits out of the FX clips and mute the hoover ANSWER clip.' },
+    { it: 'Registra un vero MC sul DROP A e sul verse. Togli gli HEY dalle clip FX. Poi cancella dall\'arrangiamento le due clip ANSWER di LEAD (battute 57 e 65): fai doppio clic su ognuna.', en: 'Record a real MC over DROP A and the verse. Take the HEY hits out of the FX clips. Then delete the two ANSWER clips of LEAD from the arrangement (bars 57 and 65): double-click each one.' },
     { it: 'Se una linea ti ricorda una canzone che conosci, cambiala finché non te la ricorda più.', en: 'If a line reminds you of a song you know, change it until it does not.' },
   ],
   notes: {
     it: ['Match confronta a volume uguale apposta: la versione più forte sembra sempre "migliore" per qualche secondo.', 'Match key sposta le note e la batteria intonata nella tonalità del riferimento, per la via più corta. Con un riferimento maggiore il set va nella relativa minore. Transpose sposta il set di un semitono. Ctrl+Z annulla.', 'Se il riferimento ha più Air (6-20 kHz), alza i pad C-HAT e TOPS o apri il Filter A dell\'hoover. Non partire dal master.',
-      'Un break campionato porta ghost note, swing e stanza che i suoni sintetici non hanno. Per cambiare break, scegli un altro campione nel pad e premi To pads: le 8 fette vanno sugli 8 pad. Usa solo break con una licenza chiara, per esempio CC0, o registrati da te. I break di questa app sono CC0.'],
+      'Un break campionato porta ghost note, swing e stanza che i suoni sintetici non hanno. Per cambiare break, scegli un altro campione nel pad e premi To pads: le 8 fette vanno sugli 8 pad. Usa solo break con una licenza chiara, per esempio CC0, o registrati da te. I break di questa app sono costruiti solo da campioni CC0.'],
     en: ['Match compares at equal loudness on purpose: the louder of two versions always sounds "better" for a few seconds.', 'Match key moves the notes and the tuned drums to the reference\'s key, the shorter way. With a major reference the set goes to the relative minor. Transpose moves the set by one semitone. Ctrl+Z undoes it.', 'If the reference has more Air (6-20 kHz), raise the C-HAT and TOPS pad levels or open the hoover\'s Filter A. Do not start with the master.',
-      'A sampled break brings ghost notes, swing and room sound that synthesized drums do not have. To change the break, pick another sample on a pad and press To pads: the 8 chops go onto the 8 pads. Use only breaks with a clear licence, for example CC0, or record your own. The breaks in this app are CC0.'],
+      'A sampled break brings ghost notes, swing and room sound that synthesized drums do not have. To change the break, pick another sample on a pad and press To pads: the 8 chops go onto the 8 pads. Use only breaks with a clear licence, for example CC0, or record your own. The breaks in this app are built only from CC0 samples.'],
   },
 };
 GENRES.rave.lesson = RAVE_LESSON;
@@ -2620,8 +2628,8 @@ async function smpLoadFile(f, i, k) {
   if (f.size > SMP_MAX_MB * 1e6) return flash(`${f.name} is larger than ${SMP_MAX_MB} MB`);
   flash(`Loading ${f.name}...`);
   try {
-    const bytes = await f.arrayBuffer(), id = 'user:' + await smpHash(bytes);
-    if (!SMP.bufs.has(id)) {
+    const bytes = await f.arrayBuffer(), id = 'user:' + await smpHash(bytes), had = SMP.bufs.has(id);
+    if (!had) {
       const buf = await smpDecode(bytes.slice(0)); // decodeAudioData takes its input away: the original goes to the storage
       if (buf.duration > SMP_MAX_SEC) throw new Error(`it is longer than ${SMP_MAX_SEC} s`);
       smpAdd(id, buf, { name: f.name.slice(0, 60), kind: 'user', slices: smpOnsets(buf), credit: '', url: '' });
@@ -2629,6 +2637,13 @@ async function smpLoadFile(f, i, k) {
     SMP.state.set(id, 'ok'); SMP.jobs.set(id, Promise.resolve());
     const kept = await smpDbPut(id, { name: f.name.slice(0, 60), type: f.type, size: f.size, bytes, added: Date.now() });
     const pad = P.tracks[i] && P.tracks[i].pads && P.tracks[i].pads[k]; if (!pad) return;
+    if (pad.voice === 'smp' && pad.sample === id) { // the same file again (a missing sample loaded back): every pad keeps its slice, start, end and reverse
+      const n = P.tracks.reduce((m, t) => m + (t.pads || []).filter(pd => pd && pd.voice === 'smp' && pd.sample === id).length, 0);
+      renderDetail(); audition(i, k);
+      if (had) return flash(`${f.name} is already on ${pad.name}: its settings stay as they are`);
+      return flash(kept === false ? `${f.name} is back for this session only (${n} pad${n === 1 ? '' : 's'}, settings kept): this browser does not allow storage`
+        : `${f.name} is back: its ${n} pad${n === 1 ? '' : 's'} keep their settings. It stays in this browser: a saved set keeps only its key`);
+    }
     pushUndo();
     pad.voice = 'smp'; samplePadFields(pad); Object.assign(pad, { sample: id, slice: -1, start: 0, end: 1, rev: false });
     save(); renderDetail(); audition(i, k);
@@ -2756,12 +2771,18 @@ function smpDrawWave(cv, pd, color) {
   sl.forEach(s => g.fillRect(Math.round(s / dur * w), 0, 1, h));
   if (pd.rev === true) { g.fillStyle = color; g.font = `600 ${Math.round(h / 4)}px sans-serif`; g.fillText('REV', 4, Math.round(h / 4) + 2); }
 }
-// Put slices 1-8 of this sample on the 8 pads
+// Put slices 1-8 of this sample on the 8 pads. Each pad keeps its level and pan; the message names what went back to default.
 function smpToPads(i, id) {
   const tr = P.tracks[i], n = ((SMP.meta.get(id) || {}).slices || []).length; if (!n) return;
+  const num = (v, d) => Number.isFinite(+v) ? +v : d, old = tr.pads;
   pushUndo();
-  tr.pads = tr.pads.map((_, k) => Object.assign({ name: 'CHOP ' + (k + 1), voice: 'smp' }, PAD_BASE, SAMPLE_PAD, { sample: id, slice: k % n, choke: 1 }));
-  save(); renderDetail(); flash(`${tr.name}: slices 1-${Math.min(8, n)} on the 8 pads, all in choke group 1. Ctrl+Z undoes it`);
+  tr.pads = old.map((pd, k) => Object.assign({ name: 'CHOP ' + (k + 1), voice: 'smp' }, PAD_BASE, SAMPLE_PAD,
+    { sample: id, slice: k % n, choke: 1, level: num(pd.level, PAD_BASE.level), pan: num(pd.pan, PAD_BASE.pan) }));
+  const words = { tune: 'tune', decay: 'decay', start: 'start', end: 'end', rev: 'reverse', duck: 'duck' };
+  const reset = Object.keys(words).filter(key => old.some((pd, k) => pd[key] != null && pd[key] !== tr.pads[k][key])).map(key => words[key]);
+  const list = reset.length > 1 ? reset.slice(0, -1).join(', ') + ' and ' + reset[reset.length - 1] : reset.join('');
+  save(); renderDetail();
+  flash(`${tr.name}: slices 1-${Math.min(8, n)} on the 8 pads, choke group 1. Level and pan kept${list ? '; ' + list + ' reset' : ''}. Ctrl+Z undoes it`);
 }
 // Returns the device groups for pad pd of track i (in place of the synthesized pad's knobs)
 function smpPadGroups(i, pd, c) {
@@ -2807,7 +2828,8 @@ function smpPadGroups(i, pd, c) {
     toggleCtl('REVERSE', pd.rev === true, v => { pd.rev = v; redraw(); }, 'Play the slice backwards (the tail first, the hit last)')], [toPads]]);
   const g3 = kgroup('AMP', [K('tune', { label: 'TUNE', min: -24, max: 24, step: 1, def: 0, bipolar: true, fmt: fSt, info: 'Tune in semitones: faster and higher, or slower and lower' }),
     K('decay', { label: 'DECAY', min: .2, max: 3, def: 1, fmt: v => v.toFixed(2) + 'x', info: 'At 1x the slice plays as it is. Under 1x it fades out sooner, over 1x it plays on past the slice end' }),
-    K('level', { label: 'LEVEL', min: 0, max: 1.5, def: .8, fmt: fPct }), K('pan', { label: 'PAN', min: -1, max: 1, def: 0, bipolar: true, fmt: fPan }),
+    K('level', { label: 'LEVEL', min: 0, max: 1.5, def: .8, fmt: fPct, info: 'Level of this pad: how loud its hits are, before the track fader' }),
+    K('pan', { label: 'PAN', min: -1, max: 1, def: 0, bipolar: true, fmt: fPan, info: 'Pan of this pad: where its hits sit, from left to right, before the track pan' }),
     toggleCtl('DUCK', pd.duck, v => { pd.duck = v; }, 'When ON, this pad ducks every track whose SIDECHAIN amount is above zero'),
     selectCtl('CHOKE', [[0, 'OFF'], [1, '1'], [2, '2'], [3, '3'], [4, '4']], String(pd.choke | 0), v => { pd.choke = +v; },
       'Choke group: a hit cuts the other pads of the same group on this track (like a closed hat cuts the open hat)')]);
@@ -3242,7 +3264,10 @@ function renderSession() {
 function initSession() {
   const v = $('#session-view');
   v.addEventListener('click', e => {
-    const act = e.target.closest('[data-act]'), slot = e.target.closest('.slot');
+    const act = e.target.closest('[data-act]'), slot = e.target.closest('.slot'), dbl = UI.slotStop;
+    // the second click of a double-click that began on a stop square but landed on another slot: the dblclick handles it
+    if (dbl && e.detail > 1 && !(slot && +slot.dataset.t === dbl.t && +slot.dataset.s === dbl.s)) return;
+    if (e.detail <= 1 && !(act && act.dataset.act === 'stop')) UI.slotStop = null; // a new click: no double-click on a stop square is under way
     if (act) {
       const a = act.dataset.act;
       if (a === 'launch') {
@@ -3250,11 +3275,11 @@ function initSession() {
         launchClip(t, +slot.dataset.s); select(t, +slot.dataset.s, 'clip');
         if (c && !c.notes.length) flash(`${c.name} is empty, so ${P.tracks[t].name} is silent until you draw notes. ↩ Arrangement plays the timeline again`);
       } else if (a === 'stop') {
-        const t = +slot.dataset.t, r = RT[t], prev = UI.slotStop, now = performance.now();
-        // remembered for a moment: a double-click on an empty slot creates a clip and must not leave the track stopped
-        // (its second click keeps the state from before the first one)
-        if (!(prev && prev.t === t && now - prev.at < 700)) UI.slotStop = { t, at: now, rt: { playing: r.playing, queued: r.queued, arrOff: r.arrOff } };
-        stopTrack(t); select(t, +slot.dataset.s);
+        const t = +slot.dataset.t, s = +slot.dataset.s, r = RT[t], prev = UI.slotStop, now = performance.now();
+        // remembered for a moment: a double-click on an empty slot creates a clip in this slot and must not leave the
+        // track stopped (its second click keeps the state from before the first one)
+        if (!(prev && prev.t === t && prev.s === s && now - prev.at < 700)) UI.slotStop = { t, s, at: now, rt: { playing: r.playing, queued: r.queued, arrOff: r.arrOff } };
+        stopTrack(t); select(t, s);
         const st = UI.slotStop; // a plain click (no double-click follows): say how to get the timeline back
         setTimeout(() => { if (UI.slotStop === st && TR.playing && RT[t].arrOff) flash(`${P.tracks[t].name} stopped. ↩ Arrangement plays the timeline again`); }, 450);
       }
@@ -3267,13 +3292,12 @@ function initSession() {
     const th = e.target.closest('.th'); if (th) select(+th.dataset.t, null, 'device');
   });
   v.addEventListener('dblclick', e => {
-    const slot = e.target.closest('.slot');
-    if (slot && slot.classList.contains('empty')) { // the whole empty slot creates a clip, its stop square included
-      const t = +slot.dataset.t, st = UI.slotStop;
-      if (st && st.t === t && performance.now() - st.at < 700) Object.assign(RT[t], st.rt); // undo the stop of the first click
-      UI.slotStop = null;
-      createClip(t, +slot.dataset.s); return;
+    const slot = e.target.closest('.slot'), st = UI.slotStop;
+    if (st && performance.now() - st.at < 700) { // it began on the stop square of an empty slot: the clip goes there, even if the grid moved
+      UI.slotStop = null; Object.assign(RT[st.t], st.rt); // undo the stop of the first click
+      createClip(st.t, st.s); return;
     }
+    if (slot && slot.classList.contains('empty')) { createClip(+slot.dataset.t, +slot.dataset.s); return; } // the whole empty slot creates a clip
     if (e.target.closest('[data-act]')) return;
     if (slot) { const t = +slot.dataset.t, s = +slot.dataset.s; if (P.tracks[t].clips[s]) renameClip(t, s); else createClip(t, s); return; }
     const th = e.target.closest('.th'); if (th && +th.dataset.t >= 0) { renameTrack(+th.dataset.t); return; }
@@ -3422,7 +3446,7 @@ function renderArrangement() {
     <button id="a-zout" class="btn" data-info="Zoom out">&minus;</button><button id="a-zin" class="btn" data-info="Zoom in">+</button>
     <button id="a-fill" class="btn" data-info="Rebuild the timeline from the scenes: every scene that has clips gets 8 bars, in order">SCENES &#8594; ARR</button>
     <button id="a-clear" class="btn" data-info="Clear the whole arrangement">CLEAR</button>
-    <button id="a-uniq" class="btn" data-info="Make the selected arrangement clip unique: copy its clip into a free slot, so editing it no longer changes the other copies">UNIQUE</button>
+    <button id="a-uniq" class="btn" data-info="Make the selected arrangement clip unique: copy its clip into a free slot (in a scene row with no clips, when there is one), so editing it no longer changes the other copies">UNIQUE</button>
     <span class="cb-hint">Click a lane to paint the clip chosen in its menu. Drag to move, drag the right edge to loop, double-click to delete. Every copy and loop plays the same clip: edit it once, they all change.</span>
   </div>`;
   let rows = `<div class="arr-row ruler-row"><div class="lane-head">BAR</div><div class="arr-ruler" id="a-ruler" style="width:${A.len * bw}px" data-info="Click to set where playback starts">`;
@@ -3473,16 +3497,20 @@ function arrDelete(i, k) {
   pushUndo(); tr.arr.splice(k, 1); UI.arrSel = null; renderArrangement(); save();
 }
 // Point the selected arrangement clip at its own copy of the clip, so edits stop reaching the other copies.
+// The copy goes to a scene row with no clips in any lane, so launching a scene of the song does not play it;
+// with no such row, to the last free slot of the track (and the message says which scene now plays it).
 function arrMakeUnique() {
   const a = UI.arrSel, tr = a && P.tracks[a.t], en = tr && tr.arr[a.k];
   if (!en || !tr.clips[en.slot]) return flash('Select a clip in the arrangement first');
-  const free = tr.clips.findIndex(c => !c);
+  let free = tr.clips.findIndex((c, s) => !c && P.tracks.every(t => !t.clips[s]));
+  for (let s = tr.clips.length - 1; free < 0 && s >= 0; s--) if (!tr.clips[s]) free = s;
   if (free < 0) return flash(`${tr.name} has no free slot: delete a clip in Session view first`);
+  const shared = P.tracks.some(t => t.clips[free]), scene = P.scenes[free] ? P.scenes[free].name : 'SCENE ' + (free + 1);
   pushUndo();
   const c = clone(tr.clips[en.slot]); c.name = (c.name + ' B').slice(0, 24);
   tr.clips[free] = c; en.slot = free; UI.brush[a.t] = free;
   renderArrangement(); renderSession(); select(a.t, free, 'clip'); save();
-  flash(`${c.name} is now its own clip in slot ${free + 1}: edits no longer change the other copies`);
+  flash(`${c.name} is now its own clip in slot ${free + 1}, scene ${scene}` + (shared ? '. Launching that scene plays it too' : ': edits no longer change the other copies'));
 }
 function scenesToArr() {
   pushUndo();
@@ -4088,7 +4116,7 @@ const fCents = v => (v > 0 ? '+' : '') + Math.round(v) + '¢';
 const fBi = v => (v > 0 ? '+' : '') + Math.round(v * 100) + '%';
 function engineSelect(i) {
   const tr = P.tracks[i], s = el('select');
-  s.dataset.info = 'Instrument engine: Classic, Polar VA (multi-oscillator analog, Sylenth-style) or Tidal WT (wavetable, Massive-style)';
+  s.dataset.info = 'Instrument engine: Classic, Polar VA (multi-oscillator virtual analog) or Tidal WT (wavetable)';
   s.innerHTML = ENGINES.map(([v, n]) => `<option value="${v}">${n}</option>`).join('');
   s.value = tr.synth.engine || 'classic';
   s.addEventListener('change', () => applyPreset(i, ENGINE_INIT[s.value]));
@@ -6163,6 +6191,7 @@ const LESSON = {
   listen: null,                  // the running Listen: what to put back when it ends
   shown: -1,                     // the step the list was last scrolled to
   mouse: false,                  // the focus in the panel came from a click or a tap: the app keeps its keys
+  back: false,                   // Show me left the panel: the next Shift+Tab comes straight back to it
 };
 const LESSON_LS = 'dnb808.lesson.v1';
 const LESSON_PRE = 2;    // bars rendered before a measured region, so reverb and delay tails are already there
@@ -6182,11 +6211,13 @@ const LESSON_TXT = {
     tplAsk: l => `Aprire il template ${l}? Sostituisce il set attuale. Ctrl+Z (Undo) riporta il tuo set.`, tplOpened: l => `Template ${l} aperto. Ctrl+Z riporta il set di prima`,
     xposeBack: d => `Il set è trasposto di ${lsSemi(d, 'semitono', 'semitoni')}: premi Transpose back.`,
     xposedBack: (d, k) => `Set trasposto di ${lsSemi(d, 'semitono', 'semitoni')}, di nuovo in ${k}. Ctrl+Z lo annulla`,
-    showFlash: (t, w) => `${t}: ${w}. Shift+Tab o la scheda Lesson riportano la lezione`,
-    showArr: b => `Arrangement dalla battuta ${b}`, showScene: n => `Session, scena ${n}`, showDetail: { clip: 'scheda Clip', device: 'scheda Devices', ref: 'scheda Reference' },
+    showFlash: (t, w) => `${t}: ${w}. Shift+Tab o la scheda Lesson riportano la lezione`, showShort: w => `${w}. Torna con la scheda Lesson`,
+    showArr: b => `Arrangement dalla battuta ${b}`, showScene: n => `Session, scena ${n}`, showMixer: 'mixer della Session', showDetail: { clip: 'scheda Clip', device: 'scheda Devices', ref: 'scheda Reference' },
+    barShort: b => `battuta ${b}`, barsShort: (a, b) => `battute ${a}-${b}`, sceneShort: n => `scena ${n}`, mixerShort: 'mixer',
     listenArr: (a, b, ing) => `${ing ? 'In riproduzione: l\'arrangiamento' : 'Riproduce l\'arrangiamento'} dalla battuta ${a} alla battuta ${b}`,
     listenScene: (n, ing) => `${ing ? 'In riproduzione: la scena' : 'Riproduce la scena'} ${n}`,
     listenSolo: ns => `, con ${ns.join(' e ')} in solo`, listenBack: '. Il mix torna com\'era quando si ferma', stopped: 'Fermato',
+    listenShort: (w, ns) => `In riproduzione: ${w}${ns.length ? `, ${ns.join(' e ')} in solo` : ''}`,
     swapped: (n, p) => `${n}: ${p}, con le sue impostazioni di FX e mixer. Ctrl+Z lo annulla`, noPreset: p => `${p} non è disponibile qui`,
     measNoMod: 'Measure ha bisogno del modulo di analisi del Reference player', measCancel: 'Misura annullata', measFail: m => `Misura non riuscita: ${m}`,
     listen: 'Ascolta', target: 'obiettivo', exercises: 'Esercizi', notes: 'Note', swaps: 'Preset da provare', check: 'Controllo', measure: 'Misura',
@@ -6195,6 +6226,7 @@ const LESSON_TXT = {
     setTo: v => `Impostalo a ${v}.`, setRange: (a, b) => `Impostalo tra ${a} e ${b}.`,
     addNote: 'Aggiungi questa nota.', removeNote: 'Togli questa nota.', clearNotes: n => n === 1 ? 'Togli la nota che c\'è.' : `Togli le ${n} note che ci sono.`,
     noClip: 'La clip manca: Ctrl+Z la riporta, oppure riapri il template.',
+    laneType: (n, t) => `${n} non è una corsia ${t === 'drums' ? 'Drum Rack' : 'synth'}.`, reopenTpl: 'Riapri il template.',
     noteAt: (w, n, at) => `${w} · ${n} su ${at}`, noNoteAt: (w, n, at) => `${w} · niente ${n} su ${at}`, stepsClear: (w, a, b) => `${w} · step ${a} - ${b} vuoti`,
     allOk: 'Tutti gli obiettivi sono giusti: il passo è fatto.', someBad: n => n === 1 ? '1 valore da sistemare.' : `${n} valori da sistemare.`,
     undoHint: 'Ctrl+Z annulla le modifiche una alla volta. Riaprire il template rimette tutti i valori.',
@@ -6216,11 +6248,13 @@ const LESSON_TXT = {
     tplAsk: l => `Open the ${l} template? It replaces the current set. Ctrl+Z (Undo) brings your set back.`, tplOpened: l => `Opened the ${l} template. Ctrl+Z brings your previous set back`,
     xposeBack: d => `The set is transposed by ${lsSemi(d, 'semitone', 'semitones')}: press Transpose back.`,
     xposedBack: (d, k) => `Transposed back: ${lsSemi(d, 'semitone', 'semitones')} to ${k}. Ctrl+Z undoes it`,
-    showFlash: (t, w) => `${t}: ${w}. Shift+Tab or the Lesson tab brings the lesson back`,
-    showArr: b => `Arrangement from bar ${b}`, showScene: n => `Session, scene ${n}`, showDetail: { clip: 'Clip view', device: 'Devices', ref: 'Reference' },
+    showFlash: (t, w) => `${t}: ${w}. Shift+Tab or the Lesson tab brings the lesson back`, showShort: w => `${w}. The Lesson tab takes you back`,
+    showArr: b => `Arrangement from bar ${b}`, showScene: n => `Session, scene ${n}`, showMixer: 'Session mixer', showDetail: { clip: 'Clip view', device: 'Devices', ref: 'Reference' },
+    barShort: b => `bar ${b}`, barsShort: (a, b) => `bars ${a}-${b}`, sceneShort: n => `scene ${n}`, mixerShort: 'mixer',
     listenArr: (a, b, ing) => `${ing ? 'Playing' : 'Play'} the arrangement from bar ${a} to bar ${b}`,
     listenScene: (n, ing) => `${ing ? 'Playing' : 'Play'} the scene ${n}`,
     listenSolo: ns => `, with ${ns.join(' and ')} solo`, listenBack: '. The mix comes back when it stops', stopped: 'Stopped',
+    listenShort: (w, ns) => `Playing ${w}${ns.length ? `, ${ns.join(' and ')} solo` : ''}`,
     swapped: (n, p) => `${n}: ${p}, with its FX and mixer settings. Ctrl+Z undoes it`, noPreset: p => `${p} is not available here`,
     measNoMod: 'Measure needs the analysis module of the Reference player', measCancel: 'Measure cancelled', measFail: m => `Measure failed: ${m}`,
     listen: 'Listen', target: 'target', exercises: 'Exercises', notes: 'Notes', swaps: 'Presets to try', check: 'Check', measure: 'Measure',
@@ -6229,6 +6263,7 @@ const LESSON_TXT = {
     setTo: v => `Set it to ${v}.`, setRange: (a, b) => `Set it between ${a} and ${b}.`,
     addNote: 'Add this note.', removeNote: 'Remove this note.', clearNotes: n => n === 1 ? 'Remove the note there.' : `Remove the ${n} notes there.`,
     noClip: 'The clip is missing: Ctrl+Z brings it back, or open the template again.',
+    laneType: (n, t) => `${n} is not a ${t === 'drums' ? 'Drum Rack' : 'synth'} lane.`, reopenTpl: 'Open the template again.',
     noteAt: (w, n, at) => `${w} · ${n} on ${at}`, noNoteAt: (w, n, at) => `${w} · no ${n} on ${at}`, stepsClear: (w, a, b) => `${w} · steps ${a} - ${b} empty`,
     allOk: 'Every target passes: the step is done.', someBad: n => n === 1 ? '1 value to fix.' : `${n} values to fix.`,
     undoHint: 'Ctrl+Z undoes your changes one at a time. Opening the template again puts every value back.',
@@ -6366,10 +6401,17 @@ const lessonGetPath = (p, path) => (typeof lessonGet === 'function' ? lessonGet(
 const lessonKeyOf = path => { const k = path.split('.'); return /^\d+$/.test(k[k.length - 1]) ? k[k.length - 2] : k[k.length - 1]; };
 
 // ---------- Check: every target of the step, with what to change ----------
+// Targets the student cannot change (the lane type): no line while they hold, a plain sentence when they do not
+const LS_FIXED = /^tracks\.\d+\.type$/;
 function lessonCheckRows(st) {
   const rows = [];
   (st.check || []).forEach(c => {
     if (c.notes) { rows.push(...lessonNoteRows(c)); return; }
+    if (LS_FIXED.test(c.path)) {
+      const tr = P.tracks[+c.path.split('.')[1]];
+      if (!lessonCheck(P, c)) rows.push({ ok: false, where: ['laneType', tr ? tr.name : c.path, c.eq], now: '', want: '', fix: ['reopenTpl'] });
+      return;
+    }
     const key = lessonKeyOf(c.path), v = lessonGetPath(P, c.path), f = x => lessonFmt(key, x);
     const xp = c.path === 'key' ? lessonXpose() : 0, ok = !!lessonCheck(P, c) && !xp; // a moved set is not in the template key, whatever its label says
     const want = 'eq' in c ? f(c.eq) : ['range', f(c.min), f(c.max), ''];
@@ -6404,34 +6446,92 @@ function lessonRunCheck(st) {
 }
 
 // ---------- Show me: the view, track, scene and detail the step is about ----------
+const LS_TABS = { clip: 'Clip', device: 'Devices', ref: 'Reference' }; // the detail tabs, as they read on screen
 function lessonShowWhat(st, T = LESSON_TXT.en) { // T: the language of the text (English for the help strings)
   const o = st.open || {}, t = o.track ?? UI.sel.t, s = clamp(o.scene ?? UI.sel.s, 0, P.scenes.length - 1);
   const d = o.detail === 'ref' && typeof renderRefDetail === 'function' ? 'ref' : o.detail === 'device' ? 'device' : 'clip';
-  const who = t < 0 ? 'MASTER' : P.tracks[t] ? P.tracks[t].name : '';
-  const where = o.view === 'arr' ? T.showArr((o.bar || 0) + 1) : T.showScene(P.scenes[s].name);
-  return { t, s, d, text: `${who}, ${where}, ${T.showDetail[d]}` };
+  const who = t < 0 ? 'MASTER' : P.tracks[t] ? P.tracks[t].name : '', b = (o.bar || 0) + 1;
+  const where = o.view === 'arr' ? T.showArr(b) : t < 0 ? T.showMixer : T.showScene(P.scenes[s].name);
+  const near = o.view === 'arr' ? T.barShort(b) : t < 0 ? T.mixerShort : T.sceneShort(P.scenes[s].name); // the short form: phones
+  return { t, s, d, text: `${who}, ${where}, ${T.showDetail[d]}`, short: `${who}, ${near}, ${LS_TABS[d]}` };
+}
+// The flash in the status line; the short text when the long one would be cut (a phone: one line, or two clamped lines)
+function lessonFlash(long, short) {
+  flash(long);
+  const i = $('#info');
+  if (short && i && (i.scrollWidth > i.clientWidth + 1 || i.scrollHeight > i.clientHeight + 1)) flash(short);
 }
 function lessonDevTab(st, t) { // the device page the step's first synth target is on
   const tr = P.tracks[t]; if (!tr || !tr.synth) return null;
   const c = (st.check || []).find(x => x.path && x.path.startsWith(`tracks.${t}.synth.`) && !/\.preset$/.test(x.path));
   return c ? lessonSynthPage(tr.synth.engine || 'classic', c.path.split('.')[3]) : null;
 }
+const lessonUsesMixer = st => (st.open || {}).view === 'session' && (lessonSoloLanes(st).length > 0 || (st.check || []).some(c => c.path && /\.mix\.|^master\.vol$/.test(c.path)));
+// The device a check path is set on, by the name its head shows ('' = the instrument, first in the chain; null = not a device)
+function lessonDevName(path) {
+  const k = path.split('.'), head = s => (s ? s.split(' · ')[0] : null);
+  if (k[0] === 'tracks') return k[2] === 'fx' ? head(LS_FX[k[3]]) : k[2] === 'synth' || k[2] === 'pads' ? '' : null;
+  if (k[0] === 'master') return k[1] === 'vol' ? null : head(LS_MASTER[k[1]]); // the master volume is the mixer fader
+  if (k[0] === 'ret') return head(LS_RET[k[1]]);
+  return null;
+}
+// What Show me brings into view: the arrangement clip at the step's bar or the session slot, the mixer strip of a fader
+// target, and the device of the step's first device target (or the one open.dev names); on a synth, the knob group of that
+// target ('Mod env 1'), since a synth is wider than a phone
+function lessonShowEls(st) {
+  const o = st.open || {}, w = lessonShowWhat(st), ck = (st.check || []).filter(c => c.path), out = [];
+  if (o.view === 'arr') {
+    const tr = P.tracks[w.t], bar = o.bar || 0, k = tr ? tr.arr.findIndex(e => e.start <= bar && bar < e.start + e.len) : -1;
+    const e = k >= 0 && $(`#arr-view .aclip[data-t="${w.t}"][data-k="${k}"]`); if (e) out.push(e);
+  } else if (w.t >= 0 && UI.slotEls && UI.slotEls[w.t] && UI.slotEls[w.t][w.s]) out.push(UI.slotEls[w.t][w.s]);
+  if (UI.view === 'session' && !$('#session-view').classList.contains('nomix') && ck.some(c => (w.t < 0 ? c.path === 'master.vol' : c.path.startsWith(`tracks.${w.t}.mix.`)))) {
+    const m = $(`#session-view .mix[data-t="${w.t}"]`); if (m) out.push(m);
+  }
+  if (w.d === 'device') {
+    const mine = c => (w.t < 0 ? /^(master|ret)\./.test(c.path) : c.path.startsWith(`tracks.${w.t}.`));
+    const first = o.dev != null ? null : ck.filter(mine).find(c => lessonDevName(c.path) != null), name = o.dev != null ? o.dev : first ? lessonDevName(first.path) : null;
+    const devs = $$('#detail-body .device');
+    let d = name == null ? null : name === '' ? devs[0] : devs.find(x => { const h = $('.dev-head span:nth-child(2)', x); return h && h.textContent === name; });
+    const k = first ? first.path.split('.') : [];
+    if (d && k[2] === 'synth') { // 'Polar VA · Env · Mod env 1 · Amount' -> the group 'Mod env 1'
+      const g = lessonSynthLabel(P.tracks[w.t], k[3], k[4]).split(' · ').slice(-2)[0].toLowerCase();
+      const gt = $$('.kgroup-t', d).find(x => x.textContent.toLowerCase().startsWith(g)); if (gt) d = gt.parentElement;
+    }
+    if (d) out.push(d);
+  }
+  return out;
+}
+// Scrolls the boxes around e by the least amount that puts it inside them, clear of their sticky heads (the arrangement's
+// lane names and ruler, the session's track names and mixer). axes: 'x', 'y' or 'xy'
+function lessonReveal(e, axes = 'xy') {
+  for (let p = e.parentElement; p && p !== document.body; p = p.parentElement) {
+    const cs = getComputedStyle(p), sx = /auto|scroll/.test(cs.overflowX), sy = /auto|scroll/.test(cs.overflowY);
+    if (!sx && !sy) continue;
+    const mix = p.id === 'session-view' && !e.closest('.sess-mixer') && $('.sess-mixer', p);
+    const pad = p.id === 'a-scroll' ? { l: ARR_HEAD, t: ($('.ruler-row', p) || {}).offsetHeight || 0, b: 0 }
+      : p.id === 'session-view' ? { l: 0, t: ($('.th', p) || {}).offsetHeight || 0, b: mix && mix.offsetParent ? mix.offsetHeight : 0 } : { l: 0, t: 0, b: 0 };
+    const r = e.getBoundingClientRect(), bx = p.getBoundingClientRect(), x0 = bx.left + p.clientLeft, y0 = bx.top + p.clientTop, px = k => parseFloat(cs[k]) || 0;
+    const by = (lo, hi, a, z) => (z > hi ? Math.min(z - hi, a - lo) : a < lo ? a - lo : 0); // the scroll that brings [a, z] into [lo, hi], its start first
+    if (sx && axes.includes('x')) p.scrollLeft += by(x0 + pad.l + px('paddingLeft'), x0 + p.clientWidth - px('paddingRight'), r.left, r.right);
+    if (sy && axes.includes('y')) p.scrollTop += by(y0 + pad.t + px('paddingTop'), y0 + p.clientHeight - pad.b - px('paddingBottom'), r.top, r.bottom);
+  }
+}
 function lessonShow(st) {
   if (!st) return;
   const o = st.open || {}, w = lessonShowWhat(st);
   if (o.view === 'arr' || o.view === 'session') setView(o.view);
-  if (o.view === 'session' && (lessonSoloLanes(st).length || (st.check || []).some(c => c.path && /\.mix\./.test(c.path)))) { // the step uses the mixer
-    $('#session-view').classList.remove('nomix'); $('#v-mix').classList.add('on');
-  }
+  if (lessonUsesMixer(st)) { $('#session-view').classList.remove('nomix'); $('#v-mix').classList.add('on'); } // the step uses the mixer
   if (w.t >= 0) {
     const tab = w.d === 'device' && lessonDevTab(st, w.t); if (tab) UI.devTab[w.t] = tab;
     const pc = (st.check || []).find(c => c.path && c.path.startsWith(`tracks.${w.t}.pads.`)); if (pc) UI.focusPad[w.t] = +pc.path.split('.')[3];
   }
-  if (o.view === 'arr' && o.bar != null) { TR.startBar = clamp(o.bar, 0, P.arr.len - 1); uiTransport(); renderArrMarkers(); }
+  if (o.bar != null) { TR.startBar = clamp(o.bar, 0, P.arr.len - 1); uiTransport(); renderArrMarkers(); }
   select(w.t, w.s, w.d);
   if (o.view === 'arr') { const sc = $('#a-scroll'); if (sc) sc.scrollLeft = Math.max(0, (o.bar || 0) * UI.bw - 40); }
-  else { const e = w.t >= 0 && UI.slotEls && UI.slotEls[w.t] && UI.slotEls[w.t][w.s]; if (e && e.scrollIntoView) e.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
-  flash(lsT().showFlash(lt(st.title), lessonShowWhat(st, lsT()).text));
+  lessonShowEls(st).forEach(e => lessonReveal(e, e.classList.contains('aclip') ? 'y' : 'xy')); // an arrangement clip: the line above placed its bar, only its lane moves into view
+  LESSON.back = true;
+  const T = lsT(), tw = lessonShowWhat(st, T);
+  lessonFlash(T.showFlash(lt(st.title), tw.text), T.showShort(tw.short));
 }
 
 // ---------- Listen: the step's scene or section, with the lanes it names solo, then the mix comes back ----------
@@ -6449,18 +6549,19 @@ function lessonSoloLanes(st) { // "Solo DRUMS and SUB." -> [0, 3]
   return out;
 }
 function lessonListenTarget(st) {
-  const o = st.open || {};
-  if (o.view === 'arr') {
-    const bar = clamp(o.bar || 0, 0, Math.max(0, P.arr.len - 1)), m = (st.measure || []).find(x => x.from === bar);
-    return { arr: true, bar, end: Math.min(P.arr.len, m ? m.from + m.bars + 1 : P.arr.len) }; // one more bar: hear where the section lands
+  const o = st.open || {}, pl = st.play || (o.view === 'arr' ? { bar: o.bar } : null); // play: a section of the arrangement, whatever Show me opens
+  if (pl) {
+    const bar = clamp(pl.bar || 0, 0, Math.max(0, P.arr.len - 1)), m = pl.bars ? null : (st.measure || []).find(x => x.from === bar);
+    return { arr: true, bar, end: Math.min(P.arr.len, pl.bars ? bar + pl.bars + 1 : m ? m.from + m.bars + 1 : P.arr.len) }; // one more bar: hear where the section lands
   }
   const en = (st.listen && st.listen.en) || '', q = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const named = P.scenes.map((sc, k) => [sc.name, k]).filter(([n]) => n && n.length > 2 && new RegExp(`(^|[^A-Z0-9-])${q(n)}($|[^A-Z0-9-])`).test(en));
   named.sort((a, b) => b[0].length - a[0].length); // the text may name another scene than the one Show me opens
   return { arr: false, scene: named.length ? named[0][1] : clamp(o.scene || 0, 0, P.scenes.length - 1) };
 }
-function lessonListenText(st, T = LESSON_TXT.en, ing = false) { // T: the language (English for the help string), ing: the flash while it plays
+function lessonListenText(st, T = LESSON_TXT.en, ing = false, short = false) { // T: the language (English for the help string), ing: the flash while it plays
   const g = lessonListenTarget(st), solo = lessonSoloLanes(st).map(k => P.tracks[k].name);
+  if (short) return T.listenShort(g.arr ? T.barsShort(g.bar + 1, g.end) : T.sceneShort(P.scenes[g.scene].name), solo); // a phone's status line
   return (g.arr ? T.listenArr(g.bar + 1, g.end, ing) : T.listenScene(P.scenes[g.scene].name, ing)) + (solo.length ? T.listenSolo(solo) : '') + T.listenBack;
 }
 function lessonListen(st) {
@@ -6484,7 +6585,7 @@ function lessonListen(st) {
     RT.forEach(r => { r.arrOff = false; r.playing = null; r.queued = null; });
     TR.startBar = g.bar; renderArrMarkers(); play();
   } else launchScene(g.scene);
-  flash(lessonListenText(st, lsT(), true));
+  lessonFlash(lessonListenText(st, lsT(), true), lessonListenText(st, lsT(), true, true)); // the panel shows the whole text while it plays
   lessonSync();
 }
 // Takes a Listen's temporary solo and loop switch out of a set: only what still holds the temporary value, so a change
@@ -6788,6 +6889,7 @@ function lessonMainHtml(L, i) {
     <p class="ls-text">${esc(lt(st.text))}</p>
     ${st.listen ? `<p class="ls-hint"><b>${esc(T.listen)}</b> ${esc(lt(st.listen))}</p>` : ''}
     <div class="ls-acts">${acts}</div>
+    ${listening ? `<div class="ls-note ls-now" role="status">${esc(lessonListenText(st, T, true))}</div>` : ''}
     ${nav}</div>`;
 }
 function lessonResHtml(L, i) {
@@ -6811,6 +6913,7 @@ function renderLessonDetail(body) {
   const L = lessonData();
   if (!L) { body.innerHTML = '<div class="empty-detail">This build has no lesson.</div>'; return; }
   const n = L.steps.length, i = LESSON.step = clamp(LESSON.step, 0, n);
+  LESSON.back = false; // the lesson is back: Shift+Tab cycles the detail views again
   $('#detail-title').textContent = 'LESSON / ' + lt(L.title);
   // keep the scroll positions and the focused control across a re-render
   const old = $('.lessonbox', body), keep = old ? { top: old.scrollTop, cols: $$('.ls-scroll', old).map(e => e.scrollTop) } : null;
@@ -6849,6 +6952,9 @@ function lessonClick(e) {
 
 // ---------- keyboard: with a lesson control focused from the keyboard, arrows move, Enter presses ----------
 function lessonKey(e) {
+  if (LESSON.back && e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && UI.detail !== 'lesson') { // the first Shift+Tab after Show me
+    e.preventDefault(); setDetail('lesson'); lessonFocus(); return true;
+  }
   const box = $('#detail-body .lessonbox'), a = document.activeElement;
   if (UI.detail !== 'lesson' || !box || !a || a === box || !box.contains(a) || e.ctrlKey || e.metaKey || e.altKey) return false;
   if (LESSON.mouse) return false; // focused by a click or a tap: the app's own keys stay
@@ -6894,7 +7000,7 @@ const LIB_LICENCES = {
   'CC BY 4.0': 'https://creativecommons.org/licenses/by/4.0/',
   'CC BY 3.0': 'https://creativecommons.org/licenses/by/3.0/',
   'CC0 1.0': 'https://creativecommons.org/publicdomain/zero/1.0/',
-  'Public domain (PD Mark 1.0)': 'https://creativecommons.org/publicdomain/mark/1.0/',
+  'Public Domain Mark 1.0 (applied by the author)': 'https://creativecommons.org/publicdomain/mark/1.0/',
   'CC BY (version not stated)': 'https://creativecommons.org/licenses/',
 };
 // Track FX and sends per lane role (the masterclass values): the fader in each song's snd does the mix
@@ -6911,6 +7017,9 @@ const AALASTEIR = 'MIDI parts of the download merged into one file, drums moved 
 const XM_NOTES = 'Notes read from the .xm module patterns (no samples), drum samples mapped to General MIDI drum notes';
 const XM_TUNE = 'pitched parts moved to the pitch of their samples and to the octave of their lane';
 const XM_BREAK = 'sampled break not included: the BREAK lane plays a simple two-step break, written for this library, where the original break plays';
+// Scott DeathBoy uploaded his own modules to the Internet Archive with the Public Domain Mark: a label, not a legal
+// tool, so the credit says who applied it and quotes his words on the item (archive.org/details/DeathBoyXMs)
+const DEATHBOY = 'Public Domain Mark 1.0 applied by the author, who wrote on the item: "This zip represents all of the music I wrote during my time at university (roughly from \'95 to \'99)" and "Hopefully there are some interesting samples to be grabbed in there". Credit given as a courtesy.';
 // One entry per song. parts: [part index in the file, lane, options]. Options: t = semitones, lo / hi = lowest /
 // highest note kept, map = { GM note: GM note }, v = velocity x, chord = intervals added to each note,
 // fold = every note moved by octaves into LIB_SUB (the sub copy of a bass part),
@@ -6925,19 +7034,19 @@ const LIB_ITEMS = [
     parts: [[0, 'DRUMS'], [1, 'REESE', { hi: 59 }], [1, 'SUB', { hi: 59, fold: 1, v: 1.5 }], [2, 'STAB']],
     snd: { DRUMS: ['DRUMS', 'pro', .65], REESE: ['BASS', 'Polar Switch Reese', .59], SUB: ['SUB', 'Sub Pure Mono', .91], STAB: ['KEYS', 'Liquid Keys', .43] },
     chg: ['two FX notes of "2 Bass+FX" (above B3) left out'] },
-  { id: 'corestep', title: 'CORESTEP', author: 'Scott DeathBoy', lic: 'Public domain (PD Mark 1.0)', bpm: 175, key: 9, scale: 'minor',
+  { id: 'corestep', title: 'CORESTEP', author: 'Scott DeathBoy', lic: 'Public Domain Mark 1.0 (applied by the author)', bpm: 175, key: 9, scale: 'minor',
     src: 'https://archive.org/details/DeathBoyXMs',
-    att: '"CORESTEP" by Scott DeathBoy, from "DeathBoy XM Module Archive - \'95 - \'99" (https://archive.org/details/DeathBoyXMs), public domain (credit as courtesy).',
+    att: '"CORESTEP" by Scott DeathBoy, from "DeathBoy XM Module Archive - \'95 - \'99" (https://archive.org/details/DeathBoyXMs). ' + DEATHBOY,
     conv: XM_NOTES,
     // 0 Systembe.iff, 1 Kickslik.iff, 2 4beathih.iff, 3 M1hhopen.raw, 4 Crocksna.raw
     parts: [[1, 'DRUMS'], [2, 'DRUMS'], [3, 'DRUMS'], [4, 'DRUMS'], [0, 'REESE', { t: -36 }], [0, 'SUB', { fold: 1 }]],
     snd: { DRUMS: ['DRUMS', 'pro', .58], REESE: ['BASS', 'Polar Switch Reese', .61], SUB: ['SUB', 'Sub Pure Mono', .83] },
     chg: ['"Systembe" part played as a bass line on A1'] },
-  { id: 'reese', title: 'REESE', author: 'Scott DeathBoy', lic: 'Public domain (PD Mark 1.0)', bpm: 165, key: 0, scale: 'minor',
+  { id: 'reese', title: 'REESE', author: 'Scott DeathBoy', lic: 'Public Domain Mark 1.0 (applied by the author)', bpm: 165, key: 0, scale: 'minor',
     src: 'https://archive.org/details/DeathBoyXMs',
-    att: '"REESE" by Scott DeathBoy, DeathBoy XM Module Archive (https://archive.org/details/DeathBoyXMs), public domain (credit as courtesy).',
+    att: '"REESE" by Scott DeathBoy, from "DeathBoy XM Module Archive - \'95 - \'99" (https://archive.org/details/DeathBoyXMs). ' + DEATHBOY,
     conv: XM_NOTES,
-    // 0 Tr808-01.pat, 1 Nicepian.pat, 2 Princeb2.pat, 3 SH101-Bassdrum, 4 inst 3, 5 Mousbong.iff, 6 Apachecl.iff (break hits), 7 inst 3
+    // 0 Tr808-01.pat, 1 Nicepian.pat, 2 Princeb2.pat, 3 SH101-Bassdrum, 4 inst 3, 5 Mousbong.iff, 6 Apachecl.iff (break hits, scrubbed by pack.py), 7 inst 3
     parts: [[0, 'DRUMS', { map: { 38: 42 } }], [2, 'DRUMS'], [3, 'DRUMS'], [4, 'REESE', { t: -36 }], [7, 'REESE', { t: -36 }], [4, 'SUB', { fold: 1 }], [7, 'SUB', { fold: 1 }],
       [1, 'STAB'], [5, 'LEAD', { t: -9 }]],
     snd: { DRUMS: ['DRUMS', 'pro', .67], REESE: ['REESE', 'Polar Reese', .44], SUB: ['SUB', 'Sub Pure Mono', .77], STAB: ['PIANO', 'Liquid Keys', .52], LEAD: ['BONG', 'Polar Hook Pluck', .62] },
@@ -6966,7 +7075,8 @@ const LIB_ITEMS = [
     att: '"System Daemon" by congusbongus (https://opengameart.org/content/system-daemon), CC BY 3.0. Converted from .xm to MIDI (notes only).',
     conv: XM_NOTES,
     // 0 Juno106 Synth, 1 HR-16 Ride Cymbal, 2 Bass, 3 Electric Piano mp, 4 bb (break hits), 5 Juno106 Synth, 6 TR909 Snare Drum, 7 Organ,
-    // 8 High Hat Closed, 9 arp, 10 Synth Low Strings, 11 FX Zap (break hits), 12 TB-303 Bass, 13 SH-101 Sweep, 14 Phily Stab
+    // 8 High Hat Closed, 9 arp, 10 Synth Low Strings, 11 FX Zap (break hits), 12 TB-303 Bass, 13 SH-101 Sweep, 14 Phily Stab.
+    // The break tracks (4, 11) hold one note per half bar the break sounds in (pack.py): no break rhythm is stored
     parts: [[1, 'DRUMS'], [6, 'DRUMS'], [8, 'DRUMS'], [4, 'BREAK', { brk: true }], [2, 'REESE', { t: -41 }], [12, 'REESE', { t: -29 }], [2, 'SUB', { fold: 1 }],
       [12, 'SUB', { fold: 1 }], [0, 'STAB', { t: -17 }], [3, 'PAD', { t: -17 }], [5, 'LEAD', { t: -17 }], [7, 'LEAD', { t: -17 }]],
     snd: { DRUMS: ['DRUMS', 'pro', .8], BREAK: ['BREAK', 'breaks', .58], REESE: ['BASS', 'Polar Switch Reese', .53], SUB: ['SUB', 'Sub Pure Mono', .8],
@@ -7020,7 +7130,7 @@ const LIB_ITEMS = [
     src: 'https://opengameart.org/content/null-function',
     att: '"Null Function" by congusbongus (https://opengameart.org/content/null-function), CC BY 4.0. Converted from .xm to MIDI (notes only).',
     conv: XM_NOTES,
-    // 0 Synth, 1 Jungle Chord, 2 Bass, 3 Bright Piano f, 4 bb (break hits), 5 bass accent, 6 arp, 7 milky
+    // 0 Synth, 1 Jungle Chord, 2 Bass, 3 Bright Piano f, 4 bb (break hits, scrubbed by pack.py), 5 bass accent, 6 arp, 7 milky
     parts: [[4, 'BREAK', { brk: true }], [2, 'REESE', { t: -29 }], [2, 'SUB', { fold: 1 }], [1, 'STAB', { t: 3 }], [3, 'PAD', { t: -9, v: 2.5 }], [0, 'LEAD', { t: -25 }]],
     snd: { BREAK: ['BREAK', 'breaks', .58], REESE: ['BASS', 'Polar Switch Reese', .51], SUB: ['SUB', 'Sub Pure Mono', .76], STAB: ['CHORD', 'Polar Rave Stab', .58],
       PAD: ['PIANO', 'Liquid Keys', .74], LEAD: ['SYNTH', 'Polar Hook Pluck', .45] },
@@ -7030,15 +7140,15 @@ const LIB_ITEMS = [
     att: '"Shuffle" by congusbongus (https://opengameart.org/content/shuffle), CC BY 4.0. Converted from .xm to MIDI (notes only).',
     conv: XM_NOTES,
     // 0 Juno106 Synth, 1 Bass, 2 MiniMoog Synth, 3 bb (pitched break), 4 High Hat Closed, 5 Organ, 6 dramalead, 7 arp, 8 Synth Low Strings,
-    // 9 bbbass, 10 TR909 Snare Drum, 11 bbshufflel (break hits), 12 check (break hits)
+    // 9 bbbass, 10 TR909 Snare Drum, 11 bbshufflel (break hits), 12 check (break hits). 3, 11 and 12 are scrubbed by pack.py
     parts: [[4, 'DRUMS', { v: 2.5 }], [10, 'DRUMS'], [3, 'BREAK', { brk: true }], [11, 'BREAK', { brk: true }], [1, 'REESE', { t: -41 }], [1, 'SUB', { fold: 1 }], [0, 'STAB', { t: -17, v: 3 }],
       [5, 'STAB', { t: -10 }], [7, 'PAD', { t: -17 }], [8, 'PAD', { t: -17 }], [2, 'LEAD', { t: -5 }], [6, 'LEAD', { t: -18 }]],
     snd: { DRUMS: ['DRUMS', 'pro', .8], BREAK: ['BREAK', 'breaks', .58], REESE: ['BASS', 'Polar Switch Reese', .55], SUB: ['SUB', 'Sub Pure Mono', .72],
       STAB: ['STAB', 'Polar Rave Stab', .43], PAD: ['PAD', 'Polar Dark Pad', .81], LEAD: ['LEAD', 'Polar Hook Pluck', .5] },
     chg: [XM_BREAK, 'quiet "Juno106 Synth" and "High Hat Closed" parts played louder', XM_TUNE] },
-  { id: 'clean2', title: 'CLEAN2', author: 'Scott DeathBoy', lic: 'Public domain (PD Mark 1.0)', bpm: 165, key: 11, scale: 'minor',
+  { id: 'clean2', title: 'CLEAN2', author: 'Scott DeathBoy', lic: 'Public Domain Mark 1.0 (applied by the author)', bpm: 165, key: 11, scale: 'minor',
     src: 'https://archive.org/details/DeathBoyXMs',
-    att: '"CLEAN2" by Scott DeathBoy, DeathBoy XM Module Archive (https://archive.org/details/DeathBoyXMs), public domain (credit as courtesy).',
+    att: '"CLEAN2" by Scott DeathBoy, from "DeathBoy XM Module Archive - \'95 - \'99" (https://archive.org/details/DeathBoyXMs). ' + DEATHBOY,
     conv: XM_NOTES,
     // 0 4beathih.iff, 1 inst 2, 2 909rim.iff, 3 Sinecz.raw, 4 909crash.iff, 5 Dedicati.iff, 6 900no.iff, 7 Dred1.wav, 8 Screamsc.iffvcln.vcl,
     // 9 SH101-Bassdrum, 10 Cymcrsh2.pat, 11 inst 6, 12 Praisech.iff
@@ -7048,18 +7158,21 @@ const LIB_ITEMS = [
     chg: ['"909rim" played on the TOPS pad, "Sinecz" played as ghost snares', '"Dred1" sample played as a bass line two octaves lower'] },
 ];
 // Drum grooves from the Groove MIDI Dataset: one 8-bar groove per scene. [LIB_MIDI key, scene name, file in the dataset, recorded BPM]
-const LIB_GROOVES = { id: 'grooves', title: 'Grooves', author: 'Google LLC: Groove MIDI Dataset (Gillick, Roberts, Engel, Tran, Bamman 2019)', lic: 'CC BY 4.0', bpm: 172,
+// Free sessions only: the eval_session files are the set of 10 beats every drummer was asked to play (groove1 is the
+// Amen break re-played). Every bar is checked against famous record breaks by lab/library/tools/breakscan.py.
+const GMD_AUTHORS = 'Jon Gillick, Adam Roberts, Jesse Engel, Douglas Eck, David Bamman 2019';
+const LIB_GROOVES = { id: 'grooves', title: 'Grooves', author: `Google LLC: Groove MIDI Dataset (${GMD_AUTHORS})`, lic: 'CC BY 4.0', bpm: 172,
   key: 5, scale: 'minor', src: 'https://magenta.withgoogle.com/datasets/groove',
   grooves: [
     ['g-twostep', 'TWO-STEP 170', 'drummer1/session1/80_dance-breakbeat_170_beat_4-4.mid', 170],
     ['g-rolling', 'ROLLING HATS 170', 'drummer1/session1/81_dance-breakbeat_170_beat_4-4.mid', 170],
-    ['g-funk138', 'FUNK 138 SPED UP', 'drummer5/eval_session/1_funk-groove1_138_beat_4-4.mid', 138],
-    ['g-funk112', 'FUNK 112 CHOPPED', 'drummer7/session3/65_funk_112_beat_4-4.mid', 112],
-    ['g-soul102', 'SOUL 102 SYNCOPATED', 'drummer5/eval_session/10_soul-groove10_102_beat_4-4.mid', 102],
-    ['g-soul105', 'SOUL 105 HATS', 'drummer7/session3/130_soul_105_beat_4-4.mid', 105],
+    ['g-funk100', 'FUNK 100 GHOSTS', 'drummer7/session2/72_funk_100_beat_4-4.mid', 100],
+    ['g-secondline124', 'SECOND LINE 124', 'drummer5/session2/7_neworleans-secondline_124_beat_4-4.mid', 124],
     ['g-funk125', 'FUNK 125 BUSY', 'drummer1/session1/126_funk-fast_125_beat_4-4.mid', 125],
-    ['g-half87', 'HALFTIME 87', 'drummer5/eval_session/6_hiphop-groove6_87_beat_4-4.mid', 87],
+    ['g-hiphop100', 'HIP-HOP 100 OFFBEAT', 'drummer7/session1/39_hiphop_100_beat_4-4.mid', 100],
   ] };
+// 'Grooves (8 grooves, 3 drummers)': the counts read from the list above
+const libGroovesLabel = () => `Grooves (${LIB_GROOVES.grooves.length} grooves, ${new Set(LIB_GROOVES.grooves.map(g => g[2].split('/')[0])).size} drummers)`;
 const LIB = { busy: false };
 const LIB_SOUNDS = "all sounds made by the app's own kits and synths (no sound of the original)";
 const LIB_SUB = [28, 39]; // E1..Eb2 (41-78 Hz): the octave the SUB lane plays in
@@ -7235,10 +7348,10 @@ async function libBuildGrooves(it) {
   p.tracks[0].clips.forEach((c, k) => { if (c) c.name = it.grooves[k][1]; });
   Object.assign(p, { key: it.key, scale: it.scale });
   p.credit = libCredit(Object.assign({}, it, {
-    att: 'Drums: Groove MIDI Dataset by Google LLC (Gillick, Roberts, Engel, Tran, Bamman 2019), CC BY 4.0 https://creativecommons.org/licenses/by/4.0/. ' +
+    att: `Drums: Groove MIDI Dataset by Google LLC (${GMD_AUTHORS}), CC BY 4.0. ` +
       'Scenes 1-8: ' + it.grooves.map(g => g[2]).join(', ') + '.',
   }), 'Excerpted, remapped to General MIDI drum notes and tempo-scaled for this library; ' +
-    `bars 1-8 of each excerpt made into one scene, all at ${it.bpm} BPM (recorded at ${it.grooves.map(g => g[3]).join(', ')} BPM, the 87 BPM groove read as halftime); ` +
+    `bars 1-8 of each excerpt made into one scene, all at ${it.bpm} BPM (recorded at ${it.grooves.map(g => g[3]).join(', ')} BPM); ` +
     `notes quantized to 16ths; ${LIB_SOUNDS}.`);
   return { project: p, stats: res.stats };
 }
@@ -7246,13 +7359,16 @@ async function libBuildGrooves(it) {
 // ---------- browser, credits ----------
 // 'Aalasteir - CC BY 4.0': the short author and licence of an item (escaped for HTML unless html is false)
 const libLine = (it, html = true) => { const s = `${it.author.split(/[,:(]/)[0].trim()} - ${it.lic.replace(/ \(.*$/, '')}`; return html ? esc(s) : s; };
+const LIB_CREDITS_INFO = "Who made this set, its licence, its source and what was changed, and the credits of the app's sounds";
+const LIB_SOUNDS_INFO = "The credits of the app's sounds (this set is not from the library, so it has no credit of its own)";
 function libBrowserHtml() {
   const cur = P.credit ? P.credit.id : null, sub = 'style="display:block;font-size:10px"';
   let h = `<div class="br-sec"><div class="br-title"><span>Library</span><span>BPM</span></div>`;
-  if (P.credit) h += `<button class="br-item cur" data-credits="1" data-info="Who made this set, its licence, its source and what was changed"><span>Credits of this set<small ${sub}>${esc(P.credit.title)}</small></span></button>`;
+  h += P.credit ? `<button class="br-item cur" data-credits="1" data-info="${esc(LIB_CREDITS_INFO)}"><span>Credits of this set<small ${sub}>${esc(P.credit.title)}</small></span></button>`
+    : `<button class="br-item" data-credits="1" data-info="${esc(LIB_SOUNDS_INFO)}"><span>Credits<small ${sub}>Sounds of DNB-808 Live</small></span></button>`;
   const item = it => `<button class="br-item${it.id === cur ? ' cur' : ''}" data-lib="${it.id}" data-info="Open &quot;${esc(it.title)}&quot; by ${esc(it.author)} (${esc(it.lic)}) as a new set: the notes of the song, played by the app's sounds. CTRL+Z goes back"><span>${esc(it.title)}<small ${sub}>${libLine(it)}</small></span><small>${it.bpm}</small></button>`;
   h += LIB_ITEMS.map(item).join('');
-  h += `<div class="br-sub">Drum grooves</div>` + item(Object.assign({}, LIB_GROOVES, { title: 'Grooves (8 drummers)', author: 'Groove MIDI Dataset' }));
+  h += `<div class="br-sub">Drum grooves</div>` + item(Object.assign({}, LIB_GROOVES, { title: libGroovesLabel(), author: 'Groove MIDI Dataset' }));
   return h + '</div>';
 }
 async function libOpen(id) {
@@ -7265,45 +7381,86 @@ async function libOpen(id) {
   } catch (err) { console.error(err); flash(`Could not open "${it.title}": ${err.message}`); }
   LIB.busy = false;
 }
-// The Credits button in the menu bar: shown while the set has a credit
+// The Credits button in the menu bar: always there (the sounds have credits too), its tip follows the set
 function libSyncTopbar() {
   let b = $('#m-credits');
   if (!b) {
     const name = $('#set-name'); if (!name) return;
-    b = el('button', 'mb', 'Credits'); b.id = 'm-credits'; b.dataset.info = 'Who made this set, its licence, its source and what was changed';
+    b = el('button', 'mb', 'Credits'); b.id = 'm-credits';
     b.onclick = libShowCredits; name.before(b);
   }
-  b.classList.toggle('hidden', !P.credit);
+  b.dataset.info = P.credit ? LIB_CREDITS_INFO : LIB_SOUNDS_INFO;
+}
+// The text "Copy credit" gives (and the README shows): credit line, licence page, changes
+function libCreditText(c) {
+  const att = c.attribution.trim();
+  return `${att}${/[.!?]$/.test(att) ? '' : '.'} Licence: ${c.licenceUrl || c.licence}. Changes: ${c.changes}`;
+}
+// The credits of the bundled samples (SAMPLE_CREDITS, section 3c) and which kits are synthesized, as HTML rows
+function libSoundsHtml(link) {
+  const credits = typeof SAMPLE_CREDITS !== 'undefined' && Array.isArray(SAMPLE_CREDITS) ? SAMPLE_CREDITS : [];
+  const kits = smp => Object.values(KITS).filter(k => k.pads.some(pd => pd[1] === 'smp') === smp).map(k => k.name).join(', ');
+  // each credit as text, with its web address and its licence name as links
+  const rich = s => s.split(/(https?:\/\/[^\s)]+|CC0 1\.0|CC BY [34]\.0)/).map((part, k) => (k % 2 === 0 ? esc(part)
+    : /^https?:/.test(part) ? link(part, part, 'Where these samples come from (opens a new tab)')
+      : link(LIB_LICENCES[part], part, `The ${part} licence of these samples (opens a new tab)`))).join('');
+  let h = `<tr><td style="vertical-align:top">Synths</td><td class="mi-name">Every synth and the synth drum kits (${esc(kits(false))}): made by DNB-808 Live in the browser, no samples.</td></tr>`;
+  if (credits.length) h += `<tr><td style="vertical-align:top">Samples</td><td class="mi-name">The sample kits (${esc(kits(true))}) and the sampler's bundled sounds:<ul style="margin:4px 0 0;padding-left:16px;line-height:1.45">${credits.map(s => `<li>${rich(String(s))}</li>`).join('')}</ul></td></tr>`;
+  return h;
 }
 function libShowCredits() {
-  const c = P.credit; if (!c) { flash('This set has no credits: it does not come from the library'); return; }
-  const old = $('#credit-dialog'); if (old) old.remove();
-  const link = (url, text) => (url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent)">${esc(text || url)}</a>` : esc(text || '-'));
-  const changes = c.changes.replace(/\.$/, '').split('; ').map(s => `<li>${esc(s.charAt(0).toUpperCase() + s.slice(1))}</li>`).join(''); // one change per line
+  const old = $('#credit-dialog'); if (old) old.close();
+  const c = P.credit, opener = document.activeElement;
+  const link = (url, text, info) => (url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent)" data-info="${esc(info)}">${esc(text || url)}</a>` : esc(text || '-'));
+  const changes = c ? c.changes.replace(/\.$/, '').split('; ').map(s => `<li>${esc(s.charAt(0).toUpperCase() + s.slice(1))}</li>`).join('') : ''; // one change per line
+  const set = c ? `<p class="mdesc"><b>${esc(c.title)}</b> by ${esc(c.author)}. The set has the notes of this work only: every sound is made by DNB-808 Live.</p>
+    <div class="mtable-wrap"><table class="mtable"><tbody>
+      <tr><td style="vertical-align:top">Licence</td><td class="mi-name">${link(c.licenceUrl, c.licence, `The licence of "${c.title}": what you may do with it (opens a new tab)`)}</td></tr>
+      <tr><td style="vertical-align:top">Source</td><td class="mi-name">${link(c.source, '', `Where "${c.title}" comes from (opens a new tab)`)}</td></tr>
+      <tr><td style="vertical-align:top">Credit line</td><td class="mi-name" id="cr-line">${esc(c.attribution)}</td></tr>
+      <tr><td style="vertical-align:top">Changes</td><td class="mi-name"><ul style="margin:0;padding-left:16px;line-height:1.45">${changes}</ul></td></tr>
+    </tbody></table></div>
+    <p class="mdesc">When you share music made from this set, give this credit line with the licence and say what you changed. Copy credit copies all three.</p>`
+    : `<p class="mdesc">This set does not come from the library, so it has no credit of its own. These are the credits of the sounds it plays.</p>`;
   const ov = el('div', 'overlay');
   ov.id = 'credit-dialog';
   ov.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="cr-h" tabindex="-1">
     <h2 id="cr-h">Credits</h2>
-    <p class="mdesc"><b>${esc(c.title)}</b> by ${esc(c.author)}. The set has the notes of this work only: every sound is made by DNB-808 Live.</p>
-    <div class="mtable-wrap"><table class="mtable"><tbody>
-      <tr><td style="vertical-align:top">Licence</td><td class="mi-name">${link(c.licenceUrl, c.licence)}</td></tr>
-      <tr><td style="vertical-align:top">Source</td><td class="mi-name">${link(c.source)}</td></tr>
-      <tr><td style="vertical-align:top">Credit line</td><td class="mi-name" id="cr-line">${esc(c.attribution)}</td></tr>
-      <tr><td style="vertical-align:top">Changes</td><td class="mi-name"><ul style="margin:0;padding-left:16px;line-height:1.45">${changes}</ul></td></tr>
-    </tbody></table></div>
-    <p class="mdesc">When you share music made from this set, give this credit line and say what you changed.</p>
-    <div class="mbtns"><span id="cr-msg" class="mi-msg"></span><button class="btn" id="cr-copy" data-info="Copy the credit line and the changes">Copy credit</button><button class="btn on" id="cr-close" data-info="Close [Esc]">Close</button></div>
+    ${set}
+    <h3 id="cr-snd" style="margin:0;font-size:13px;font-weight:600;color:var(--bright)">Sounds</h3>
+    <div class="mtable-wrap"><table class="mtable" aria-labelledby="cr-snd"><tbody>${libSoundsHtml(link)}</tbody></table></div>
+    <div class="mbtns"><span id="cr-msg" class="mi-msg"></span>${c ? '<button class="btn" id="cr-copy" data-info="Copy the credit line, the licence address and the changes">Copy credit</button>' : ''}<button class="btn on" id="cr-close" data-info="Close [Esc]">Close</button></div>
   </div>`;
   document.body.append(ov);
-  const close = () => { ov.remove(); $('#app').inert = false; };
+  // Keys while the dialog is open, before the app's shortcuts see them: Esc closes from anywhere, Tab stays inside
+  // the dialog, every other key stays out of the app (Space must not start the transport)
+  const keys = e => {
+    e.stopPropagation();
+    if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const f = $$('a[href], button', ov), n = f.length, i = f.indexOf(document.activeElement);
+      if (n) f[i < 0 ? (e.shiftKey ? n - 1 : 0) : (i + (e.shiftKey ? n - 1 : 1)) % n].focus();
+      return;
+    }
+    if (!ov.contains(e.target)) e.preventDefault(); // focus outside the dialog: no scrolling, no app key
+  };
+  const close = () => {
+    window.removeEventListener('keydown', keys, true);
+    ov.remove(); $('#app').inert = false;
+    // the focus goes back to the opener, or to the menu button when the opener is gone or off screen (the phone browser slides away)
+    const r = opener && opener !== document.body && opener.isConnected && opener.getClientRects().length ? opener.getBoundingClientRect() : null;
+    const back = r && r.right > 0 && r.left < innerWidth && r.bottom > 0 && r.top < innerHeight ? opener : $('#m-credits');
+    if (back && back.isConnected) back.focus();
+  };
   ov.close = close;
-  ov.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape') close(); }); // the app's shortcuts wait until the dialog is closed
+  window.addEventListener('keydown', keys, true);
   let downOnBackdrop = false; // close on a full click on the backdrop, like the import dialog
   ov.addEventListener('pointerdown', e => { downOnBackdrop = e.target === ov; });
   ov.addEventListener('click', e => { if (downOnBackdrop && e.target === ov) close(); });
   $('#cr-close', ov).onclick = close;
-  $('#cr-copy', ov).onclick = () => {
-    const text = `${c.attribution} Changes: ${c.changes}`, msg = $('#cr-msg', ov);
+  if (c) $('#cr-copy', ov).onclick = () => {
+    const text = libCreditText(c), msg = $('#cr-msg', ov);
     const done = ok => { msg.textContent = ok ? 'Copied' : 'Select the text and copy it'; };
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => done(true), () => done(false)); else done(false);
   };
@@ -7320,21 +7477,19 @@ const LIB_MIDI = {
   'y4j': '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',
   'greene': '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',
   'subterrain': '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',
-  'system-daemon': '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',
-  'null-function': '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',
-  'shuffle': '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',
+  'system-daemon': 'H4sIAAAAAAAC/+2az08bVxDHJ8ZptylV3VaVkKpKL5KFKArqIqJIyWkJabFQVmuvF5sUKbUNFlgB49iOEKfH2oQfFarANAF66yGHqkLi2GOPvfXQS6uoPfZfaG903u7YuzbIcmMKDuwh+s77vJnZmbdv188mqjE7DQBvwBUIQEI18o9wFISjrneiS4Viep7dS6bnF7JwFOm6mjqAowm/39cjwdGnYPte+1v4jj3JLgzKt1h0KVucNX+DLY3LyxqgKrAVs+3lmBhzHCsNY+Yat+mv4rzG7BgVWY0rTmwdZ06OOt5heewcsBV3el2O19YDudLArRzIWQN/hTy6K4/uyqPjnMEdblAeHecMpYFTHoM1cMoTc+WJufLElAZOeWKsgaNvRMSQf8Ses9Y/ImJonavcEJyJ+yBT3R/i3Pvo85a3b7196+1bb996+9bbt96+veT7Vqy/2LcGdzjWUzv+Sh/h8fe9kD4weIvpmek0G1maTyXn8Ai8PxTt3hiCoKeeeuqpp556emnUdUS4jkcE/91koXAI2xo3FVODxPYkl81JgG080Jh4MNnWecLUQd5WuRkw1Ro4mwhdROgY8RA9HyJ4gPoA1UAHAyMMEYHnHgxNWJF0DVNxJ821MUUl4FQnXvOi3C+vD68Prw+vD6+PM+tjE/AazYzaQeHNsvgt4bO59FQxn5li4Uwyu8Dmc1AxuL8Sw38anyhh8oqh+EtYZyWGigkqmtInuG1zmkP/CPrb845/BDWC/shrfpjf4iJ/1a96HTueOCPOiDPiAeIB4gHiEnGJuETcT9xP3E/cR9xH3Pe0R0zY0F4EatJbiE5YCIvFmFgIqY2FWL2ojZVFoWWR7Z+OeYpp44r2qq2t91gXjnXgPXhtCq3fLCuKFaBzpwCD91VUHijpgtuFYaK+En5KVFSFOLPGlq1yyfLRuISxYfKjCygSxTOLx7nNqzE6+sftRbJyiYVSL9pCCR2nhsUCiPkwNj4uOC6QWIA4alhwhTgjzogzhirjnCx47aO461f8KH43lWJ9qXw6+YjNZoqFT35Q9oPTprIRxEe6aq3UWA2Zx1FHeDUx2vb+PyowX/UyDjKb1FBuCa2dkOuMVusEr5Oqaa2PZjU7uTZOMbD5yv3HO9PMvbXb4Tzavx/7D2ulddjRuLyD5/8yvoGEXVN8OzXjO/EmvvhG2TEauSKXDcEV4gpxRpwRZ8QDxAPEA8Ql4hJxibifuJ+4n7iPuI+4z+KCWWOvf6//161/cbZGeGh14TzgGj7gAUO/Ld9m0Wwyn2b38k/mD2C/l3Vv9EL3fm8v6Q3Sm6R3SIdJR0lV0nHSSdIp0gzpY9JFUu5W80X3OVdwcN4FmPerxvR+75c0o5BalZUN8gjShHnTFcJPCqlNXMik/uO3jJ/yLePNbpnzWF35Ex+rq1p+Jpn9Gb7ReGhFgx5UGdU9tlX8dLaiglw1AI2EpecRqaOHjh46Rup1Y1vDIgC/B1QNQCNh6SXps3aX4aX44hPKzMyyULLIRuYWCulpfHf24y7sx23Zf4P0Duko6TjpFOljUi7UfBFsM8Mf7SZwtfgXttiVzOcO4dkY34SnY1Bn7B0zNtszNoRRPttETre/iB+VrWMuu7+wyKLFfCY7U4DnKnqu4qZp0Vi1jTAvwypumOe6MPRT8zF/aqkQp62vsa0PPp9gXyRzdV/S145/Gzjhy0npe2jFrTXkquo7rOpt4+7AkDzExF/892B3hJu5tRGA3WF85taGwcxVLWtOseY03rOmQQiB7PaFXRWBKmJOI42r0EEstDsaGhiUB1l0MZ3OmVuwNzK6B+sY5zaeWYYT+DEGXgvPZuaWcCslU6Uf4Vt8DV3/ys7+L7OH5XVONAAA',
+  'null-function': 'H4sIAAAAAAAC/+1by08kRRgvmmEyi4rG7KGXU8cowUjiHDYxmZDQQ88MvcAOsLM9dOaRnhkeCwFBXokbDz1PUBMT3sGjF49GL56NB/WmR/+TPeJXVV/PFLMzLIOiEur0vX6/X31VXd1TFcLjp0vzhBA/6SL3SO7x080ViN4l591vxHdWV7XYztrc9vL6Gjmf6e759mdybvt8ihog5x8Sjn3wK2B7Es/Xtpe+0/cTmlpMELJvDalFC2wypBaTYFNjajEFNmFhfQ7rG1h3ed2zSZfnLRdx7kVcFmz2BvAJF/tro/Nf6WfAZjqY71XxN93PdfXl87+tzx98jXFYnITYHmK1os3GA06IjYn6sHZjHJ/18FYD3+gDcBsXcXk+ZjFPcQ7ZLzgMWyzQOsR5p1G3IM46At+hHF5PteBnkZ8V9LNYb8W3kG+1Gb+Z3xzbqGejXiv9y/pP4HgJYb4O4h3EZxHPx1f/N31nse9sm76b+5nH8eev0X/GwX17jf2SwXorfgb5mUv2i8in+jbq21dclwziM23m6eB4zhX6b35uKaynhPmJcRL1k4L+q/rPYP+ZK+3Hl/vPIz6P+EXEL8r3Xb7v8n2/I+97F7zvv8zKC0WH+l7+rh+o5fO/3fNPajznfWiaLxQWXigsoU4vFN6HJoEXioSIn2vCbwgfJrxYpOTFQh40Ouif9pvGftPX3De2I1x8m/hp5Kc72DedHjia8Z0eOET9VgeONPLTLeLrHDjS2H9aXjDkey8vGPKC8Tfe95f4s8CfFfgzwJ8R+BPAnxD4UeBHBb4OfF3gh4AfEvgPgf9Q4A8Bf0jgDwB/QODDOSivCfx+4PcL/PvAvy/w+4DfJ/ADwA80+IsKcJQHwB2knPqfc+79Ts67Xx/fWXu2uqAZS+ub81/pB8bbJb1kEHJg9HvOkOfoOW4n0M6gnUXroF1Bu8GIv4HnmohAq6PVzINhqA2DP8xr3Ncxp5UDjAyBFJACUkAKSAEQGEGBEUiMAIhZHS0IhKAeAj/Ea9zXMed1EJIdyA5ufwd3/nvweYA69WNdIATHOt9ofmvrjBxOuKW3yhOEHMbcXDkGNkITEVKePnzkBsuPSAtIlCaiJHg45arlKaIKFgpTgJgE5CS5efXaNFKDqF7TQP1SRCXIEGOAGAPrtRF3S3o5/i9SOl8YhNzQskt1qS7VpbpUl+qtqY0ThH8LThB9o5vLz5a2tenl/Nq6tvhCOzLeMStw+jgy/OrRuBvkvk+tjIMd11iN+705bv0mtz60imexrqhHpstyFRNiEzSoNTTwe7n+uKseGeBTDIs1lWP8jVxUp2OalSj1Na5HfcOFuBd71lid+17Oj9aHVlG51bmNwlhUJwY2xni0R1ZjPUT9rD+O8SPGBxi/6vXGcQrvm+EUjjMVtT7v279eGPfKfXG390WuaT+c2uB8n2u7ciZ2Me6a9d1CbdT9p57cp2xlvFXxVp7qmIKOiTphh2uFqc/rzKf4sL+BD78CH/YHL8wpjG+Asc7nxXVUWPH66uP8IOcLNmKKUYS4/Q6FXnI4NmFzxl7YfMM+Pn8vjuH8Y/xZHEWgD7oGEFciOK8YvM0R6CXs5Xr5M4sojVyn62LobG0YJpbepQP+yCqNn54/4KfnzUJBGyxsLuRXtKXl7a33ydcD8yX9iwFyi5yqfgublo7ofCNXQTrSkc61HaX+u9b1EfyuvVbIb21p+bm5hbXtM3I8C/eu6iwhx0/cXPUJ2GmamIZr3rHlBqsWaQ3RAUKOpwAxdcECkjpwzatOkptXr00zKhwlgB6swtEAJWoak7ABaYtIiuKISpAhEoBIgLV03k5KP1SrKbI3WG+svnwkDsvXnd/8pPQTOTG0Lz+rGeS9E7jA1mDcE8NliR96oLRLTkbcKg1LELq7pDZChBSNGqof0P9n/Xh5deX5n/ZpXNkb3I0TGOF0VD8ju6OEOns2dYDyFyIhp8M9OwAA',
+  'shuffle': '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',
   'corestep': 'H4sIAAAAAAAC//MNyUhhYGBgY2AE4gTfkKJsIE+e4T8zh7N/kGtwiGsAw/9AZlZrT4b/ESwsTBIcDP/1GSDKGEWAyniCK4tLUnOTUvUy09IYJrjWJzS4MoDobCCtCqQNoPwENBokH4pDHJ8+GG2ARpNqDk3sR4SNFChsvDOTs4tzMrPBYTNTpZ6nU4UhBEo3skAZKmgScAUmuCQI6QxBk1ch1yDqOwE99ZgkpSaWZGRmQEJIC6hGC6h3ZNKIsGG4AwobX8OMjPyC1Dy9osTyRoeZet48nXpAxRBaBUo3pgwpCSQ/TgD50bkoH5hF8hKhflQDBoQaKHVBGSlQRlMJlaRgjBAorQKlQe4CAEZ0hHILBQAA',
   'clean2': 'H4sIAAAAAAAC/+2dwU/TUBzHH2wS0IlLxITjDmMHEudGiHGJB3SYyCIEsh28Qd1G1ugm6SqoMek6IIbIAS7G/hEa1OjZgwdunoxX/wJjPJqY+QothSkYM9BtfC77fPe+v/feb69r81u7reOZQk4I0SU6RK+YGc9ot+WzsKj5Ts+qJbVcmE7euHZlYkjUpnwnVnVRu+n3d/Z3i9oFsR071CdjA8O38opeUAtRdXZWWINGYGVQhCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCGFT0vttyNmnoubrUktlPTTk/iok49AcrmvAwMDAwMDAwMDAwMDAwMDAwMDAaNjwzs4Fz4ma72QiltDUov2/LZ+FNTAWWBmQfSCEx40bLASEEEIIIQUgPEb0Tg6c+WifHEirpXz2YVRTFsy1mBUZCaxEZGwk5DBoM2xFDOe5y5GD2uv7S3Y79Nf122+cA8cjn+bMZ5MFIh/yIR/yIR/yIR/yIR/yIR/y+Tf5eB/uT6Xte7YkYomsppS37tkSs+KRwErc/poA4lfxkkVA8P5BIBAIxBELi0VoKeGV1j0f7NJ6NJ9Ts4qubt8OMSzL77Awc67wOyLsNgzXOzuxGSscshmwwiMOf981U28w297YV/q+Fkv0P2ZbauftsMlmb83ZVv9iusccSVpztmcsZfvvnYcwnVfWdb+XZV1PIhYr3bVruhnnlKrs0Yhwz9TKVI/VeC8eOeLyMV8Ixjv68d7oLFIbjrc0zCo1Mt6S/88r2kyx7BWNjefVMv6aXcuMavlcPLqgzJvvxFraMIOVtBBrE0Y1VJmQYsyoTlbGpEgZi7FKSoopo3qpMiX6CSaYYIJbM9g7DPq+y8NgXzqr5ZViOWt/qpvP3ilF5cPypHPMXJ5zxX1aaKGluVrsGmfEFSFXBF3R7Qq/Kzr3FkId3+QRoDd9PR6Ln7+qlMs57V7RvVr3REe0m9i15b/aV2mTD4pZrVwYis4purDihn0lVwYj2kzs2u6fdv6Q/uJbsZ6SVcJ60qgWzKRQzZRYnm6CJvP5dHMm9qNJ8/I2r/hi79aTmqKW89mt7zVvuLcdkG+GRoT5Wj+kgRYPaSD7Vf8EQyXtSLyTAAA=',
-  'reese': 'H4sIAAAAAAAC/+1UTUvjYBCeahQXyuKhYBY85FCqK6hvV1mKtNouBILYYm0Vb5s0bW1wt5akld5i0r0Ie4gVhP4Af5G/ZH9Bd9741ryNHyiLeHBPz8w8zzyZSYbky40qAExDBD6Ami+bx5jNw3Byak+WSzIMi5NTv9swPBSECXEGhqtwq5mIoSZaNlMktUySKy2tDYPE1+h5AuL/8V1icBvwh95GwdBrLUNr+rfhbcri2SaI3hbiFmIOMQdu1UvLgpfBJA1wlkEiLROMibeBuOGjiCg+YECogXQnoCa3BtRMYfXuk0+mT32kcYS9WEjozHIzUgW3+A1dfNc0mnqt8oUurg4SafpynPVHg/ioIDxf8oyel/hTSue1I+RWu8bVPpaUJEkuf9Msq2p2fsIgbkfP4+BUR4HwlhVu2CscdtpoWm1prQcXiu3MOgqMBYRDX6JiQDj0CRJuGa+oITP1AfM7DKb7Ra8kf9KxKifNoxWjXod+wXZTbgGUftHuukUQ+zu2k3V3gFBGQkblmUNkRMrMINNFRkWGBD3blNlGSclW3BJiyDWYJbKGs3zKtTS9UdN/0FmkxYpZ046lhtG2PuM/3aZ3MMdecXKwhLgE+6y+x3JguMDqMZa7p/9ocBDq1+75jeeR1x6Y+4yrwZF52UtFIj38ypdKluF3hraP2PYXmf0CkWsHAAA=',
+  'reese': 'H4sIAAAAAAAC/+2SwU7CQBCGR6kGE2I8eKiJhx4I0YO6qDHEoBaTJg0RIsLBmy0tSqMiaTHhVrZwMfFQMTHhAXwin8QnwNkKdCVo9ORBT9/s/jP/zmwmV6qaADALUzAHWq5kX+JpGfqRmRNFKSrQL0Rm7hvQPxWEaTEK/Q14z5lexJxYyU6R1BpJrtf1BvQSO7G7BMT/+ScZ7ga8st3IW0album1YDf8fUVs7YPoHyAPkBlkBjzTTyuCv4eHNEBrD4W0QjAm/i5yN6CIFCcYEGYgjRKYybsBM1MH980vX2avflI4ZHtxLJEucD2yDG7wFzb4sW3VjEp5kw2u9RJp9jl0+9MgPrwQvp/yjZqf+DPJ4HOH5EZ7xtHmi2qSJNcOdccx7dtr6MXd2F0cqDkMhN+84Zp9wmZnrZrTkLba8KC6dIGq8CEgHIMUDQPCMRDIeMnHG23MTJtgPmLYXYdtSe7m1inf1C7WrfNz6OZdL+XlQe0W3KZXALF75FLZOwLCFAkVjVdOURGZEkWliYqGCglrskzJYkrRVb0icsyV6yWLvSxl6rpRrRhXrBdppWxX9EupajWcVSr3EiaVcRM6o4hOiDq50HEj/HtfflQl0sbhH1V5wLMB3YBY9gbaulgbggYAAA==',
   'strawberry': 'H4sIAAAAAAAC/+1YW08bRxQeLqmayqkq9YW3TCIHcfUFkBxiSIwNhazWcqg31BGqyNq7xG7Wu9buEhqpqopxLfFWDFjiB/ZftHK/mV3swXESUVGpIfvwacZzvjnnzJlzZmadVcoaIeQLMkRuk1hWsV8TMvQr6YxMb69+/zxLx2l6JZ//keZdW90v6rb9ls7SQkk1KsU9m05kMjT9YpJ0huqJ+++bcJ8W3wpTLnqyZWuTMzRj66pbeaPTjFWtWqYDfTNUzmbzNF9W7Yr5ij4zVHfXsqu07Lo151E0alSrTqRiRQ2nFn2iltyKZS47ZWt/fLdi6Mvxh4uJh/QXmimr5ivdeURLlvlGt11do7u2VaVuWff012zrJ73kUtei2aerT5M0DU+iadVxjIqp05rquroNh/Sfa6qp6VqSavZelTpqtWboDq2qtRp0YvZ6lpqWiyHLpCVYNXWDxmNs1R6XmmpVT9LqHvMBYSm9dqih77rU2nMjpFMYHR0e+5J0Nkdupf8inSjxduHO39iFW6sw6ZDzsMYQOgoTAoTPH+D3ODDBETp6gPFxYIIjfD6N8RjGp/E7RkL+fMLHZ7t6CJfPQn5ZHzmf9LmRd3STo0l/XgTzLvRd6LmwMwXEgfmZnq0pIA7Mgzf1JITf79pl8+YH2Jy6mLfszeO8iVB3vGt3RbT3L/R/5+kX19G/hsD/z9v/yAdsRIJ9CPwP6uC9dRAX7p74R++xpb57L/TRe+9q9+RN1z/4/o4Ecbpm/cF7Kzing3MhOBeuax96H4EjSXwEfptOU8Wu4Esy55QqBj6HLZv8saaFflsjYb9d8ttQ33ggD+Sfo7xXQrdzKKGvMtZ+UTeMiOYcpI43NHKsaKGDDUKO19Guo82gzaBNoU2h3fgfyxVCOCeGdeR/CB3E0J/D+BzaBbR5yBfQT0CegzyBfhLjSbRLaHOQL6H/GPJNyB/7ejd9vRLGZYxLH/BD0m6uXEYcMlzmxe9TzZOckCfKgDxRhDzJD8iTvJAnOSFPckKefMr7LPn7LPnnQT+PxcfjkuPCAH0FyD0u4iPozQn5E5wzwTkTnDPBOfNfnjOKVqdMCYIbZsFEEMNMiKIbY8WGIjskLNsgAJNJFDAuzxjj4xJTJXGdHqGAtsAIGid0n1VDHfasWtt5VlFNiz+rWti+FlK5JQNZoKAdkjr2sg7f67BezwLQ1Ur5RMSjlQPyjJjyiTBeh6E6vGot+toYSQG2GHHR18ZI8LC+BWJiEDExgBj4eC0+dtOAHCINvl63LI3mDI0qlaqOVDgZx7xDfNSeTLAOvmpP7rHOPXTuss5ddK6J08vITbgyuqHatYPUKSuJBpw9RYI3EIJTlEQDCzhFSTRQEqesJBoyF4DJJCiJvhljfJyVRENiBM0joCQaBUbQPMINtdUN7OifCOw3/f9AHKTOkKgckgBFQEHACwEaxyH5HUnNIQlQBBQEvBCgeThDAXDIAkQHtgRsC9jhgAMoFg5ZgOjAloBtATsezlBYHGsC5L6Vi4Zf+ihywAEUIceaALlv5aLhlz6KHs5QsBwZAdJVHEBxc2QESFdwIMiBIAfEHFC6e923t0pvDy/tmdLdm769UHoxvxRjubukvtjJPVcvxUQSJ4hrlXoTuofd8DAOuzuOtevu1LpPm/acRtpLAJxurwAyVDXxvG3i2dqEw80VAPbbCz4R4WjDdnudERd8IkLRhN0m3m/tWV8bI+EOb0uMOOtrYyTc4U042J4eRJweQAx8vBYfkQn/AKo+WsAVJwAA',
   'g-twostep': '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',
   'g-rolling': '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',
-  'g-funk138': 'H4sIAAAAAAAC/01Wa1ca2RJtHvIwiKJGY3yk1U7bQIOY4zMmjgajk0yMmphxNA8k0ioiwiBmnDyXH/MPpv7d/SF3Le+ucw7rzgdW033qVNXZtWvX2dg5KRmGEcLP5/vPxk6jYhixf4ybQP/6xqp5dHleMY8btdonb8qcEvNmaca48afX5Rdz49nqM3O12CxeeE3TWa/Vjs8888WLfNI183nzyZ45nc0ZN75r3+vaZePQe2iWGpfVqteYmfQ+Fc8KF97FRbl2PjlV4DAZHaaAMIWPXrFZmM5MZ6vlkllsytBPtjYWTe/q0GvUm665vpFpeNVive7B4LxkNr1qvZa5OCye4UOzZk7NTZvORd3zSpf1ZNa42Q60PfmvcfNHMOi/E2kjdy5I1kSIRN776RptPy38hFEiK2mSeLiJ9zBZoQF8+x3/+8nNJ0j81U3O6Qbsu/C9+6djfCaRqeF/iOwH9Z+20QW7NhIzp7AJ4XuE7LlNsjpHsRYhsbgGXxGyxkaxxjHGlP1BgJzjY70noPzap2TPc06n0q/IB8hKh8hdOpI2luEn22nDHuTsBkjMBmF3gu8BrH+GXSeJUjs5P3ZhE8e3W/B7HUTCFbIzQe34DokHcPrqlA8BwyDZ07tkjQxgLUZi6TkcmgisErEMg9wH+H4WJOfPA9jfwvcgHH8j4Xwg207g/YPyu8oJB5AI+/ZjbxD2HWSbB2Rl/SSm47B7Jn1aoT7YGPj/F7lrYyQqUST+FPYMVFQBkq1zLLJHatgXJzEH3ytnMj4OSLYFIHLtWDNIvJ5RfrvukR3t1jF8DL4Egm3s6DM8BxFvgITLIA1I4MRVGznfK/pcNRLpOM7wHgVmzOKwe499UbKGRkg83YbPLrIcBngJ2IzLAotT+KgswzbF5yJ7IgRfjHc/8K+SvcBFOlOEWUDxdvxkpSqw97ewAnFqijQPE2TFVtQZEsNYT+B/mdwtrL0oa9L8SaIJzC6PNF7H5E4ixyTI9bgIm6gmOEgzsazOn5jEE3HTvSDXO6z3YP0KhGwn0bhFztWerm87EwcFm68rB1lmeg+5++ieV5w0nEmCoLC3uQAo4EIeDtvJGm4xPYaDhkl8DZNT5YTC+B6G4+8gAndQG9mCDxwiK4NYz/0oTIVZLgFxjV4U+AQgIeasXzOdY34CeXtIfIuQc/YGdt3/J0yO/bbjwOz3NgkBn7tV2T2uEUDObxUQMcSMxRVpFxYU0ENdeE7Adp/cDLroCqT6coR9DIaB79dAKVkie4YRKklGunlU5ClYnzzSVQlyOyLxmuqmKR/QPtdMvwZ981G0UghUUSUCCgw1YErXFNQOQ90HQ/StOFNQu8yd92T1RVT6vRFpI5afqtR7gjr1h+jteXJT8/g/j7374Av69keB7KGY5vcB9t4jkbqD8vzB/Ib/KGyP8R0CmUHc5T3lN9qjxeWryqfK4sKJB7S4/ICfmuJ78iPs4xJ2dxrlnP0Ne8c5f6x3otRvkedtxe/Hr7CGEgz0Y41jQZwnB6EBPnI+v8aeQYkYgIECb3OAGNlvdsn9tYcVUXJGVLaYI8wzrGdR8xUkD17MD2I9ow4Qua1J/haHtUlc4ABff8E+W5O8qdW8QwOPRKbhe6HVZFD51EtwfFTxSXIlTtaog7V1/I9iqvSTc4iGLjAX++GTRYNVdwJynm3JeRhKgc5L+kB0qPE9v0RGkX1WVbVjBs9brLxynFgyAZB9aUjJ+sVz7Lmrkf8CLtYV8lZdqYxAw+WLqARXJwbbNeX3DnwmOmUDi0Wtvr3MmDEFTGoYyo68treZkgCiVxP+HfYIEuNlsnPcvMdQPUyDJZ9UQ7HssS/ZIBKoex4K0C7PKnIFVkmlLo+g3B86yPmbAeqQiuoYf5MYY1by9ChIVRZp5P+gpBQ/GYHtB42LUngrg356LlT+HTk82dc35INRmTnQIxpTqQbB+X6ixeYrphQU99E2ahGXSuoaW/DnI3u4GwxE3OU83hPKr80TgzHeA2F6yKmhsK/3+Yw4XwT+Arr3cWVwUce5Vn0jIALy2wSrnffKfsovc7BkZzF50F3dFa0Rv2C6octT+3jvg30TnQXBefeW7PF/4z8CQoalkFnJLbIH+7SQ8sS4r8UsjWcKucNumkUyrHBZG0aToPvLm9gzrLufRSz3EUrIYBSxcQBqCrLmq3oUoROm9sD4PqzhPrH4m2S5NTqEtR3VqksYnyU4Pt6RjNeO0depQzjmqnyU6ueuYBy4YNYaAg75JVMsebI5PY8ykpVWCpnPlzXjL9XFq4F5ermvq9rWusiAijYblbHxLrlv0KuL3Kso5wSX4qVyPAJJHuILDVpnaRGOMVAHLaw/QfZReQsTBdCk9Bh705oq18D/PiZ1ujWpw/o2gyC/HksldOUAAtf71/WNAjclNyKVU+BKZodWmBuw5RlRwUmSQGUN+5J4h9iUMbTOWxP7C2qEfaOYKQ7znYXjjfLrdMqbgjUKJB5xLyXk1dK6OwvO5EhsIXmPOTCLfRnYc+mYn0eSM+L+GRS3dQ6++gKQFCqUL8kyW3L0DJHdvaDitQOgLHphlnuNb4Bc7nNUEEDl+Po7jvea4tNJ66bEgDndAOglGqFLNxdXoANoAwwHI2p1V4qcnPKjfIh3OEBA3q/FAd8MNrWo8XXpOqrnIOT+EU9Q42bS+B8BABsargwAAA==',
-  'g-funk112': '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',
-  'g-soul102': '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',
-  'g-soul105': 'H4sIAAAAAAAC/z1V7VIaSRQdvpQoKEqMmkgcdaYztICiJn6uX6CEhFFERo0b12VlNmtWgwW4m9pKVYqfPMJ9gH2vfRP33JkxPyjo2/eePvfc041Z/aOuKEoPPj7ff2a1+aeihMPKQyBeMPNqq3F/o2bnX6v15XR2cV558M8Wmo3GX7ZqFvNFNV9r11p2WzUKjcanG1stlXLJlJrLqbsf1KUM0n1/Hzfum1f2mlpv3t/e2s3luZbdal03vizOAe+S8S+Bf/mbXWtfLqWXMrfXdbXWds7cLZvrqv31ym7etVNqwUw37dva3Z2NhC91tW3f3jXSravaDQLthppdXlCN1p1t1+/vkhnl4SgQqvyrPJwFg/6xsELalEJy3upqitKVSkehTMnqZpRvlNocJb0aIPl5o5tSRrq6EkTCOomE1RXKIMkFC2uDhBgiubpL2rgf8RhiwyR3swDU3f1Rzu8nLekneVxF3McHjVBqKUDGbT/JswIO8HcNJYKNNySec8FTkoIPGMeBz0hubCH2DGswng2TLJsAeoK1SaInR7ISJU0GkZNHLII9NLAcI5GP4tAV4MewF+WDYyRnGfgVCe0JyZ/fY6MPayQWTvC9SeJpiTLmE8T5sBLUCAOwEwFinPRDFFVXgRiHJMygkyaZ9rR4GYSYZVSGsO4lWYqR9nIPv2MugjTDpOkmAg5kAioPkW4C8nwNkMOADDNkguQ6Q74gMQMlNncAGccaau1xvOOjTPkZadoW2I0A6h9KrU6SXgRSLQ2kyUdyLz1yOokpDG1ln4eHdQiagdzUD3IByhwPAzEHxGEOBEFOhQXQ0tmCBxl0RyfzDLlBQsXmxhEgfaTNYL7LPNsKqv34XiMRrZD8yL7AePR9xAaxt0dicI9S5zwS1NRyTufO6DerjurGtQU7dMZIy/RS9vAARb3drNKZJLnIM+rolMr1kDDRUXkL5b0oG+CNUXiPua2S3O4n8eodfsPDO5xwiN8lcNpC6wHSjDhi24j53VHoh/DVWelROJyVZaR5dBVEp0eM5LCTefhCrbIZuXKC5AHsPcNH9XMgSvo7uOn8LaAcy70AGYZawDRRvsX+Vhwvy71Th6wYglDHAe+ivPU83JkifR8jrxaBFPGQ5t32hAHplsogw1Us95BjB4lbgspxkhew2vQPq02QOEV/FyXP7p3nXn8SUCCy8kiqx5vuDomRCmmC4WGWm5J34SCMqA6Q/FB41HwMRCzn5sg3ARKy4mjqKFUOgRQrF2QOuMcWpJu2HqXTSC+D1LHp+T5JYmyPtIFBhkbyCpISiB+Q6NuHWQcdp8nTPOJDiG8jbrnuk37KXLDzgvAvhE7sUMriCe/CHlUyPrOj/GQ0qviukAibpC2Endpsye0NBpvGXbPcJg0byleKyI66757zjkGdC8v1dsz1qjYhSQ5LIMw6bhHxImXOItgrgklngFI74zgej8HZa1AZB2AvEnNItNwL8AtbWuDZ4XUcFwXvRKwIwIj7qDgtQswThxk8cQ5mS+yJfgTOSYS2MY6nSNpx5znkvtCawPWI7wOIL/wiiQFXK/mrAzRLxkeIP1cCo7Bnrt9P3JcxypkTeP1wv+NHjqpO3EFAK59GkbOJ2CjWnTgZX2GRVBlIIQ/J5jMmPSQ8NEnciIkCkNgy38DX4ZAk/bQPF+w9mnFcOUOybrlO6PP+N/j/ZTKHSn4jGiSvnMosXAgiGwdMyDuzxjsF1yuv2Ctgv76LSn46OyHKfD/BSBIYneEoKvoS7neEnyIVhuklkfThdwmT+gncquCFf6nvbJ5F759JeZhT/geRWNuRHggAAA==',
+  'g-funk100': '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',
+  'g-secondline124': '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',
   'g-funk125': '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',
-  'g-half87': 'H4sIAAAAAAAC/01Tf08TQRBd6tk0tTkJEoJQccXNeq5QVGrBShRLY6u2iGD8FZOm0EOKLde0J2mMIbn+x0eYb+cHMalv9+4a/2i6+3bmzZs3c/UPJy3GWBK/qak/9Q/9H4xdrbLxlaVKvcxP2r0Tr8e/9z3v3C3wzQ1+0uwc++2uy8aJBxUD8/rr8mtebvrNgetzp+J53zsur9V27q/wnR1e+sLzuYdsPBUkDryf/SO3yFv9n92u23+y5p43O42BOxi0vbO1QiOsthpVa2xuNA7dpt/Ir+Zz3XaLN30toLRXf8bd4ZHb7/krvFJf7bvdZq/n4v2sxX232/NWB0fNDgDf44828tyJNd/PsfH7K1dLf9n4s2Ul5lOMVImRkKeXirFLwUY+KRXYuI0+k6plyOkHCdzSlw4blUk9CjK4DUncwUGwLVIVE31B4rpBHFLVeRLiHOCcJkTSAWhaAQOSAc2v/5Kfm+QACmZwEqxI6i2yl3ygCzp7luSNBVLrKWi0LyVjJK99w38WAUkdsA96m2TrAoAOCCSKG/qsps+EnYg7FhoNUoCTGtkj9XKGxM3fuExrmiqpVwAWJ8A24m1EGNl2VKmaIXE78kMYh7KhVy1S75Mk24FmT0HG6Dmpp+atR+KW0QMjHhvkK4m06baGGAtFgzTQhGY8JbWXInlqeJK6nTQJbtJBeDN0C42tm9M0cmdJvRjieU7LeEMqFwoCdXWG5OEvXGa1HvSzZdwI0FXWML4itRMatA0iGPQy0G1ZGkG1F5YuncLN0tJqoSGL0RyBfAx3567hMMszJLUU1t9FI2mSx4EVNTJCtU3zdqo91AQYQiGUBBbbOLICSVkSyz2gWc2IHXlnkfxkLLK0IUldUcc+nnQ0G6dLrKNC+iFQpdPBJTmphx1cliOHdm1yBuG6OGbw6yGLivcSgyqHXRSxijapZxdApzUAOdtziJtsdwGxDiZ8DMDRAAq8hUQZTRDIGan5kA4btJ8h6UYbJI1NRfM2jE3JxTbp7dqC/nsTL7SnWPXDaAKS+bHiorbC7MYCiVT8HW7Bl+wwVro7IcapPFlWM5sSqSfmDYzT8Ye4zeFkB+CyTt/EsKBmcaImj65T+qPS25GOeAtMb4gd7QMbr7F/KqDYkl4FAAA=',
+  'g-hiphop100': 'H4sIAAAAAAAC/01U3VIiRxQeQTYoCgQx/muDTTs2IChskMWNW0BEN447uF5kb2IRmUSTdaEAU95tcckjnAfIc+RV8ibkOzNjVS6o5nzf+evvnB7r5r5rGMYr/GZm/rVuBn8aRugfYxpMtqymuH/o3/f64rBYFN1KvlQ1poFsa9Dr/eUI66J5IZqdUWfojITZ6vV+/+yIy8vGfk40GqL+SZQPisZ05vlj72lw57wR3cHT46MzqBSGznD40PtyWChVb738t8h/+6vTGd2W8+WDx4eu6IzcmnXbqgnn+c4Z9Ec50bLyA+ex0+87cPjSFSPnsd/LD+86nwGMeuKwciTMYd9xuk/9/QNj2g6Grv82pj/PzgZWwwbpYn2ijVVSG+2JMr4nWQmQXryaSCMIfJvUIuMp0tU2bPDlNrgC6W+uYX9HciNOKlwHFoNfnGQV8acfYAfAN0jNcfwc6TmOH6co8ylLKp+ZZIwsiA1SCXZA0BU7gNtke5f0Ky5QJDXPdpn0CYqValwUyQWpFcbTpOev0ETQbUYlj8GtAc+QfmsDy5PctoGtkDzZIZ04wv8d4DH4cnwRed3GkmR27YlpWD6xQNpiIkVqle3XpMNsv8Ft/cLvNcndPWAaSaN+Q1tQhv1MUqk5ktlzvj34b0mfMb4Lv2WSSzXgy8DnSUcjJI/OwEVgo96S7Sluu41hBF8ZqEIZ21Pmve0pI7jgKpRiR0VqjfkkyTpuWn+5aY7UsofrBb+BLTRWe2lsCaNlpdcwCahkVjkncPjHQiR/sMDNwi6Tivr1mm5j62R+zVJGKKiWxTifSd9wohUUTMHRgJJr3hlb8c7IDM4c4ljpPKkdTlgheRomnb5AkTnEH5Ja95V0Cx2TfB0Cdgk+BHwcILk5j27PAEQAzJN8K0ibRZYPAZt+ggTpH7mhsSDztzYq7kHCbb+jEs4W6Y9tL8CVDkkibU/aCCfAwp1o0i2FxDngwh/Bge+nUcgk2dgHZnJ3pA/8nVnaIpkp8y2AL2JEYYzlHFwYdtrfKSzpLzzKcZzMP1gSLM2qL120gPMYr4IdJArZrnQ6xgWQYOUDnirLKbFYOSTNeBdJst8e6ST7RUmqReRsgl/wJD1lvIRXNUsyZQEL8ovBs8blQ4f8ssAnSMVtb8nb7qx3yRyyggVsddtrxF3CfSyht5w63vaWaMNbUvkOb94+92dq+splSS+z3zoUx9iqLX8JoVDz2suXAJ4+Ax5xG9NpLGHtJ3Ch/y1hxP9cjPNk9gFubqI5lvvlXS/5o4VS21zYmBaM/wD4/+eQ1QUAAA==',
 };
 // LIB_MIDI end
 
