@@ -1,8 +1,9 @@
 # DNB-808 Live
 
 A small Ableton-style DAW for drum & bass, built for teaching rave and jump-up DnB.
-It is one self-contained `index.html`: Web Audio only, every sound is
-synthesized, no samples and no build step.
+It is one self-contained `index.html`: Web Audio only, no build step.
+Most sounds are synthesized; the Acoustic Kit and the Jungle Breaks use
+CC0 drum samples that are stored inside the page.
 
 It is a private study tool. It lives only on this branch and on its
 Vercel preview, which asks for a Vercel login. It is not on the public
@@ -147,8 +148,8 @@ A static server works too, for example `npx serve .`
 **Library** (browser section "Library")
 - Openly licensed drum & bass songs that open as ready sets in one click: 6 songs by
   Aalasteir (CC BY 4.0), 4 tracker songs by congusbongus (CC0, CC BY), 3 by Scott DeathBoy
-  (public domain), "Strawberry" by Xcalibur (CC BY) and "Grooves", 8 drummer grooves from the
-  Groove MIDI Dataset (CC BY 4.0).
+  (Public Domain Mark, applied by the author), "Strawberry" by Xcalibur (CC BY) and "Grooves",
+  6 drummer grooves from free sessions of the Groove MIDI Dataset (CC BY 4.0).
 - Only the notes ship, never a sound of the originals: every sound is made by this app.
 - **Credits** shows the open set's author, licence, source and the changes made. Keep that
   credit when you share music made from a library set.
@@ -226,14 +227,15 @@ serialize the same object.
 
 The **Library** in the browser opens openly licensed drum & bass songs as ready sets.
 The app ships the notes only (Standard MIDI Files inside `index.html`), never a sound of the originals.
-Every sound is made by DNB-808 Live. The **Credits** button shows the credit of the open set.
-Keep the credit line when you share music made from a library set, and say what you changed.
+Every sound is made by DNB-808 Live. The **Credits** button shows the credit of the open set and the credits of the
+app's sounds (for any set, also one that is not from the library). **Copy credit** gives the credit line, the licence
+address and the changes in one text: keep it when you share music made from a library set, and add what you changed.
 
 | Set | Author | Licence | Source |
 |---|---|---|---|
 | O-Two | Aalasteir | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | <https://archive.org/details/o-two-aalasteir> |
-| CORESTEP | Scott DeathBoy | [Public domain (PD Mark 1.0)](https://creativecommons.org/publicdomain/mark/1.0/) | <https://archive.org/details/DeathBoyXMs> |
-| REESE | Scott DeathBoy | [Public domain (PD Mark 1.0)](https://creativecommons.org/publicdomain/mark/1.0/) | <https://archive.org/details/DeathBoyXMs> |
+| CORESTEP | Scott DeathBoy | [Public Domain Mark 1.0 (applied by the author)](https://creativecommons.org/publicdomain/mark/1.0/) | <https://archive.org/details/DeathBoyXMs> |
+| REESE | Scott DeathBoy | [Public Domain Mark 1.0 (applied by the author)](https://creativecommons.org/publicdomain/mark/1.0/) | <https://archive.org/details/DeathBoyXMs> |
 | Strawberry | Xcalibur (XcaliburLord) | [CC BY (version not stated)](https://creativecommons.org/licenses/) | <https://lmms.io/lsp/?action=show&file=18978> |
 | Subterrain | congusbongus | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | <https://opengameart.org/content/subterrain> |
 | System Daemon | congusbongus | [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) | <https://opengameart.org/content/system-daemon> |
@@ -244,15 +246,15 @@ Keep the credit line when you share music made from a library set, and say what 
 | Greene | Aalasteir | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | <https://archive.org/details/Greene-Aalasteir> |
 | Null Function | congusbongus | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | <https://opengameart.org/content/null-function> |
 | Shuffle | congusbongus | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | <https://opengameart.org/content/shuffle> |
-| CLEAN2 | Scott DeathBoy | [Public domain (PD Mark 1.0)](https://creativecommons.org/publicdomain/mark/1.0/) | <https://archive.org/details/DeathBoyXMs> |
-| Grooves | Google LLC: Groove MIDI Dataset (Gillick, Roberts, Engel, Tran, Bamman 2019) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | <https://magenta.withgoogle.com/datasets/groove> |
+| CLEAN2 | Scott DeathBoy | [Public Domain Mark 1.0 (applied by the author)](https://creativecommons.org/publicdomain/mark/1.0/) | <https://archive.org/details/DeathBoyXMs> |
+| Grooves | Google LLC: Groove MIDI Dataset (Jon Gillick, Adam Roberts, Jesse Engel, Douglas Eck, David Bamman 2019) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | <https://magenta.withgoogle.com/datasets/groove> |
 
 ### O-Two
 
-- **Credit line:** "O-Two" by Aalasteir, CC BY 4.0, https://archive.org/details/o-two-aalasteir (MIDI parts merged and drums moved to channel 10)
+- **Credit to copy:** "O-Two" by Aalasteir, CC BY 4.0, https://archive.org/details/o-two-aalasteir (MIDI parts merged and drums moved to channel 10). Licence: https://creativecommons.org/licenses/by/4.0/. Changes: MIDI parts of the download merged into one file, drums moved to channel 10; notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 170 BPM; all sounds made by the app's own kits and synths (no sound of the original); empty first bar removed; "2 Bass+FX" doubled on the BASS and SUB lanes; SUB notes moved into one octave (E1 to Eb2); two FX notes of "2 Bass+FX" (above B3) left out.
 - **Licence:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - **Source:** <https://archive.org/details/o-two-aalasteir>
-- **Changes:**
+- **Changes, one per line:**
   - MIDI parts of the download merged into one file, drums moved to channel 10
   - Notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 170 BPM
   - All sounds made by the app's own kits and synths (no sound of the original)
@@ -263,10 +265,10 @@ Keep the credit line when you share music made from a library set, and say what 
 
 ### CORESTEP
 
-- **Credit line:** "CORESTEP" by Scott DeathBoy, from "DeathBoy XM Module Archive - '95 - '99" (https://archive.org/details/DeathBoyXMs), public domain (credit as courtesy).
-- **Licence:** [Public domain (PD Mark 1.0)](https://creativecommons.org/publicdomain/mark/1.0/)
+- **Credit to copy:** "CORESTEP" by Scott DeathBoy, from "DeathBoy XM Module Archive - '95 - '99" (https://archive.org/details/DeathBoyXMs). Public Domain Mark 1.0 applied by the author, who wrote on the item: "This zip represents all of the music I wrote during my time at university (roughly from '95 to '99)" and "Hopefully there are some interesting samples to be grabbed in there". Credit given as a courtesy. Licence: https://creativecommons.org/publicdomain/mark/1.0/. Changes: Notes read from the .xm module patterns (no samples), drum samples mapped to General MIDI drum notes; notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 175 BPM; all sounds made by the app's own kits and synths (no sound of the original); "Systembe.iff" doubled on the BASS and SUB lanes; SUB notes moved into one octave (E1 to Eb2); "Systembe" part played as a bass line on A1.
+- **Licence:** [Public Domain Mark 1.0 (applied by the author)](https://creativecommons.org/publicdomain/mark/1.0/)
 - **Source:** <https://archive.org/details/DeathBoyXMs>
-- **Changes:**
+- **Changes, one per line:**
   - Notes read from the .xm module patterns (no samples), drum samples mapped to General MIDI drum notes
   - Notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 175 BPM
   - All sounds made by the app's own kits and synths (no sound of the original)
@@ -276,10 +278,10 @@ Keep the credit line when you share music made from a library set, and say what 
 
 ### REESE
 
-- **Credit line:** "REESE" by Scott DeathBoy, DeathBoy XM Module Archive (https://archive.org/details/DeathBoyXMs), public domain (credit as courtesy).
-- **Licence:** [Public domain (PD Mark 1.0)](https://creativecommons.org/publicdomain/mark/1.0/)
+- **Credit to copy:** "REESE" by Scott DeathBoy, from "DeathBoy XM Module Archive - '95 - '99" (https://archive.org/details/DeathBoyXMs). Public Domain Mark 1.0 applied by the author, who wrote on the item: "This zip represents all of the music I wrote during my time at university (roughly from '95 to '99)" and "Hopefully there are some interesting samples to be grabbed in there". Credit given as a courtesy. Licence: https://creativecommons.org/publicdomain/mark/1.0/. Changes: Notes read from the .xm module patterns (no samples), drum samples mapped to General MIDI drum notes; notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 165 BPM; all sounds made by the app's own kits and synths (no sound of the original); "inst 3" doubled on the REESE and SUB lanes; SUB notes moved into one octave (E1 to Eb2); part left out: "Apachecl.iff (break hits)"; quiet "Tr808-01" hits played as closed hats; pitched parts moved to the pitch of their samples and to the octave of their lane.
+- **Licence:** [Public Domain Mark 1.0 (applied by the author)](https://creativecommons.org/publicdomain/mark/1.0/)
 - **Source:** <https://archive.org/details/DeathBoyXMs>
-- **Changes:**
+- **Changes, one per line:**
   - Notes read from the .xm module patterns (no samples), drum samples mapped to General MIDI drum notes
   - Notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 165 BPM
   - All sounds made by the app's own kits and synths (no sound of the original)
@@ -291,10 +293,10 @@ Keep the credit line when you share music made from a library set, and say what 
 
 ### Strawberry
 
-- **Credit line:** "\[DRUM & BASS\] Strawberry" by Xcalibur (XcaliburLord), Creative Commons BY, LMMS Sharing Platform, https://lmms.io/lsp/?action=show&file=18978 (converted to MIDI)
+- **Credit to copy:** "\[DRUM & BASS\] Strawberry" by Xcalibur (XcaliburLord), Creative Commons BY, LMMS Sharing Platform, https://lmms.io/lsp/?action=show&file=18978 (converted to MIDI). Licence: https://creativecommons.org/licenses/. Changes: LMMS project converted to MIDI: Beat/Bassline patterns expanded, factory drum samples mapped to General MIDI drum notes, muted "sforzando" track left out; notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 174 BPM; all sounds made by the app's own kits and synths (no sound of the original); "Good Old Times" doubled on the BASS and SUB lanes; SUB notes moved into one octave (E1 to Eb2); parts left out: "BB TripleOscillator", "Harp", "soft_piano.ds"; "Cowbell.ds" melody played by a pluck synth.
 - **Licence:** [CC BY (version not stated)](https://creativecommons.org/licenses/)
 - **Source:** <https://lmms.io/lsp/?action=show&file=18978>
-- **Changes:**
+- **Changes, one per line:**
   - LMMS project converted to MIDI: Beat/Bassline patterns expanded, factory drum samples mapped to General MIDI drum notes, muted "sforzando" track left out
   - Notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 174 BPM
   - All sounds made by the app's own kits and synths (no sound of the original)
@@ -305,10 +307,10 @@ Keep the credit line when you share music made from a library set, and say what 
 
 ### Subterrain
 
-- **Credit line:** "Subterrain" by congusbongus (https://opengameart.org/content/subterrain), CC0 (credit optional).
+- **Credit to copy:** "Subterrain" by congusbongus (https://opengameart.org/content/subterrain), CC0 (credit optional). Licence: https://creativecommons.org/publicdomain/zero/1.0/. Changes: Notes read from the .xm module patterns (no samples), drum samples mapped to General MIDI drum notes, octaves of the pitched parts set by role; notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 160 BPM; all sounds made by the app's own kits and synths (no sound of the original); first 6 empty bars removed; "Novation Bass" doubled on the BASS and SUB lanes; SUB notes moved into one octave (E1 to Eb2); part left out: "FX Filter Sweep"; power-chord samples played as root and fifth; "FX Bounce" moved up a fifth to the pitch of its sample.
 - **Licence:** [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)
 - **Source:** <https://opengameart.org/content/subterrain>
-- **Changes:**
+- **Changes, one per line:**
   - Notes read from the .xm module patterns (no samples), drum samples mapped to General MIDI drum notes, octaves of the pitched parts set by role
   - Notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 160 BPM
   - All sounds made by the app's own kits and synths (no sound of the original)
@@ -321,10 +323,10 @@ Keep the credit line when you share music made from a library set, and say what 
 
 ### System Daemon
 
-- **Credit line:** "System Daemon" by congusbongus (https://opengameart.org/content/system-daemon), CC BY 3.0. Converted from .xm to MIDI (notes only).
+- **Credit to copy:** "System Daemon" by congusbongus (https://opengameart.org/content/system-daemon), CC BY 3.0. Converted from .xm to MIDI (notes only). Licence: https://creativecommons.org/licenses/by/3.0/. Changes: Notes read from the .xm module patterns (no samples), drum samples mapped to General MIDI drum notes; notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 170 BPM; all sounds made by the app's own kits and synths (no sound of the original); "Bass" doubled on the BASS and SUB lanes; "TB-303 Bass" doubled on the BASS and SUB lanes; SUB notes moved into one octave (E1 to Eb2); parts left out: "arp", "Synth Low Strings", "FX Zap (break hits)", "SH-101 Sweep", "Phily Stab"; sampled break not included: the BREAK lane plays a simple two-step break, written for this library, where the original break plays; pitched parts moved to the pitch of their samples and to the octave of their lane.
 - **Licence:** [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/)
 - **Source:** <https://opengameart.org/content/system-daemon>
-- **Changes:**
+- **Changes, one per line:**
   - Notes read from the .xm module patterns (no samples), drum samples mapped to General MIDI drum notes
   - Notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 170 BPM
   - All sounds made by the app's own kits and synths (no sound of the original)
@@ -337,10 +339,10 @@ Keep the credit line when you share music made from a library set, and say what 
 
 ### Ah Seh
 
-- **Credit line:** "Ah Seh" by Aalasteir, CC BY 4.0, https://archive.org/details/ah-seh-Aalasteir (MIDI parts merged and drums moved to channel 10)
+- **Credit to copy:** "Ah Seh" by Aalasteir, CC BY 4.0, https://archive.org/details/ah-seh-Aalasteir (MIDI parts merged and drums moved to channel 10). Licence: https://creativecommons.org/licenses/by/4.0/. Changes: MIDI parts of the download merged into one file, drums moved to channel 10; notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 170 BPM; all sounds made by the app's own kits and synths (no sound of the original); empty first bar removed; "2 Bass" doubled on the BASS and SUB lanes; SUB notes moved into one octave (E1 to Eb2).
 - **Licence:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - **Source:** <https://archive.org/details/ah-seh-Aalasteir>
-- **Changes:**
+- **Changes, one per line:**
   - MIDI parts of the download merged into one file, drums moved to channel 10
   - Notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 170 BPM
   - All sounds made by the app's own kits and synths (no sound of the original)
@@ -350,10 +352,10 @@ Keep the credit line when you share music made from a library set, and say what 
 
 ### Roll back the Tape
 
-- **Credit line:** "Roll back the Tape" by Aalasteir (vocals in the audio by MegapiemanPHD), CC BY 4.0, https://archive.org/details/roll-back-the-tape-Aalasteir (MIDI parts merged and drums moved to channel 10)
+- **Credit to copy:** "Roll back the Tape" by Aalasteir (vocals in the audio by MegapiemanPHD), CC BY 4.0, https://archive.org/details/roll-back-the-tape-Aalasteir (MIDI parts merged and drums moved to channel 10). Licence: https://creativecommons.org/licenses/by/4.0/. Changes: MIDI parts of the download merged into one file, drums moved to channel 10; notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 180 BPM; all sounds made by the app's own kits and synths (no sound of the original); empty first bar removed; SUB notes moved into one octave (E1 to Eb2).
 - **Licence:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - **Source:** <https://archive.org/details/roll-back-the-tape-Aalasteir>
-- **Changes:**
+- **Changes, one per line:**
   - MIDI parts of the download merged into one file, drums moved to channel 10
   - Notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 180 BPM
   - All sounds made by the app's own kits and synths (no sound of the original)
@@ -362,10 +364,10 @@ Keep the credit line when you share music made from a library set, and say what 
 
 ### Stone5
 
-- **Credit line:** "Stone5" by Aalasteir, drums by DynamiteGrizzly (Ruby Mello), CC BY 4.0, https://archive.org/details/Stone5 (MIDI parts merged and drums moved to channel 10)
+- **Credit to copy:** "Stone5" by Aalasteir, drums by DynamiteGrizzly (Ruby Mello), CC BY 4.0, https://archive.org/details/Stone5 (MIDI parts merged and drums moved to channel 10). Licence: https://creativecommons.org/licenses/by/4.0/. Changes: MIDI parts of the download merged into one file, drums moved to channel 10; notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 160 BPM; all sounds made by the app's own kits and synths (no sound of the original); empty first bar removed; "Bassline" doubled on the BASS and SUB lanes; SUB notes moved into one octave (E1 to Eb2); long notes of part "3" moved to the CHORDS lane.
 - **Licence:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - **Source:** <https://archive.org/details/Stone5>
-- **Changes:**
+- **Changes, one per line:**
   - MIDI parts of the download merged into one file, drums moved to channel 10
   - Notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 160 BPM
   - All sounds made by the app's own kits and synths (no sound of the original)
@@ -376,10 +378,10 @@ Keep the credit line when you share music made from a library set, and say what 
 
 ### Y4J
 
-- **Credit line:** "Y4J" by Aalasteir, CC BY 4.0, https://archive.org/details/y4j-Aalasteir (MIDI parts merged and drums moved to channel 10)
+- **Credit to copy:** "Y4J" by Aalasteir, CC BY 4.0, https://archive.org/details/y4j-Aalasteir (MIDI parts merged and drums moved to channel 10). Licence: https://creativecommons.org/licenses/by/4.0/. Changes: MIDI parts of the download merged into one file, drums moved to channel 10; notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 160 BPM; all sounds made by the app's own kits and synths (no sound of the original); first 2 empty bars removed; "Bassline" doubled on the BASS and SUB lanes; SUB notes moved into one octave (E1 to Eb2).
 - **Licence:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - **Source:** <https://archive.org/details/y4j-Aalasteir>
-- **Changes:**
+- **Changes, one per line:**
   - MIDI parts of the download merged into one file, drums moved to channel 10
   - Notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 160 BPM
   - All sounds made by the app's own kits and synths (no sound of the original)
@@ -389,10 +391,10 @@ Keep the credit line when you share music made from a library set, and say what 
 
 ### Greene
 
-- **Credit line:** "Greene" by Aalasteir, CC BY 4.0, https://archive.org/details/Greene-Aalasteir (MIDI parts merged, drums moved to channel 10, snare note 37 changed to 38)
+- **Credit to copy:** "Greene" by Aalasteir, CC BY 4.0, https://archive.org/details/Greene-Aalasteir (MIDI parts merged, drums moved to channel 10, snare note 37 changed to 38). Licence: https://creativecommons.org/licenses/by/4.0/. Changes: MIDI parts of the download merged into one file, drums moved to channel 10, snare note 37 changed to 38; notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 165 BPM; all sounds made by the app's own kits and synths (no sound of the original); empty first bar removed; "3 Bass" doubled on the BASS and SUB lanes; SUB notes moved into one octave (E1 to Eb2); part "2" moved up an octave.
 - **Licence:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - **Source:** <https://archive.org/details/Greene-Aalasteir>
-- **Changes:**
+- **Changes, one per line:**
   - MIDI parts of the download merged into one file, drums moved to channel 10, snare note 37 changed to 38
   - Notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 165 BPM
   - All sounds made by the app's own kits and synths (no sound of the original)
@@ -403,10 +405,10 @@ Keep the credit line when you share music made from a library set, and say what 
 
 ### Null Function
 
-- **Credit line:** "Null Function" by congusbongus (https://opengameart.org/content/null-function), CC BY 4.0. Converted from .xm to MIDI (notes only).
+- **Credit to copy:** "Null Function" by congusbongus (https://opengameart.org/content/null-function), CC BY 4.0. Converted from .xm to MIDI (notes only). Licence: https://creativecommons.org/licenses/by/4.0/. Changes: Notes read from the .xm module patterns (no samples), drum samples mapped to General MIDI drum notes; notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 162 BPM; all sounds made by the app's own kits and synths (no sound of the original); "Bass" doubled on the BASS and SUB lanes; SUB notes moved into one octave (E1 to Eb2); parts left out: "bass accent", "arp", "milky"; sampled break not included: the BREAK lane plays a simple two-step break, written for this library, where the original break plays; "Jungle Chord" sample played by a stab synth (root and fifth); "Bright Piano f" played louder; pitched parts moved to the pitch of their samples and to the octave of their lane.
 - **Licence:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - **Source:** <https://opengameart.org/content/null-function>
-- **Changes:**
+- **Changes, one per line:**
   - Notes read from the .xm module patterns (no samples), drum samples mapped to General MIDI drum notes
   - Notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 162 BPM
   - All sounds made by the app's own kits and synths (no sound of the original)
@@ -420,10 +422,10 @@ Keep the credit line when you share music made from a library set, and say what 
 
 ### Shuffle
 
-- **Credit line:** "Shuffle" by congusbongus (https://opengameart.org/content/shuffle), CC BY 4.0. Converted from .xm to MIDI (notes only).
+- **Credit to copy:** "Shuffle" by congusbongus (https://opengameart.org/content/shuffle), CC BY 4.0. Converted from .xm to MIDI (notes only). Licence: https://creativecommons.org/licenses/by/4.0/. Changes: Notes read from the .xm module patterns (no samples), drum samples mapped to General MIDI drum notes; notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 160 BPM; all sounds made by the app's own kits and synths (no sound of the original); "Bass" doubled on the BASS and SUB lanes; SUB notes moved into one octave (E1 to Eb2); parts left out: "bbbass", "check (break hits)"; sampled break not included: the BREAK lane plays a simple two-step break, written for this library, where the original break plays; quiet "Juno106 Synth" and "High Hat Closed" parts played louder; pitched parts moved to the pitch of their samples and to the octave of their lane.
 - **Licence:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - **Source:** <https://opengameart.org/content/shuffle>
-- **Changes:**
+- **Changes, one per line:**
   - Notes read from the .xm module patterns (no samples), drum samples mapped to General MIDI drum notes
   - Notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 160 BPM
   - All sounds made by the app's own kits and synths (no sound of the original)
@@ -436,10 +438,10 @@ Keep the credit line when you share music made from a library set, and say what 
 
 ### CLEAN2
 
-- **Credit line:** "CLEAN2" by Scott DeathBoy, DeathBoy XM Module Archive (https://archive.org/details/DeathBoyXMs), public domain (credit as courtesy).
-- **Licence:** [Public domain (PD Mark 1.0)](https://creativecommons.org/publicdomain/mark/1.0/)
+- **Credit to copy:** "CLEAN2" by Scott DeathBoy, from "DeathBoy XM Module Archive - '95 - '99" (https://archive.org/details/DeathBoyXMs). Public Domain Mark 1.0 applied by the author, who wrote on the item: "This zip represents all of the music I wrote during my time at university (roughly from '95 to '99)" and "Hopefully there are some interesting samples to be grabbed in there". Credit given as a courtesy. Licence: https://creativecommons.org/publicdomain/mark/1.0/. Changes: Notes read from the .xm module patterns (no samples), drum samples mapped to General MIDI drum notes; notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 165 BPM; all sounds made by the app's own kits and synths (no sound of the original); "Dred1.wav" doubled on the DRED and SUB lanes; SUB notes moved into one octave (E1 to Eb2); parts left out: "Screamsc.iffvcln.vcl", "Praisech.iff"; "909rim" played on the TOPS pad, "Sinecz" played as ghost snares; "Dred1" sample played as a bass line two octaves lower.
+- **Licence:** [Public Domain Mark 1.0 (applied by the author)](https://creativecommons.org/publicdomain/mark/1.0/)
 - **Source:** <https://archive.org/details/DeathBoyXMs>
-- **Changes:**
+- **Changes, one per line:**
   - Notes read from the .xm module patterns (no samples), drum samples mapped to General MIDI drum notes
   - Notes quantized to 16ths and cut into 8-bar scenes, the whole song laid out in the arrangement at 165 BPM
   - All sounds made by the app's own kits and synths (no sound of the original)
@@ -451,18 +453,25 @@ Keep the credit line when you share music made from a library set, and say what 
 
 ### Grooves
 
-- **Credit line:** Drums: Groove MIDI Dataset by Google LLC (Gillick, Roberts, Engel, Tran, Bamman 2019), CC BY 4.0 https://creativecommons.org/licenses/by/4.0/. Scenes 1-8: drummer1/session1/80_dance-breakbeat_170_beat_4-4.mid, drummer1/session1/81_dance-breakbeat_170_beat_4-4.mid, drummer5/eval_session/1_funk-groove1_138_beat_4-4.mid, drummer7/session3/65_funk_112_beat_4-4.mid, drummer5/eval_session/10_soul-groove10_102_beat_4-4.mid, drummer7/session3/130_soul_105_beat_4-4.mid, drummer1/session1/126_funk-fast_125_beat_4-4.mid, drummer5/eval_session/6_hiphop-groove6_87_beat_4-4.mid.
+- **Credit to copy:** Drums: Groove MIDI Dataset by Google LLC (Jon Gillick, Adam Roberts, Jesse Engel, Douglas Eck, David Bamman 2019), CC BY 4.0. Scenes 1-8: drummer1/session1/80_dance-breakbeat_170_beat_4-4.mid, drummer1/session1/81_dance-breakbeat_170_beat_4-4.mid, drummer7/session2/72_funk_100_beat_4-4.mid, drummer5/session2/7_neworleans-secondline_124_beat_4-4.mid, drummer1/session1/126_funk-fast_125_beat_4-4.mid, drummer7/session1/39_hiphop_100_beat_4-4.mid. Licence: https://creativecommons.org/licenses/by/4.0/. Changes: Excerpted, remapped to General MIDI drum notes and tempo-scaled for this library; bars 1-8 of each excerpt made into one scene, all at 172 BPM (recorded at 170, 170, 100, 124, 125, 100 BPM); notes quantized to 16ths; all sounds made by the app's own kits and synths (no sound of the original).
 - **Licence:** [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - **Source:** <https://magenta.withgoogle.com/datasets/groove>
-- **Changes:**
+- **Changes, one per line:**
   - Excerpted, remapped to General MIDI drum notes and tempo-scaled for this library
-  - Bars 1-8 of each excerpt made into one scene, all at 172 BPM (recorded at 170, 170, 138, 112, 102, 105, 125, 87 BPM, the 87 BPM groove read as halftime)
+  - Bars 1-8 of each excerpt made into one scene, all at 172 BPM (recorded at 170, 170, 100, 124, 125, 100 BPM)
   - Notes quantized to 16ths
   - All sounds made by the app's own kits and synths (no sound of the original)
 
 Notes on the licences:
 
-- CC BY asks for the credit, a link to the licence and a note that the work was changed: the credit line and the changes above do that.
+- CC BY asks for the credit, a link to the licence and a note that the work was changed: the credit to copy holds all three.
 - "Strawberry" is labelled "Creative Commons (by)" on the LMMS Sharing Platform with no version number: credit it as CC BY.
-- Scott DeathBoy put the Public Domain Mark on his own modules. The credit is a courtesy. Subterrain is CC0: credit optional.
+- Scott DeathBoy uploaded his own modules to the Internet Archive with the Public Domain Mark 1.0. Creative Commons
+  calls the mark a label, not a legal tool, so the credit says that the author applied it and quotes his words on the item.
+  The credit is a courtesy. Subterrain is CC0: credit optional.
 - The tracker modules (.xm) also hold samples of unknown origin. The library has their notes only, never their samples.
+  A track that only played a sampled break ("... (break hits)", and "bb" in Shuffle) keeps no rhythm of that break:
+  one long note per half bar marks where the break plays, and the BREAK lane plays the library's own stand-in break there.
+- The grooves come from free sessions of the Groove MIDI Dataset only, never from its "eval_session" set of 10 beats
+  that every drummer was asked to play (that set has a re-played Amen break). Their kick and snare were checked bar by bar
+  against famous record breaks: no bar has the same pattern.
