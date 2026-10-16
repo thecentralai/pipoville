@@ -2720,8 +2720,19 @@ function initSession() {
     const act = e.target.closest('[data-act]'), slot = e.target.closest('.slot');
     if (act) {
       const a = act.dataset.act;
-      if (a === 'launch') { launchClip(+slot.dataset.t, +slot.dataset.s); select(+slot.dataset.t, +slot.dataset.s, 'clip'); }
-      else if (a === 'stop') { stopTrack(+slot.dataset.t); select(+slot.dataset.t, +slot.dataset.s); }
+      if (a === 'launch') {
+        const t = +slot.dataset.t, c = P.tracks[t].clips[+slot.dataset.s];
+        launchClip(t, +slot.dataset.s); select(t, +slot.dataset.s, 'clip');
+        if (c && !c.notes.length) flash(`${c.name} is empty, so ${P.tracks[t].name} is silent until you draw notes. ↩ Arrangement plays the timeline again`);
+      } else if (a === 'stop') {
+        const t = +slot.dataset.t, r = RT[t], prev = UI.slotStop, now = performance.now();
+        // remembered for a moment: a double-click on an empty slot creates a clip and must not leave the track stopped
+        // (its second click keeps the state from before the first one)
+        if (!(prev && prev.t === t && now - prev.at < 700)) UI.slotStop = { t, at: now, rt: { playing: r.playing, queued: r.queued, arrOff: r.arrOff } };
+        stopTrack(t); select(t, +slot.dataset.s);
+        const st = UI.slotStop; // a plain click (no double-click follows): say how to get the timeline back
+        setTimeout(() => { if (UI.slotStop === st && TR.playing && RT[t].arrOff) flash(`${P.tracks[t].name} stopped. ↩ Arrangement plays the timeline again`); }, 450);
+      }
       else if (a === 'tstop') stopTrack(+act.dataset.t);
       else if (a === 'stopall') stopAll();
       else if (a === 'scene') launchScene(+act.closest('.scene').dataset.s);
@@ -2731,8 +2742,14 @@ function initSession() {
     const th = e.target.closest('.th'); if (th) select(+th.dataset.t, null, 'device');
   });
   v.addEventListener('dblclick', e => {
-    if (e.target.closest('[data-act]')) return;
     const slot = e.target.closest('.slot');
+    if (slot && slot.classList.contains('empty')) { // the whole empty slot creates a clip, its stop square included
+      const t = +slot.dataset.t, st = UI.slotStop;
+      if (st && st.t === t && performance.now() - st.at < 700) Object.assign(RT[t], st.rt); // undo the stop of the first click
+      UI.slotStop = null;
+      createClip(t, +slot.dataset.s); return;
+    }
+    if (e.target.closest('[data-act]')) return;
     if (slot) { const t = +slot.dataset.t, s = +slot.dataset.s; if (P.tracks[t].clips[s]) renameClip(t, s); else createClip(t, s); return; }
     const th = e.target.closest('.th'); if (th && +th.dataset.t >= 0) { renameTrack(+th.dataset.t); return; }
     const sn = e.target.closest('.sname'); if (sn) renameScene(+sn.closest('.scene').dataset.s);
