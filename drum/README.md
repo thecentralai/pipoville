@@ -611,6 +611,39 @@ Open a drum lane, then the **Devices** tab. The drum rack has a group named **VO
 - Without samples on the lane, it loads the synthesized Vox Chops kit until you load a pack or chops.
 - The track FX, the sidechain and the master work as on every lane. One undo step.
 
+## Wave 3: composition, keys, PRO sounds, audio loops
+
+**Songs that are composed, not stacked**
+- GENERATE SONG follows a production rulebook (arrangement, registers, mix) built from about 40 public articles and guides
+- One new layer at most every 8 bars, density caps per section (a drop is drums, bass, chords and one hook), and the outro
+  takes layers away in reverse order
+- One chord progression per song, played by a KEYS lane in every section: 11 hand-written 8-bar progressions with
+  turnarounds, rootless voicings over the bass, open voicings without it, comping rhythms per genre
+- One melody: phrases built from hand-written motifs, chord tones on the strong beats, steps in between, an open first
+  phrase and a closed second one (A A' A A'' and a B part), rests between phrases
+- Every section boundary has a transition: drum fills, risers that end on the downbeat, reverse swells, impacts, the sub
+  out 2 bars before the drop and a beat of silence
+- A default mix per genre: levels, EQ, sidechain, glue, sends, and a hall reverb on Return A for new songs
+
+**Keys engine**
+- Piano samples: Upright Piano KW by Gonzalo and Roberto (FreePats), CC0 1.0 (https://freepats.zenvoid.org/Piano/acoustic-grand-piano.html)
+- Presets: Grand Piano, Soft Piano, Dark Piano, EP Warm, EP Tremolo, Wurli Bite (synthesized electric pianos),
+  Strings Soft, Choir Pad (additive)
+- Return A has reverb types Classic (the old one, kept for old sets), Plate, Hall and Room, with PRE-DELAY, DAMP and LOW CUT
+
+**23 PRO presets (Tidal Pro)**: smooth pads, leads, basses, plucks and risers, each a finished sound with its own EQ,
+chorus, delay and reverb, low end mono, about -18 LUFS: Air Atmos, Bell Lead, Choir Drift, Clean Wobble, Down Sweep,
+Evolving Strings, Glass Halo Pad, Glass Keys, Glide Lead, Liquid Keys, Liquid Sub, Neuro Clean, Rave Lead, Riser 4 Bars,
+Silk Lead, Silk Pad, Smooth Growl, Smooth Hoover, Soft Pluck, Talking Bass, Velvet Dark Pad, Velvet Reese, Vocal Lead
+
+**Audio tracks and song packs**
+- "+ Audio track" (up to 4, after the 8 lanes) or drop a .wav on a slot or lane: audio clips launch, loop, move and play
+  in the arrangement like MIDI clips
+- Warp: BPM and key from the file name (for example _174BPM_Cm) or detected; STRETCH keeps the pitch and moves the loop to
+  the set's key, REPITCH changes speed and pitch, OFF plays the file as it is; start, gain, reverse, fades, length
+- A SONG PACK is a .zip with song.json and its audio files: import it (or drop it) and the set opens with its loops;
+  export one to move a set with loops to another browser. The audio stays in this browser (IndexedDB)
+
 ## Shortcuts
 
 | Key | Action |
