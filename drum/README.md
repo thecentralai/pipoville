@@ -385,6 +385,232 @@ offbeat chops, call and response, stutter.
 4. Press GENERATE BEAT five times on Auto and name each style before you read the info line.
 5. LOCK a style you like and press again: the signature stays (kick and snare), the details move (ghosts, hats, fills).
 
+## Move clips between tracks
+
+- **Session view:** drag a clip to any slot of any track. Alt (Option) + drag copies it. On a phone, hold the clip 0.4 s, then
+  drag; hold over 1 s to copy. Esc cancels
+- **Arrangement:** drag a clip up or down to another lane; it keeps its bar. Alt + drag copies
+- The notes follow the target: drums to drums by sound (KICK to B.KICK...), synth to drums by pitch order, drums to synth as
+  scale notes from the root. The info line says what happened
+- **A .mid file** dropped on a slot or a lane becomes one clip there (a small picker asks which part if the file has several).
+  Dropped anywhere else it opens as a new set, as before
+- **Ctrl+C / Ctrl+V** paste onto any track with the same conversion. Every move is one undo step
+
+## Styles, GENERATE SONG, MATCH and VARIATION
+
+The generator now listens before it plays. A lane matches what the other lanes of the scene already play. A style sets the
+whole vibe of a song, and GENERATE SONG builds a complete set in one click. VARIATION makes a second version of a scene
+(for example of a drop) with the same chords. Every press is one undo step (CTRL+Z).
+
+### Styles
+
+A style is a vibe you can try in one click. It holds:
+
+- the tempo, the swing and the keys it likes,
+- the progressions it uses and the chord type of each lane (for example 9ths on a liquid pad),
+- a drum style mix (which beat styles AUTO picks from) and the rhythms of the bass, sub, stab, pad and lead,
+- a preset for each synth lane and a kit for each drum lane,
+- track FX (distortion, OTT, phaser, width, EQ) and the mastering preset,
+- an arrangement and an energy curve.
+
+The rule is "inspired by, original material". A style can name the artist whose sound inspired it. It matches tempo, groove,
+sound design, arrangement and energy. Every riff, melody, chord loop and pattern is new: the generator writes them.
+
+| Style | Tempo | What makes the vibe |
+|---|---|---|
+| Festival jump-up rave (inspired by Chase & Status) | 175 | A two-step beat, a talking FM bass that bounces with every kick, huge supersaw hoovers and stabs on anthem chords. The drop comes fast. |
+| Dark rave anthem (inspired by Chase & Status) | 174 | Harmonic-minor anthems: the major V pulls back to a dark home chord. A switching Reese under rave hoovers, a halftime breakdown. |
+| Neurofunk (inspired by Mefjus) | 174 | Syncopated neuro steppers, metallic FM and formant basses that change every 16th, phrygian half steps, almost no chords. |
+| Tech-neuro roller (inspired by Pirapus) | 174 | One rolling Reese line over two chords, a tight roller beat with ghost snares, very little on top. |
+| Brostep 140 (inspired by Skrillex) | 140 | Halftime (the snare on beat 3), folded formant growls in short blasts with gaps, a screaming lead, risers into each drop. |
+| Liquid | 174 | 9th and 7th chords that move by step, a walking bass, a swung ride and ghost notes, keys and pads in the drop. Gentle mastering. |
+| Jungle | 165 | The break leads: chops of the Jungle Breaks kit cut, repeated and reversed over a deep sub and a simple Reese, with swing. |
+| Jump-up | 174 | A pedal bass on the root that talks with its LFO, a bouncy kick on the "and" of 2, claps on the backbeat, donk stabs. |
+
+The presets come from the app: for example Supersaw Rave Stab and Polar Rave Hoover (festival), Neuro Reese Wide (dark rave),
+Neuro Metal Bass and Growl Formant (neurofunk), Rolling Reese (tech roller), Growl Formant and Sub Square Grit (brostep),
+Jump-Up Talker FM (festival and jump-up).
+
+### GENERATE SONG
+
+**Generate Song** in the menu bar opens a list of the styles. The browser also has a **Styles** section under Templates: a
+click there generates a song at once. The new set has:
+
+- six scenes: INTRO, BUILD, DROP A, BREAKDOWN, DROP B, OUTRO, and two empty rows for your variations,
+- a clip on every lane that plays in each section (8 bars each), all on one progression of the style,
+- the presets, kits, track FX, mix and mastering preset of the style,
+- the arrangement laid out, for example 16 bars of intro, 16 of build, 32 of drop, 16 of breakdown, 16 of build, 32 of drop
+  and 16 of outro.
+
+The sections also bring lanes in and out. The intro starts with the break, the pad and the FX; the DRUMS lane with its kick
+comes in halfway (DJ-friendly).
+The build plays a snare roll that gets faster and louder, with a riser, and its last beat is silent. The drop starts with an
+impact. The breakdown has no break and a halftime beat in its second half. The outro ends with drums only.
+
+The energy curve sets how hard each section plays (velocity and drum density): intro about 40 %, build 60 %, drop 100 %,
+breakdown 30 %, drop B 100 %, outro 45 %. The set opens in the arrangement, like a template. CTRL+Z gives back the set you had.
+
+### STYLE in the generator panel
+
+The generator panel (the clip panel, under LAUNCH) now starts with **STYLE**. It is the style of the song, the same on every
+lane. With a style, every AUTO setting follows it: the beat styles come from its drum mix, the rhythms and the chord types
+from its lists. A progression that the style does not use changes to the style's first one. On a drum lane the lane's own
+pattern menu is now called **BEAT**.
+
+### MATCH: the generator listens to the scene
+
+**MATCH** is on by default. Before it generates a lane, the generator reads the other lanes of the same scene:
+
+- **The chords that sound.** It reads the notes of the pad, stab, bass and sub half a bar at a time and finds the chord of
+  the scale that fits best. The bass note counts double. A chord outside the scale (the major V of harmonic minor, for
+  example) is used only when the scene clearly plays its outside note. A lead alone does not count: a melody does not say
+  which chords sound. Without chords in the scene, the song progression plays.
+- **The kick and the snare.** The bass and the sub put a note on every kick. On AUTO the sub uses **Kick lock**: a root on
+  each kick, held to the next one. A lead and a stab leave the snare's steps free: the note moves a 16th later, or an
+  arpeggio rests for that 16th.
+- **The section and its energy.** The scene name says the section (intro, build, drop, breakdown, outro, verse). A busy beat
+  raises the energy, a sparse one lowers it. A quiet section plays softer, with lower drum density; a build gets a snare
+  roll; a breakdown gets a halftime beat, long sub notes and a slow hook.
+- **The key, the tempo and the style** of the set.
+
+The info line says what it matched, for example: "Matched DROP A (drop, energy 100%) in F natural minor at 174 BPM: Fm Db Eb
+Cm from SUB, STAB and LEAD, kick of DRUMS, Neurofunk style. Generated: Kick lock on the scene's chords...". The panel card
+also shows "The scene plays: ..." before you press. Turn MATCH off to hear the song progression only.
+
+### VARIATION
+
+Select any clip of a scene and press **VARIATION**. Tick the lanes to make again (drums, bass and lead are ticked at first),
+choose the amount and press **MAKE VARIATION**. The new scene goes into the next empty row and gets a name such as
+"DROP A var 2". The app adds a new row when every row is full.
+
+- The other lanes are copied as they are.
+- The chords stay: every new lane plays the chords of the original scene.
+- The tempo, the key and the style stay. The bass locks to the new kick.
+- **Subtle**: the same style. The drums keep their kick and snare and get new ghosts, hats and fills. The synth lanes keep
+  their first half and get a new second half.
+- **Medium**: the same style or rhythm, a new variation of it.
+- **Bold**: another style or rhythm, and other chord types on the pad and the stab. The chords stay.
+
+### Ideas for a class
+
+1. Press Generate Song in two styles, for example Neurofunk and Liquid. Compare tempo, chords, drums and mastering. Which
+   one has more chords? Which one has more space?
+2. In DROP A, press GENERATE NOTES on the BASS with MATCH on, then with MATCH off. Look at the kick lane: with MATCH on, every
+   kick has a bass note.
+3. Make three VARIATIONS of a drop: subtle, medium and bold. Launch them one after the other and name what changed.
+4. Change STYLE on a set you made yourself and press GENERATE on one lane. Listen to how the style's rhythms fit your scene.
+
+## Tidal Pro (wavetable synth)
+
+A web page cannot load VST or AU plugins, so DNB-808 Live has its own large wavetable synth, **Tidal Pro**. It is an
+original design in the same class as the big commercial wavetable synths: its tables, presets and layout are made here.
+Pick it in the engine menu of a synth lane (Classic, Polar VA, Tidal WT, **Tidal Pro**) or click one of its presets in the
+browser (Instruments > Tidal Pro).
+
+**Sound sources**
+- **Two wavetable oscillators.** Each one has a table, POSITION (morphs through the frames), OCT, SEMI, FINE, LEVEL and PAN.
+- **Unison** up to 16 voices: DETUNE, BLEND (side voices against the centre), WIDTH, and four modes: Classic, Supersaw,
+  Octaves and Fifths (the voices stack at octaves or fifths).
+- **PHASE** (start phase) and **RANDOM** (random start per voice and note; 0 gives the same punchy start every note).
+- **Warp**, one per oscillator, with a WARP amount:
+  - Sync, Bend +, Bend -, PWM, Asym, Mirror, Flip, Quantize and Remap change the frames themselves. The result is
+    band-limited, so a warped wave does not alias, even at C7.
+  - FM, AM and RM use the other oscillator (its table, position and pitch, at any level) or the sub.
+- **Sub** (5 shapes, 0/-1/-2 octaves) and **noise** with a TONE knob. Each source picks its filters: both filters, filter 1,
+  filter 2, or no filter.
+
+**Tables**
+- 18 built-in tables: Tidal's 15, plus Basic Shapes (sine > triangle > saw > square), Harmonic Climb and Formant Saw.
+- **Your own tables** (TABLE page):
+  - LOAD FILE reads a wavetable `.wav` (frames of 2048 samples, as wavetable synths export them; its `clm` chunk is read),
+    a single cycle, or any sound. For a sound, the page finds its pitch and takes 16 cycles from start to end.
+  - FROM PAD makes a table from a sample pad of a drum lane.
+  - Draw a frame with the pointer. SINE / SAW / SQUARE / TRIANGLE fill it, SMOOTH keeps 48 harmonics, MORPH makes the frames
+    between FROM and TO into crossfades, NORMALIZE sets the level.
+  - SAVE stores the table in this browser (IndexedDB, next to your samples) and puts it on the oscillator. A saved set keeps
+    only the table's key, never the audio. A set opened in another browser plays Saw > Square in its place and says the
+    table is missing: keep the .wav to use it elsewhere.
+
+**Filters**
+- Two filters in serial or parallel. Each has CUTOFF, RES, DRIVE, MIX (dry / filtered) and KEYTRACK.
+- Types: LP / HP / BP 12 and 24 dB, Ladder, Diode, Notch, Phaser, Comb + / -, Formant (with a VOWEL knob) and Off.
+
+**Modulation**
+- 4 envelopes with hold (Env 1 is the volume of each note) and 4 LFOs.
+- You draw each LFO shape: click to add a point, drag it, drag the ring in the middle of a line to bend it, double-click (or
+  hold) to delete it. There are shape buttons and a 1/16 snap. The rate is a note length at the song tempo or Hz. The modes
+  are Retrigger, Free and Once (an envelope you draw).
+- Other sources: velocity, note, a random value per note, the mod wheel (MIDI CC 1 or the WHEEL knob) and 4 macros.
+- **Drag a source chip** (E1-E4, L1-L4, VEL, KEY, RND, MW, M1-M4) onto any knob that can move. On a phone, tap the chip, then
+  tap the knob. The knob then shows a coloured ring for each modulation.
+- The MATRIX page lists the slots (16 at most): source, target, AMOUNT (- moves the other way) and BIPOLAR (the target swings
+  both ways round its knob).
+
+**FX rack**
+- Each instance has its own rack: Distortion, EQ, Compressor, OTT, Chorus, Phaser/Flanger, Delay (tempo-synced, ping-pong) and
+  Reverb.
+- Tap an effect to edit it. Its dot turns it on or off. Drag it (or use the arrows) to change the order.
+- The distortion, EQ, OTT and phaser are the same processors as the track devices. The rack plays before the track's own
+  devices.
+
+**Presets** (original sounds, about -18 LUFS like the other presets)
+- Basses: TP Neuro Reese, TP Growl Mod, TP Talker FM, TP Metal RM Bass, TP Wobble 1/8, TP Quantize Grit, TP Reese Phaser,
+  TP FM Donk, TP Deep Sub.
+- Leads and others: TP Rave Hoover, TP Supersaw Lead, TP Sync Screech, TP Glass Pluck, TP Air Pad, TP Riser Sweep.
+
+**CPU**
+- A Tidal Pro voice uses the same live safety net as Polar and Tidal: at most 8 sounding notes per lane, and a global budget
+  that first fades old release tails and then thins the unison of new notes.
+- The tables a patch can reach are built ahead in idle time, so the first note starts on time.
+- A rack at rest sleeps: when an instance has been silent for longer than its effects' tails, its rack stops using the CPU, and
+  the next note wakes it.
+- The export renders every voice in full and sounds the same as the live play.
+- FM on a bright wave aliases on very high notes, as every FM does (the same as Tidal's FM). On a sine it stays clean.
+
+## Vocals and your own sample packs
+
+Open a drum lane, then the **Devices** tab. The drum rack has a group named **VOCALS + PACKS**.
+
+### Your files stay in your browser
+- Every file you load stays in this browser (IndexedDB). It is never uploaded.
+- A saved set holds only a key for each file (`user:<hash>`), never the audio.
+- Open the set in another browser and the pads say "Missing". Load the same file again and the pads come back.
+- This is how licensed packs (for example Splice downloads) are meant to be used: you keep them, the set file does not carry them.
+
+### Load pack...
+- Pick several audio files (WAV, MP3, OGG, FLAC, AIFF) or a `.zip` of them.
+- The zip is unpacked in the browser. Folders and macOS `__MACOSX` files are skipped.
+- The first 8 files go on the 8 pads, in name order. The pad name comes from the file name (`..._Bass_Hype.wav` -> `HYPE`).
+- One undo step. Up to 64 files per pack.
+
+### Pack browser
+- Lists every pack you loaded, with length, tempo and key from the file names.
+- ▶ plays a file through the lane, with its track FX.
+- **To pad...** puts a file on any pad. **Chops...** opens Vocal chops for a loop.
+
+### Vocal chops...
+- Load a vocal loop. The tempo comes from the file name (`_175BPM_`, `_174_`), or from an analysis of the audio.
+- The key comes from the file name (`F`, `Cm`, `F#m`, `Bbmin`).
+- **FIT** stretches the loop to the set's tempo and moves it to the set's key. Tempo and pitch change separately.
+- **SAME NOTES** keeps the loop inside the set's scale. Example: an F major loop in an F minor set moves +3 semitones (Ab major uses the same notes as F minor).
+- **SAME TONIC** moves the loop's tonic onto the set's tonic.
+- **REPITCH** plays the loop faster or slower, like a turntable: the tempo and the pitch change together.
+- **SLICE**: GRID cuts 8 equal chops. HITS starts each chop on the first transient of its part, snapped to the 16th grid.
+- The 8 chops go on the pads as VOX 1-8, in choke group 1. **GENERATE CHOPS** in the clip panel plays them (Offbeat, Call and response, Stutter).
+
+### Mic record...
+- Records your microphone onto a pad. Use headphones.
+- While the set plays, the take starts on the next bar (or beat) and ends on a whole beat.
+- **LATENCY MS** moves the take earlier so it lines up with what you heard. Auto uses the latency the browser reports.
+- The meter shows the input level. Keep the peaks out of the red.
+- **NORMALIZE** raises a quiet take to -1 dBFS.
+
+### Make VOCALS
+- Turns any drum lane into a vocal lane named VOCALS. Its sample pads become vocal chops for the generator.
+- It adds a light sidechain (25 %) and a reverb send (20 %) when the lane has none.
+- Without samples on the lane, it loads the synthesized Vox Chops kit until you load a pack or chops.
+- The track FX, the sidechain and the master work as on every lane. One undo step.
+
 ## Shortcuts
 
 | Key | Action |
