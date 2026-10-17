@@ -644,6 +644,40 @@ Silk Lead, Silk Pad, Smooth Growl, Smooth Hoover, Soft Pluck, Talking Bass, Velv
 - A SONG PACK is a .zip with song.json and its audio files: import it (or drop it) and the set opens with its loops;
   export one to move a set with loops to another browser. The audio stays in this browser (IndexedDB)
 
+## Wave 3b: Spectra, groove, arpeggiator, mix
+
+**Spectra (additive synth engine)**
+- A fourth synth engine: each voice is a bank of up to 256 sine partials, shaped by spectral filters, comb, formant,
+  phaser and distortion, with envelopes, LFOs (tempo synced, triplets too) and a 12-slot mod matrix. No aliasing
+- 20 presets for growls, reeses, wobbles and leads: SP Clean Growl, SP Dark Growl, SP Deep Sub, SP FM Bell, SP Glass Pluck,
+  SP Hoover, SP Liquid Lead, SP Metal Comb Bass, SP Neuro Reese, SP Neuro Stepper, SP Razor Lead, SP Resample Stack,
+  SP Rolling Reese, SP Scream Lead, SP Spectral Pad, SP Sub-Aware Mid, SP Talking Bass, SP Wobble 1/4T, SP Wobble 1/8,
+  SP Yoi Growl
+
+**Groove: off the 4/4 grid**
+- Notes can start and end between steps (1/48 of a step), and each note can carry a pitch bend or a glide
+- Each clip has a GROOVE: grid (1/16, 1/8T, 1/16T and more), swing and humanize. Swing and humanize act when the clip
+  plays; BAKE writes them into the notes. Live playback and the WAV export use the same timing
+- MIDI import and export keep the off-grid timing
+- New styles: Dubstep halftime 140, Halftime DnB, Future bass / wonky (triplet chords, bends, laid-back drums)
+
+**Arpeggiator**
+- Per synth lane: 13 modes (Up, Down, Up-down, Down-up, Converge, Diverge, Random, Random walk, As played, Chord,
+  Pinky, Thumb, Strum), rates from 1/4 to 1/32 with dotted and triplet values, 1 to 4 octaves, gate, swing, latch
+- A step lane: on/off, velocity, accent, tie, ratchet, octave and transpose per step
+- 8 pattern presets: Trance gate, Rave arp, Liquid ripple, Broken triplets, House offbeat, Afro 3 over 4, Neuro stutter,
+  Plain 16ths
+
+**Mix buses and AUTO MIX**
+- Four buses (DRUMS, BASS, MUSIC, FX), each with kick and snare ducking, EQ, glue compressor, parallel compression,
+  soft clip and a meter. Old sets sound as before: a bus that is off is not in the audio graph
+- MIX SIDECHAIN on every track: duck from the kick and the snare separately, 5 curves, and a split duck that only
+  ducks the lows (for example below 200 Hz on the bass)
+- BASS SPLIT: a mono clean low band with an optional sine sub, and a high band with distortion, OTT and a filter
+- AUTO MIX (menu Mix, one undo step): renders the set, sets the faders, cuts where two lanes mask each other, sets the
+  genre's ducking and the bus compressors. After it, press LEARN on the master to get back to the loudness target
+- MATCH: an EQ curve toward the reference track in the Reference panel, on the master or on one bus (at most 4 dB)
+
 ## Shortcuts
 
 | Key | Action |
