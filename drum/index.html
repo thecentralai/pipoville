@@ -5233,7 +5233,7 @@ const AUTO_COMMON = {
   sendA: { name: 'Reverb send (A)', grp: 'Mixer', lin: true, fmt: auPct, def: tr => clamp(auNum(tr.mix.sendA, 0), 0, 1), tp: (E, T) => [T.sA.gain], off: (tr, v) => v - auNum(tr.mix.sendA, 0) },
   sendB: { name: 'Delay send (B)', grp: 'Mixer', lin: true, fmt: auPct, def: tr => clamp(auNum(tr.mix.sendB, 0), 0, 1), tp: (E, T) => [T.sB.gain], off: (tr, v) => v - auNum(tr.mix.sendB, 0) },
   tfreq: { name: 'Track filter freq', grp: 'Track FX', lin: true, fmt: v => auFHz(auHz(20, 20000, v)), def: tr => auInvHz(20, 20000, auNum(tr.fx.freq, 20000)), tp: (E, T) => [T.filt.detune],
-    off: (tr, v) => auCents(auHz(20, 20000, v), clamp(auNum(tr.fx.freq, 20000), 20, 20000)) },
+    off: (tr, v, E) => auCents(auHz(20, 20000, v), clamp(auNum(tr.fx.freq, 20000), 20, E ? Math.min(20000, E.ctx.sampleRate * .45) : 20000)) }, // the engine caps the filter at .45 x the sample rate
   tres: { name: 'Track filter res', grp: 'Track FX', fmt: v => auHz(.1, 18, v).toFixed(1), def: tr => auInvHz(.1, 18, auNum(tr.fx.res, .7)), tp: (E, T) => [T.filt.Q], off: (tr, v) => auHz(.1, 18, v) - auNum(tr.fx.res, .7) },
 };
 // Synth targets per engine. kind 'voice': vp(voice) gives [[param, scale], ...] of one voice; 'trk': tp(E, T, s) as above.
@@ -5301,7 +5301,7 @@ function autoDefault(tr, id) {
 function autoFmt(tr, id, v) { const im = autoImpl(tr, id); try { return im && im.fmt ? im.fmt(v) : auPct(v); } catch (e) { return auPct(v); } }
 // the offset (in the parameter's unit) for value v
 function auOff(im, tr, v, E) {
-  if (im.common) return im.off(tr, v);
+  if (im.common) return im.off(tr, v, E);
   return im.off(tr.synth, v, E);
 }
 
@@ -5458,7 +5458,7 @@ Engine.prototype.synthNote = function (i, midi, vel, t) {
   if (v && !v._auSeen) {
     v._auSeen = true; if (B.D && !v._auD) v._auD = B.D;
     S.buses.forEach(b => auConnVoice(this, i, v, b));
-    if (v._auC && v._auC.length) S.voices.add(v);
+    if (v._auC && v._auC.length) { auReap(S); S.voices.add(v); } // notes played while stopped are reaped here too
   }
   return v;
 };
@@ -18264,6 +18264,7 @@ function refSlice(p, a, b) { // a copy of the set whose arrangement is bars a..b
     });
   });
   p.arr.loop = false;
+  if (typeof autoSlice === 'function') autoSlice(p, a); // the arrangement automation moves with the slice (c16_auto.js)
   return p;
 }
 const refCmpKey = reg => reg ? [reg.a, reg.b, P.ref.offset, P.ref.bpm, P.bpm].join(':') : '';
