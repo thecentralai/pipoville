@@ -673,6 +673,33 @@ Silk Lead, Silk Pad, Smooth Growl, Smooth Hoover, Soft Pluck, Talking Bass, Velv
   genre's ducking and the bus compressors. After it, press LEARN on the master to get back to the loudness target
 - MATCH: an EQ curve toward the reference track in the Reference panel, on the master or on one bus (at most 4 dB)
 
+## Automation, long notes and the loop library
+
+**Automation**
+- Clip envelopes: an automation lane under the piano roll (choose a target, pencil, line, shapes, CLR). The envelope loops
+  with the clip. Curves: linear, smooth, or steps (S&H)
+- Arrangement automation: the A button on a track shows its lane in the arrangement, for sweeps over many bars (a filter that
+  opens over 16 bars, a reverb send that rises in a build). A clip envelope on the same target wins over it
+- Targets on every track: volume, pan, send A, send B, track filter cutoff and resonance. Per engine: classic cutoff,
+  resonance, LFO rate and depth; Polar cutoff; Tidal cutoff and wavetable position; Tidal Pro cutoff and macros 1-4; keys
+  brightness; Spectra cutoff, resonance, morph and macros 1-4. Held notes follow the automation too
+- Shapes, tempo synced from 2 bars to 1/32 with triplets: wobble, triangle, saw, ramp, square, S&H, rise, fall
+- Live playback and the WAV export play the same automation. Every stroke is one undo step
+
+**Long notes and legato**
+- Notes many bars long play to their end on every engine
+- LEGATO in the clip editor: overlapping notes play as one voice with no new attack, and glide from one pitch to the next
+  (in ms, up to 2000, or in steps)
+
+**Loop library (Loops button in the menu bar, or the Loops section of the browser)**
+- 140 built-in loops made by the app's own sounds, 14 for each of 10 styles: drums, tops, percussion, bass, sub, growl, chords,
+  pads, arps, leads, FX and vocal chops. A loop is rendered the first time you use it (2 to 7 seconds) and kept in this browser
+- My loops: your own files and your Splice downloads, read from the packs in this browser, with BPM, key and role read from the
+  file names. Search and favourites
+- Filters: source, style, role, key, bars, BPM range. Preview plays at the set's tempo and starts on the bar
+- Place a loop with +, TO SLOT, TO ARRANGE, AS MIDI or MIDI + SOUND, or drag it to a slot or an arrangement lane. On an audio
+  track it plays in STRETCH, in the set's key; on its MIDI lane it becomes an editable clip moved to the set's key
+
 ## Shortcuts
 
 | Key | Action |

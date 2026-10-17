@@ -2282,6 +2282,7 @@ class Engine {
     const voice = {
       t, ended: false, relAt: Infinity,
       bend: (t0, pts) => voiceBend(oscs.map(o => o.detune), t0, pts, 100), // a note's pitch bend (d_transport.js)
+      ap: { cut: [filt.detune], res: [filt.Q] }, // the params automation lanes drive (c16_auto.js)
       release: (tOff, r = s.r, force) => {
         if (voice.ended || (!force && tOff >= voice.relAt)) return;
         voice.relAt = tOff; tOff = Math.max(tOff, t + .003);
@@ -3727,7 +3728,7 @@ Engine.prototype.wtpBuild = function (i, midi, vel, t, srcs) {
   if (!srcs.length) { const z = c.createConstantSource(); z.offset.value = 0; z.start(t); srcs.push(z); }
   const cleanup = () => { shared.forEach(([nd, g]) => { try { nd.disconnect(g); } catch (err) { /* gone */ } }); wtpVoiceEnd(this, i, R); };
   R.live = (R.live || 0) + 1;
-  return Object.assign(this.makeVoice(t, srcs, envs, out, cleanup), { track: i, heavy: uni != null });
+  return Object.assign(this.makeVoice(t, srcs, envs, out, cleanup), { track: i, heavy: uni != null, ap: D }); // ap: the mod destinations, for the automation lanes (c16_auto.js)
 };
 
 // ---------- the FX rack of an instance: one per track while it plays this engine, in the order of fxOrder ----------
@@ -4597,7 +4598,7 @@ Engine.prototype.keysBuild = function (i, midi, vel, t, srcs) {
     envs.push({ param: env.gain, r: s.r, amp: true });
   }
   if (trem) srcs.push(trem);
-  return Object.assign(this.makeVoice(t, srcs, envs, out), { track: i, heavy: uni != null });
+  return Object.assign(this.makeVoice(t, srcs, envs, out), { track: i, heavy: uni != null, ap: { cut: [lp.detune] } }); // ap: for the automation lanes (c16_auto.js)
 };
 // the engine dispatch (c_engine.js synthNote knows classic, polar and tidal; every other engine reaches classicNote)
 const keysClassicNote0 = Engine.prototype.classicNote;
@@ -5189,6 +5190,728 @@ if (typeof noteOn === 'function' && typeof noteOff === 'function') {
     if (h.rec) recordNoteOff(h.rec);
   };
 }
+// ===================== 3q. AUTOMATION: CLIP ENVELOPES, ARRANGEMENT LANES, LEGATO =====================
+// Data (saved with the set, sanitized by normalizeProject, see autoFix):
+//  - clip.auto = [{ target, points: [[step, value, curve?], ...] }]: clip envelopes (Ableton "clip envelopes"). step in 16ths
+//    inside the clip (0..bars*16, 1/48 of a step), value 0..1 (the knob's travel), curve of the segment that starts at the point:
+//    0 linear, 1 smooth (an S-curve: two points per cycle make a sine wobble), 2 hold (a step, S&H). The envelope loops with the clip.
+//  - track.autoArr = [{ target, points }]: arrangement automation, step = song step (bar * 16), for long sweeps over many bars.
+//    It plays when the track follows the arrangement; a session clip that plays (or a stopped lane) overrides it, as in Ableton.
+//    Where a clip envelope and an arrangement lane drive the same target, the clip envelope wins.
+//  - track.legato = { on, glide, unit: 'ms' | 'st' }: overlapping notes of a synth lane play as one voice that glides from pitch to
+//    pitch (no new attack), on every engine.
+// Sound: one ConstantSource per track and target (a "bus", made the first time a lane of that target plays) adds an offset to the
+// parameter: the automation's value minus the knob's, so the parameter follows the envelope while the knob keeps its own value.
+// Track parameters (volume, pan, sends, the track filter) take the bus directly; synth parameters take it in every voice
+// (classic and Keys: the voice's filter, Polar and Tidal: the cutoff and position inputs of their mod matrix, Tidal Pro: the
+// cutoff inputs and the instance's four macros, Spectra: eight k-rate parameters of its voice worklet). A long note that is
+// already sounding follows. The ramps are scheduled from stepTick, which the live scheduler and every offline render call on the
+// same song grid with the same values, so a render (WAV export, master, mix, lesson) has the automation of the live set.
+// A set without automation builds no node and schedules nothing: it sounds as before.
+// Hooks: Engine.stepTick, synthNote, trigger, patchMods, modSpecs, panic (wrapped here), the voice field `ap` (classicNote in
+// c_engine.js, wtpBuild in c2b_wt2.js, keysBuild in c11_keys.js) and `node` (spxBuild, c12_spectra.js, whose worklet reads the
+// z0..z7 parameters), autoSlice (masterPreRender, mixRender, lessonSlice: the sliced renders move the arrangement lanes too),
+// normalizeProject (autoFix), renderClipDetail / edDrawAll / edFrame (the clip editor lane), renderArrangement (the lanes).
+
+const AUTO_MAX_LANES = 16, AUTO_MAX_PTS = 2048, AUTO_MAX_ARR_PTS = 8192, AUTO_ARR_STEPS = 512 * 16;
+const auHz = (lo, hi, v) => lo * Math.pow(hi / lo, clamp(v, 0, 1));
+const auCents = (hz, base) => 1200 * Math.log2(Math.max(1e-3, hz) / Math.max(1e-3, base));
+const auInvHz = (lo, hi, hz) => clamp(Math.log(Math.max(lo, Math.min(hi, hz)) / lo) / Math.log(hi / lo), 0, 1);
+const auPct = v => Math.round(v * 100) + '%';
+const auFHz = hz => (hz >= 1000 ? (hz / 1000).toFixed(hz >= 10000 ? 1 : 2) + ' kHz' : Math.round(hz) + ' Hz');
+const auNum = (x, d) => (typeof x === 'number' && Number.isFinite(x) ? x : d);
+// the Spectra voice parameters (c12_spectra.js worklet z0..z7)
+const AUTO_SPX_Z = { mac1: 0, mac2: 1, mac3: 2, mac4: 3, cut: 4, res: 5, morph: 6, amt1: 7 };
+
+// ---------- targets ----------
+// Every track: the mixer and the track filter. kind 'trk': the bus goes into the params tp(E, T) returns; off(tr, v): the offset.
+// lin: the offset is linear in v (the ramps are exact); else the scheduler samples the envelope every 1/4 step.
+const AUTO_COMMON = {
+  vol: { name: 'Volume', grp: 'Mixer', fmt: v => gainDb(faderGain(v)) + ' dB', def: tr => clamp(auNum(tr.mix.vol, .75), 0, 1), tp: (E, T) => [T.vol.gain], off: (tr, v) => faderGain(v) - faderGain(auNum(tr.mix.vol, .75)) },
+  pan: { name: 'Pan', grp: 'Mixer', lin: true, fmt: v => (Math.abs(v - .5) < .01 ? 'C' : (v < .5 ? 'L' : 'R') + Math.round(Math.abs(v * 2 - 1) * 50)), def: tr => (auNum(tr.mix.pan, 0) + 1) / 2,
+    tp: (E, T) => (T.pan.pan ? [T.pan.pan] : []), off: (tr, v) => v * 2 - 1 - auNum(tr.mix.pan, 0) },
+  sendA: { name: 'Reverb send (A)', grp: 'Mixer', lin: true, fmt: auPct, def: tr => clamp(auNum(tr.mix.sendA, 0), 0, 1), tp: (E, T) => [T.sA.gain], off: (tr, v) => v - auNum(tr.mix.sendA, 0) },
+  sendB: { name: 'Delay send (B)', grp: 'Mixer', lin: true, fmt: auPct, def: tr => clamp(auNum(tr.mix.sendB, 0), 0, 1), tp: (E, T) => [T.sB.gain], off: (tr, v) => v - auNum(tr.mix.sendB, 0) },
+  tfreq: { name: 'Track filter freq', grp: 'Track FX', lin: true, fmt: v => auFHz(auHz(20, 20000, v)), def: tr => auInvHz(20, 20000, auNum(tr.fx.freq, 20000)), tp: (E, T) => [T.filt.detune],
+    off: (tr, v) => auCents(auHz(20, 20000, v), clamp(auNum(tr.fx.freq, 20000), 20, 20000)) },
+  tres: { name: 'Track filter res', grp: 'Track FX', fmt: v => auHz(.1, 18, v).toFixed(1), def: tr => auInvHz(.1, 18, auNum(tr.fx.res, .7)), tp: (E, T) => [T.filt.Q], off: (tr, v) => auHz(.1, 18, v) - auNum(tr.fx.res, .7) },
+};
+// Synth targets per engine. kind 'voice': vp(voice) gives [[param, scale], ...] of one voice; 'trk': tp(E, T, s) as above.
+// s: the synth fields. cut is the main filter's cutoff (the second filter keeps its distance to it); res the main resonance.
+const auMac = k => ({ name: 'Macro ' + k, grp: 'Macros', lin: true, fmt: auPct });
+const auZ = id => ({ kind: 'voice', lin: true, vp: v => { const p = v.node && v.node.parameters && v.node.parameters.get('z' + AUTO_SPX_Z[id]); return p ? [[p, 1]] : []; }, off: (s, v) => v + 1 });
+const auDL = (D, ...ks) => ks.flatMap(k => (D && Array.isArray(D[k]) ? D[k] : [])).filter(Boolean).map(p => [p, 1]);
+const auWtp = (D, ...ks) => ks.flatMap(k => (D && Array.isArray(D[k]) ? D[k] : [])).filter(e => e && e.p).map(e => [e.p, e.k]);
+const AUTO_ENG = {
+  classic: {
+    cut: { name: 'Cutoff', grp: 'Filter', kind: 'voice', lin: true, fmt: v => auFHz(auHz(40, 18000, v)), def: s => auInvHz(40, 18000, s.cutoff), vp: v => auDL(v.ap, 'cut'), off: (s, v) => auCents(auHz(40, 18000, v), s.cutoff) },
+    res: { name: 'Resonance', grp: 'Filter', kind: 'voice', fmt: v => auHz(.1, 20, v).toFixed(1), def: s => auInvHz(.1, 20, s.res), vp: v => auDL(v.ap, 'res'), off: (s, v) => auHz(.1, 20, v) - s.res },
+    lfoRate: { name: 'LFO rate', grp: 'LFO', kind: 'trk', fmt: v => auHz(.1, 20, v).toFixed(2) + ' Hz', def: () => .5, tp: (E, T) => [T.lfo.frequency],
+      off: (s, v, E) => auHz(.1, 20, v) - (s.lfoRate !== 'off' && s.lfoDepth > 0 && hasOwnKey(BEATS, s.lfoRate) ? E.p.bpm / 60 / BEATS[s.lfoRate] : .01) },
+    lfoDepth: { name: 'LFO depth', grp: 'LFO', kind: 'trk', lin: true, fmt: auPct, def: s => s.lfoDepth, tp: (E, T) => [T.lfoG.gain],
+      off: (s, v) => (s.lfoRate !== 'off' && s.lfoDepth > 0 ? (v - s.lfoDepth) * (s.cutoff * 2 + 400) : 0) }, // the patch's LFO must be on (RATE and DEPTH)
+  },
+  polar: {
+    cut: { name: 'Cutoff (filter A, B follows)', grp: 'Filter', kind: 'voice', lin: true, fmt: v => auFHz(auHz(20, 20000, v)), def: s => auInvHz(20, 20000, s.fAcut), vp: v => auDL(v._auD, 'cutA', 'cutB'), off: (s, v) => auCents(auHz(20, 20000, v), s.fAcut) },
+  },
+  tidal: {
+    cut: { name: 'Cutoff (filter 1, 2 follows)', grp: 'Filter', kind: 'voice', lin: true, fmt: v => auFHz(auHz(20, 20000, v)), def: s => auInvHz(20, 20000, s.f1cut), vp: v => auDL(v._auD, 'cut1', 'cut2'), off: (s, v) => auCents(auHz(20, 20000, v), s.f1cut) },
+    pos: { name: 'Wavetable position', grp: 'Oscillators', kind: 'voice', lin: true, fmt: auPct, def: s => s.w1pos, vp: v => auDL(v._auD, 'pos1', 'pos2', 'pos3'), off: (s, v) => v - s.w1pos },
+  },
+  wtpro: {
+    cut: { name: 'Cutoff (filter 1, 2 follows)', grp: 'Filter', kind: 'voice', lin: true, fmt: v => auFHz(auHz(20, 20000, v)), def: s => auInvHz(20, 20000, s.f1cut), vp: v => auWtp(v.ap, 'f1cut', 'f2cut'), off: (s, v) => auCents(auHz(20, 20000, v), s.f1cut) },
+  },
+  keys: {
+    cut: { name: 'Brightness (tone, +-4 oct)', grp: 'Filter', kind: 'voice', lin: true, fmt: v => (v >= .5 ? '+' : '') + ((v - .5) * 8).toFixed(1) + ' oct', def: () => .5, vp: v => auDL(v.ap, 'cut'), off: (s, v) => (v - .5) * 9600 },
+  },
+  spectra: {
+    cut: Object.assign({ name: 'Processor 1 freq', grp: 'Spectrum', fmt: v => auFHz(auHz(20, 20000, v)), def: s => auInvHz(20, 20000, s.p1freq) }, auZ('cut')),
+    res: Object.assign({ name: 'Processor 1 res', grp: 'Spectrum', fmt: auPct, def: s => s.p1res }, auZ('res')),
+    amt1: Object.assign({ name: 'Processor 1 amount (drive)', grp: 'Spectrum', fmt: auPct, def: s => s.p1amt }, auZ('amt1')),
+    morph: Object.assign({ name: 'Morph (layer A)', grp: 'Oscillators', fmt: auPct, def: s => s.morph }, auZ('morph')),
+  },
+};
+[1, 2, 3, 4].forEach(k => {
+  AUTO_ENG.wtpro['mac' + k] = Object.assign(auMac(k), { kind: 'trk', def: s => s['mac' + k], tp: (E, T) => (T.wtp && T.wtp.mac && T.wtp.mac[k - 1] ? [T.wtp.mac[k - 1].offset] : []), off: (s, v) => v - auNum(s['mac' + k], 0) });
+  AUTO_ENG.spectra['mac' + k] = Object.assign(auMac(k), { def: s => auNum(s['mac' + k], 0) }, auZ('mac' + k));
+});
+// every target id a saved lane may name (any engine), for the sanitizer
+const AUTO_IDS = (() => { const o = Object.create(null); Object.keys(AUTO_COMMON).forEach(k => { o[k] = 1; }); Object.values(AUTO_ENG).forEach(e => Object.keys(e).forEach(k => { o[k] = 1; })); return o; })();
+const autoIdOk = id => typeof id === 'string' && Object.prototype.hasOwnProperty.call(AUTO_IDS, id);
+const auEng = tr => (tr && tr.synth ? (hasOwnKey(AUTO_ENG, tr.synth.engine) ? tr.synth.engine : 'classic') : null);
+// the implementation of target id on track tr (null: this track has no such parameter, the lane stays silent)
+function autoImpl(tr, id) {
+  if (!tr || !autoIdOk(id)) return null;
+  if (hasOwnKey(AUTO_COMMON, id)) return Object.assign({ kind: 'trk', common: true }, AUTO_COMMON[id]);
+  const e = auEng(tr); if (!e || tr.type === 'audio') return null;
+  return hasOwnKey(AUTO_ENG[e], id) ? AUTO_ENG[e][id] : null;
+}
+// the targets a track offers (the editor menus): [{ id, name, grp }]
+function autoTargets(tr) {
+  const out = Object.keys(AUTO_COMMON).map(id => ({ id, name: AUTO_COMMON[id].name, grp: AUTO_COMMON[id].grp }));
+  const e = tr && tr.type === 'synth' ? auEng(tr) : null;
+  if (e) Object.keys(AUTO_ENG[e]).forEach(id => out.unshift({ id, name: AUTO_ENG[e][id].name, grp: AUTO_ENG[e][id].grp }));
+  return out;
+}
+// the knob's value of a target, 0..1 (the first point of a new lane)
+function autoDefault(tr, id) {
+  const im = autoImpl(tr, id); if (!im || !im.def) return .5;
+  try { const v = im.common ? im.def(tr) : im.def(tr.synth); return Number.isFinite(v) ? clamp(v, 0, 1) : .5; } catch (e) { return .5; }
+}
+function autoFmt(tr, id, v) { const im = autoImpl(tr, id); try { return im && im.fmt ? im.fmt(v) : auPct(v); } catch (e) { return auPct(v); } }
+// the offset (in the parameter's unit) for value v
+function auOff(im, tr, v, E) {
+  if (im.common) return im.off(tr, v);
+  return im.off(tr.synth, v, E);
+}
+
+// ---------- envelopes ----------
+// the value at x (a point exactly at x wins: two points at one step are a jump)
+function autoVal(pts, x) {
+  const n = pts.length; if (!n) return null;
+  if (x < pts[0][0]) return pts[0][1];
+  if (x >= pts[n - 1][0]) return pts[n - 1][1];
+  let lo = 0, hi = n - 1; // pts[lo][0] <= x < pts[hi][0]
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (pts[m][0] <= x) lo = m; else hi = m; }
+  return auSeg(pts[lo], pts[hi], x);
+}
+// the value just before x (the end of the segment that arrives at x)
+function autoValL(pts, x) {
+  const n = pts.length; if (!n) return null;
+  if (x <= pts[0][0]) return pts[0][1];
+  if (x > pts[n - 1][0]) return pts[n - 1][1];
+  let lo = 0, hi = n - 1; // pts[lo][0] < x <= pts[hi][0]
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (pts[m][0] < x) lo = m; else hi = m; }
+  while (hi > lo + 1 && pts[hi - 1][0] >= x) hi--;
+  return auSeg(pts[lo], pts[hi], x);
+}
+function auSeg(a, b, x) {
+  const c = a[2] | 0, w = b[0] - a[0]; if (c === 2 || w <= 0) return c === 2 ? a[1] : b[1];
+  let u = clamp((x - a[0]) / w, 0, 1); if (c === 1) u = (1 - Math.cos(Math.PI * u)) / 2;
+  return a[1] + (b[1] - a[1]) * u;
+}
+// The breakpoints of [x0, x1): the points inside, plus samples every h steps where a segment is smooth (or the target is not
+// linear in its value). Returns the sorted x list, x1 included, x0 excluded.
+function auXs(pts, x0, x1, lin) {
+  const xs = [];
+  let k = 0; while (k < pts.length && pts[k][0] <= x0) k++;
+  for (let j = k; j < pts.length && pts[j][0] < x1; j++) if (!xs.length || xs[xs.length - 1] !== pts[j][0]) xs.push(pts[j][0]);
+  let curved = !lin;
+  if (!curved) for (let j = Math.max(0, k - 1); j < pts.length && pts[j][0] < x1; j++) if ((pts[j][2] | 0) === 1) { curved = true; break; }
+  if (curved && pts.length > 1 && x1 > pts[0][0] && x0 < pts[pts.length - 1][0]) {
+    const h = lin ? 1 / 8 : 1 / 4;
+    for (let x = x0 + h; x < x1 - 1e-9; x += h) xs.push(x);
+    xs.sort((a, b) => a - b);
+  }
+  xs.push(x1);
+  return xs;
+}
+
+// ---------- the engine side ----------
+// E._au[i] = { buses: Map(id -> bus), voices: Set(voice) }; bus = { cs, im, kg: Map(scale -> gain), tc: Set(param), on: bool }
+function auState(E, i) { const A = E._au || (E._au = []); return A[i] || (A[i] = { buses: new Map(), voices: new Set() }); }
+function auBus(E, i, id, im) {
+  const S = auState(E, i); let b = S.buses.get(id);
+  if (b) return b;
+  const cs = E.ctx.createConstantSource(); cs.offset.value = 0; cs.start(); cs.offset._auBus = i + ':' + id; // the tag: tests trace this param
+  b = { cs, im, kg: new Map(), tc: new Set(), on: false, id }; S.buses.set(id, b);
+  S.voices.forEach(v => auConnVoice(E, i, v, b)); // a long note already sounding follows the new lane
+  return b;
+}
+function auKg(E, b, k) { // the bus scaled by k (one gain per scale and bus)
+  if (k === 1) return b.cs;
+  let g = b.kg.get(k); if (!g) { g = E.ctx.createGain(); g.gain.value = k; b.cs.connect(g); b.kg.set(k, g); }
+  return g;
+}
+function auConnVoice(E, i, v, b) {
+  const tr = E.p.tracks[i], im = autoImpl(tr, b.id); if (!im || im.kind !== 'voice' || !v || v.ended) return;
+  let list = []; try { list = im.vp(v) || []; } catch (e) { list = []; }
+  if (!list.length) return;
+  const c = v._auC || (v._auC = []);
+  list.forEach(([p, k]) => { if (!p || !Number.isFinite(k) || c.some(x => x.p === p && x.b === b)) return; const src = auKg(E, b, k); try { src.connect(p); c.push({ src, p, b }); } catch (e) { /* not a param */ } });
+}
+function auDropVoice(v) { (v._auC || []).forEach(x => { try { x.src.disconnect(x.p); } catch (e) { /* gone */ } }); v._auC = null; }
+// the voices of a track that ended: their connections go (a bus must not keep a dead voice's nodes alive)
+function auReap(S) { S.voices.forEach(v => { if (v.ended) { auDropVoice(v); S.voices.delete(v); } }); }
+// track params of a trk bus: connect any new one (Tidal Pro's rack can be rebuilt)
+function auConnTrk(E, i, b, im) {
+  const T = E.t[i]; if (!T) return;
+  let ps = []; try { ps = (im.tp(E, T, E.p.tracks[i].synth) || []).filter(Boolean); } catch (e) { ps = []; }
+  ps.forEach(p => { if (!b.tc.has(p)) { try { b.cs.connect(p); b.tc.add(p); } catch (e) { /* not a param */ } } });
+}
+// What track i plays at song step `tick`: { clip, pos, src } ('s' session, 'a' arrangement). The live engine reads the transport
+// as scheduleStep does next (its queued launch included); an offline render plays the arrangement
+function auWhere(E, i, tr, tick, live) {
+  let clip = null, pos = 0, src = null, follow = true;
+  if (live) {
+    const r = RT[i];
+    if (r) {
+      let pl = r.playing;
+      if (r.queued && r.queued.at <= TR.tick) pl = r.queued.slot >= 0 && tr.clips[r.queued.slot] ? { slot: r.queued.slot, start: TR.tick } : null;
+      if (pl && tr.clips[pl.slot]) { clip = tr.clips[pl.slot]; pos = mod(TR.tick - pl.start, clip.bars * 16); src = 's'; }
+      if (r.arrOff) follow = false;
+    }
+  }
+  if (!clip && follow) {
+    const e = arrEntryAt(tr, tick);
+    if (e && tr.clips[e.slot]) { clip = tr.clips[e.slot]; pos = mod(tick - e.start * 16 + (e.off || 0), clip.bars * 16); src = 'a'; }
+  }
+  return { clip, pos, src, follow: follow && src !== 's' };
+}
+const auLaneOf = (lanes, id) => { if (!Array.isArray(lanes)) return null; for (const l of lanes) if (l && l.target === id && Array.isArray(l.points) && l.points.length) return l; return null; };
+// schedule one step [x0, x0 + 1) of envelope pts (in its own steps) on bus b, from grid time g
+function auSchedule(E, b, im, tr, pts, x0, g, sd) {
+  const P0 = typeof AUTO_TRACE === 'function' ? auTraced(b.cs.offset) : b.cs.offset, off = v => { const o = auOff(im, tr, clamp(v, 0, 1), E); return Number.isFinite(o) ? o : 0; };
+  P0.setValueAtTime(off(autoVal(pts, x0)), g);
+  for (const x of auXs(pts, x0, x0 + 1, !!im.lin)) {
+    const t = g + (x - x0) * sd, vl = autoValL(pts, x), vr = autoVal(pts, x);
+    P0.linearRampToValueAtTime(off(vl), t);
+    if (x < x0 + 1 && vr !== vl) P0.setValueAtTime(off(vr), t);
+  }
+}
+// tests: AUTO_TRACE(tag, method, value, time) sees every event the scheduler writes on a bus (window.AUTO_TRACE; unset in use)
+function auTraced(p) { return { setValueAtTime: (v, t) => { AUTO_TRACE(p._auBus, 'set', v, t); return p.setValueAtTime(v, t); }, linearRampToValueAtTime: (v, t) => { AUTO_TRACE(p._auBus, 'ramp', v, t); return p.linearRampToValueAtTime(v, t); } }; }
+// every 16th, live and offline (after the other sections' stepTick)
+function autoStep(E, tick, time, sd, live) {
+  if (!E.t || !E.p || !Array.isArray(E.p.tracks)) return;
+  const tracks = E.p.tracks, g = live ? TR.grid : time - (tick % 2 ? (E.p.swing / 100) * sd * .66 : 0);
+  for (let i = 0; i < tracks.length; i++) {
+    const tr = tracks[i], S = E._au && E._au[i];
+    if (S) auReap(S);
+    const W = auWhere(E, i, tr, tick, live);
+    (E._auClip || (E._auClip = []))[i] = W.clip; // the legato chain reads the clip of this step
+    const cl = W.clip && Array.isArray(W.clip.auto) && W.clip.auto.length ? W.clip.auto : null, al = W.follow && Array.isArray(tr.autoArr) && tr.autoArr.length ? tr.autoArr : null;
+    if (!cl && !al && !(S && S.buses.size)) continue;
+    const ids = new Set(); if (cl) cl.forEach(l => l && ids.add(l.target)); if (al) al.forEach(l => l && ids.add(l.target)); if (S) S.buses.forEach((_, id) => ids.add(id));
+    ids.forEach(id => {
+      const im = autoImpl(tr, id), lc = cl && auLaneOf(cl, id), la = !lc && al && auLaneOf(al, id);
+      if (!im || (!lc && !la)) { const b = S && S.buses.get(id); if (b && b.on) { b.cs.offset.setValueAtTime(0, g); b.on = false; } return; }
+      const b = auBus(E, i, id, im);
+      if (im.kind === 'trk') auConnTrk(E, i, b, im);
+      try { auSchedule(E, b, im, tr, (lc || la).points, lc ? W.pos : tick, g, sd); b.on = true; } catch (err) { b.cs.offset.setValueAtTime(0, g); b.on = false; }
+    });
+  }
+}
+const autoStepTick0 = Engine.prototype.stepTick;
+Engine.prototype.stepTick = function (tick, time, sd) {
+  autoStepTick0.call(this, tick, time, sd);
+  const live = !this.offline && this === E; // the live engine reads the transport (session clips, the grid time)
+  try { autoStep(this, tick, time, sd, live); } catch (err) { if (!this._auErr) { this._auErr = true; console.error('[dnb808] automation', err); } }
+};
+// Polar and Tidal: the voice's mod destinations (patchMods gets them last, complete)
+const autoPatchMods0 = Engine.prototype.patchMods;
+Engine.prototype.patchMods = function (sources, D, f0) { if (this._auBuild) this._auBuild.D = D; return autoPatchMods0.call(this, sources, D, f0); };
+// Tidal: a position lane needs the wavetable bank of every position (as a mod source on the position would)
+const autoModSpecs0 = Engine.prototype.modSpecs;
+Engine.prototype.modSpecs = function (s, eng) {
+  const out = autoModSpecs0.call(this, s, eng), B = this._auBuild;
+  if (B && eng === 'tidal') { const S = this._au && this._au[B.i], b = S && S.buses.get('pos'); if (b) out.push({ dest: 'pos', amt: 1, uni: false }); }
+  return out;
+};
+const autoSynthNote0 = Engine.prototype.synthNote;
+Engine.prototype.synthNote = function (i, midi, vel, t) {
+  const S = this._au && this._au[i];
+  if (!S || !S.buses.size) return autoSynthNote0.call(this, i, midi, vel, t);
+  const B = this._auBuild = { i, D: null };
+  let v;
+  try { v = autoSynthNote0.call(this, i, midi, vel, t); } finally { this._auBuild = null; }
+  if (v && !v._auSeen) {
+    v._auSeen = true; if (B.D && !v._auD) v._auD = B.D;
+    S.buses.forEach(b => auConnVoice(this, i, v, b));
+    if (v._auC && v._auC.length) S.voices.add(v);
+  }
+  return v;
+};
+// stop: every bus back to the knob (the lookahead's ramps go too), the legato chains end
+const autoPanic0 = Engine.prototype.panic;
+Engine.prototype.panic = function () {
+  autoPanic0.call(this);
+  const now = this.ctx.currentTime;
+  (this._au || []).forEach(S => { if (S) S.buses.forEach(b => { const o = b.cs.offset; o.cancelScheduledValues(now); o.setValueAtTime(0, now); b.on = false; }); });
+  if (this._auSkip) this._auSkip.clear();
+};
+// sliced renders (masterPreRender, mixRender, lessonSlice): the arrangement lanes move with the slice (bar a0 becomes bar 0)
+function autoSlice(p, a0) {
+  if (!p || !Array.isArray(p.tracks) || !(a0 > 0)) return p;
+  p.tracks.forEach(tr => { if (tr && Array.isArray(tr.autoArr)) tr.autoArr.forEach(l => { if (l && Array.isArray(l.points)) l.points = l.points.map(q => [q[0] - a0 * 16, q[1], q[2] | 0]); }); });
+  return p;
+}
+
+// ---------- legato: overlapping notes of a lane are one voice ----------
+// When a note starts, the notes of its clip that start before it ends (and those that start before them end ...) join it: the
+// voice holds until the last one ends and glides to each one's pitch at its start (GLIDE in ms, or in steps). The joined notes
+// do not start a voice of their own. Every engine: the voice's own pitch bend (the per-note bend of the groove contract).
+function autoLegatoGlide(tr, sd) { const L = tr.legato; const gl = L.unit === 'st' ? clamp(auNum(L.glide, 1), 0, 16) * sd : clamp(auNum(L.glide, 60), 0, 2000) / 1000; return Math.max(.003, gl); }
+function autoLegatoTry(E, i, n, t, sd) {
+  const tr = E.p.tracks[i], clip = E._auClip && E._auClip[i]; if (!clip || !Array.isArray(clip.notes)) return false;
+  const notes = clip.notes, A = notes.find(o => o === n) || notes.find(o => o.s === n.s && o.p === n.p); if (!A) return false;
+  const skip = E._auSkip || (E._auSkip = new Map());
+  const sk = skip.get(A);
+  if (sk != null) { skip.delete(A); if (Math.abs(sk - t) < sd * .75) return true; } // a note an earlier one took over
+  const L = clip.bars * 16, chain = [A];
+  for (let cur = A, guard = 0; guard < 64; guard++) {
+    const end = cur.s + cur.l; let nx = null;
+    for (const o of notes) if (o !== cur && !chain.includes(o) && o.s > cur.s + 1 / 96 && o.s < end - 1 / 96 && o.s < L && (!nx || o.s < nx.s)) nx = o;
+    if (!nx) break; chain.push(nx); cur = nx;
+  }
+  if (chain.length < 2) return false;
+  const v = E.synthNote(i, n.p, n.v, t); if (!v) return true;
+  const gl = autoLegatoGlide(tr, sd), pts = [];
+  let endS = A.s + A.l;
+  for (let k = 1; k < chain.length; k++) {
+    const o = chain[k], at = t + (o.s - A.s) * sd, nextAt = k + 1 < chain.length ? t + (chain[k + 1].s - A.s) * sd : Infinity;
+    pts.push([at, chain[k - 1].p - A.p], [Math.min(at + gl, nextAt - .001), o.p - A.p]);
+    skip.set(o, at); endS = Math.max(endS, o.s + o.l);
+  }
+  if (v.bend) v.bend(t, pts);
+  v.release(t + (endS - A.s) * sd);
+  if (skip.size > 512) { const it = skip.keys(); for (let k = 0; k < 256; k++) skip.delete(it.next().value); }
+  return true;
+}
+const autoTrigger0 = Engine.prototype.trigger;
+Engine.prototype.trigger = function (i, n, t, sd) {
+  const tr = this.p.tracks[i];
+  if (tr && tr.type === 'synth' && tr.legato && tr.legato.on && !(tr.arp && tr.arp.on)) {
+    try { if (autoLegatoTry(this, i, n, t, sd)) return; } catch (err) { console.error('[dnb808] legato', err); }
+  }
+  return autoTrigger0.call(this, i, n, t, sd);
+};
+
+// ---------- sanitizing (normalizeProject) ----------
+// a lane list from a file: own-key target names, finite numbers, values 0..1, steps 0..maxX, sorted, at most maxP points
+function autoFixLanes(src, maxX, maxP) {
+  if (!Array.isArray(src)) return null;
+  const out = [], seen = Object.create(null);
+  for (let k = 0; k < src.length && out.length < AUTO_MAX_LANES; k++) {
+    try {
+      const l = src[k]; if (!l || typeof l !== 'object') continue;
+      const id = l.target; if (!autoIdOk(id) || seen[id]) continue;
+      if (!Array.isArray(l.points)) continue;
+      const pts = [];
+      for (let j = 0; j < l.points.length && pts.length < maxP; j++) {
+        const q = l.points[j]; if (!Array.isArray(q)) continue;
+        const x = +q[0], v = +q[1], c = +q[2] || 0; if (!Number.isFinite(x) || !Number.isFinite(v)) continue;
+        pts.push([clamp(Math.round(x * 48) / 48, 0, maxX), clamp(Math.round(v * 10000) / 10000, 0, 1), c === 1 || c === 2 ? c : 0]);
+      }
+      if (!pts.length) continue;
+      pts.sort((a, b) => a[0] - b[0]); // stable: two points at one step keep their order (a jump)
+      const dd = []; pts.forEach(q => { const n = dd.length; if (n >= 2 && dd[n - 1][0] === q[0] && dd[n - 2][0] === q[0]) dd[n - 1] = q; else dd.push(q); }); // at most two points per step
+      seen[id] = 1; out.push({ target: id, points: dd });
+    } catch (e) { /* a hostile lane is dropped */ }
+  }
+  return out.length ? out : null;
+}
+function autoFixLegato(l) {
+  if (!l || typeof l !== 'object' || !l.on) return null;
+  const unit = l.unit === 'st' ? 'st' : 'ms', g = +l.glide;
+  return { on: true, glide: Number.isFinite(g) ? (unit === 'st' ? clamp(Math.round(g * 48) / 48, 0, 16) : clamp(Math.round(g), 0, 2000)) : (unit === 'st' ? 1 : 60), unit };
+}
+function autoFix(out, p) {
+  if (!out || !Array.isArray(out.tracks)) return out;
+  const src = p && Array.isArray(p.tracks) ? p.tracks : [];
+  out.tracks.forEach((tr, i) => {
+    let s = null; try { s = src[i]; } catch (e) { s = null; }
+    delete tr.autoArr; delete tr.legato;
+    if (!s || typeof s !== 'object' || s.type !== tr.type) return;
+    try { const a = autoFixLanes(s.autoArr, AUTO_ARR_STEPS, AUTO_MAX_ARR_PTS); if (a) tr.autoArr = a; } catch (e) { /* dropped */ }
+    try { const lg = tr.type === 'synth' ? autoFixLegato(s.legato) : null; if (lg) tr.legato = lg; } catch (e) { /* dropped */ }
+    (tr.clips || []).forEach((c, k) => {
+      if (!c) return;
+      delete c.auto;
+      try { const sc = Array.isArray(s.clips) ? s.clips[k] : null; const a = sc && typeof sc === 'object' ? autoFixLanes(sc.auto, c.bars * 16, AUTO_MAX_PTS) : null; if (a) c.auto = a; } catch (e) { /* dropped */ }
+    });
+  });
+  return out;
+}
+if (typeof normalizeProject === 'function') {
+  const autoNorm0 = normalizeProject;
+  normalizeProject = function (p) { const out = autoNorm0(p); if (out) { try { autoFix(out, p); } catch (e) { console.error('[dnb808] automation sanitize', e); } } return out; }; // eslint-disable-line no-func-assign
+}
+
+// ---------- the API (the editors, the generator, scripts) ----------
+// Shapes, tempo-synced: rate in steps per cycle (AUTO_RATES), lo..hi the swing of the value. Returns the points of `len` steps
+const AUTO_RATES = { '2 bars': 32, '1 bar': 16, '1/2': 8, '1/4': 4, '1/4T': 8 / 3, '1/8': 2, '1/8T': 4 / 3, '1/16': 1, '1/16T': 2 / 3, '1/32': .5 };
+const AUTO_SHAPES = [['wobble', 'Wobble (sine)'], ['tri', 'Triangle'], ['saw', 'Saw down'], ['ramp', 'Ramp up'], ['square', 'Square'], ['sh', 'Sample & hold'], ['rise', 'Rise (whole clip)'], ['fall', 'Fall (whole clip)']];
+function autoShape(shape, rate, lo, hi, len, seed = 1) {
+  const R = hasOwnKey(AUTO_RATES, rate) ? AUTO_RATES[rate] : (Number.isFinite(+rate) && +rate > 0 ? Math.max(1 / 3, +rate) : 2);
+  lo = clamp(auNum(+lo, 0), 0, 1); hi = clamp(auNum(+hi, 1), 0, 1); len = Math.max(1, auNum(+len, 16));
+  const q = x => Math.round(x * 48) / 48, pts = [], cyc = Math.ceil(len / R - 1e-9);
+  if (shape === 'rise') return [[0, lo, 0], [len, hi, 0]];
+  if (shape === 'fall') return [[0, hi, 0], [len, lo, 0]];
+  let r = (seed >>> 0) || 1; const rnd = () => { r ^= r << 13; r ^= r >>> 17; r ^= r << 5; return (r >>> 0) / 4294967296; };
+  for (let k = 0; k < cyc && pts.length < AUTO_MAX_PTS - 4; k++) {
+    const a = q(k * R), m = q(k * R + R / 2), b = q((k + 1) * R);
+    if (shape === 'wobble' || shape === 'tri') { pts.push([a, lo, shape === 'wobble' ? 1 : 0], [m, hi, shape === 'wobble' ? 1 : 0]); }
+    else if (shape === 'saw') { pts.push([a, hi, 0], [b, lo, 0]); }
+    else if (shape === 'ramp') { pts.push([a, lo, 0], [b, hi, 0]); }
+    else if (shape === 'square') { pts.push([a, hi, 2], [m, lo, 2]); }
+    else pts.push([a, lo + (hi - lo) * rnd(), 2]); // sh
+  }
+  if (shape === 'wobble' || shape === 'tri') pts.push([q(cyc * R), lo, 0]);
+  return pts.filter(p => p[0] <= len + 1e-9).map(p => [Math.min(p[0], len), p[1], p[2]]);
+}
+// clip envelope: set (points: [[step, value 0..1, curve?]]) or remove (points null / empty) the lane of target on a clip
+function autoSetLane(clip, target, points) {
+  if (!clip || !autoIdOk(target)) return null;
+  const lanes = (Array.isArray(clip.auto) ? clip.auto : []).filter(l => l && l.target !== target);
+  const fixed = points && points.length ? autoFixLanes([{ target, points }], clip.bars * 16, AUTO_MAX_PTS) : null;
+  if (fixed) lanes.push(fixed[0]);
+  if (lanes.length) clip.auto = lanes.slice(0, AUTO_MAX_LANES); else delete clip.auto;
+  return fixed ? fixed[0] : null;
+}
+// a shape on a clip lane (the whole clip): autoShapeLane(clip, 'cut', 'wobble', '1/8T', .2, .8)
+function autoShapeLane(clip, target, shape, rate, lo, hi) { return autoSetLane(clip, target, autoShape(shape, rate, lo, hi, clip.bars * 16, clip.bars * 977 + 13)); }
+// arrangement lane of a track, in song steps (bar b = step b * 16): autoArrSet(tr, 'sendA', [[0, 0], [16 * 16, 1]])
+function autoArrSet(tr, target, points) {
+  if (!tr || !autoIdOk(target)) return null;
+  const lanes = (Array.isArray(tr.autoArr) ? tr.autoArr : []).filter(l => l && l.target !== target);
+  const fixed = points && points.length ? autoFixLanes([{ target, points }], AUTO_ARR_STEPS, AUTO_MAX_ARR_PTS) : null;
+  if (fixed) lanes.push(fixed[0]);
+  if (lanes.length) tr.autoArr = lanes.slice(0, AUTO_MAX_LANES); else delete tr.autoArr;
+  return fixed ? fixed[0] : null;
+}
+// legato on a synth lane: autoSetLegato(tr, true, 80, 'ms') or (tr, true, 2, 'st')
+function autoSetLegato(tr, on, glide, unit) { if (!tr || tr.type !== 'synth') return null; const l = autoFixLegato({ on, glide, unit }); if (l) tr.legato = l; else delete tr.legato; return l; }
+
+// ===================== 7q. UI: THE AUTOMATION LANES =====================
+// Clip editor: a lane under the piano roll (target menu, pencil and line tools, shapes, clear, legato) for the clip envelopes.
+// Arrangement: an A button per lane shows its automation lane under it. Mouse and touch (pointer events); one undo step per stroke.
+const AU_UI = { show: null, tgt: {}, tool: 'draw', lo: 20, hi: 80, shape: 'wobble', rate: '1/8', arrShow: {}, arrTgt: {}, arrTool: 'draw', H: 64, AH: 46 };
+try { const v = localStorage.getItem('dnb808.autoLane'); if (v === '0' || v === '1') AU_UI.show = v === '1'; } catch (e) { /* private mode */ }
+(function auCss() {
+  if (typeof document === 'undefined') return;
+  const st = document.createElement('style');
+  st.textContent = `.ed-inner.has-auto { grid-template-rows: 18px auto 46px ${AU_UI.H}px; }
+.ed-inner.has-auto .ed-vel, .ed-inner.has-auto .ed-vcorner { bottom: ${AU_UI.H}px; }
+.ed-acorner { position: sticky; left: 0; bottom: 0; z-index: 4; background: var(--panel); color: var(--dim2); font-size: 9px; line-height: 1.15; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; border-right: 1px solid var(--line); border-top: 1px solid var(--line); padding: 0 3px; overflow: hidden; }
+.ed-acorner b { color: var(--text, #ddd); font-weight: 600; font-size: 9px; }
+.ed-auto { position: sticky; bottom: 0; z-index: 3; border-top: 1px solid var(--line); cursor: crosshair; touch-action: none; }
+.au-box { display: flex; flex-direction: column; gap: 5px; border-top: 1px solid var(--line); padding-top: 6px; }
+.au-box select, .au-box input { min-width: 0; }
+.au-box .au-tgt { width: 100%; }
+.au-box .cb-row { gap: 4px; flex-wrap: wrap; }
+.au-box input[type=number] { width: 44px; }
+.au-box .btn.on { background: var(--accent, #ffa64d); color: #161616; }
+.lane-head .au-a { min-width: 18px; }
+.lane-head .au-a.on, .au-head .btn.on { background: var(--accent, #ffa64d); color: #161616; }
+.au-row .au-head { gap: 3px; }
+.au-row .au-head select { width: 96px; flex: 1; }
+.au-row .au-head .btn { padding: 0 5px; height: 18px; font-size: 10px; min-width: 0; }
+.au-body { position: relative; height: ${AU_UI.AH}px; border-bottom: 1px solid var(--line); background: #1d1d1d; }
+.au-body canvas { position: absolute; top: 0; left: 0; touch-action: none; cursor: crosshair; display: block; }`;
+  document.head.appendChild(st);
+})();
+const auLaneGet = (lanes, id) => (Array.isArray(lanes) ? lanes.find(l => l && l.target === id) || null : null);
+function auTgtOf(tr, key, lanes, store) {
+  const ts = autoTargets(tr), cur = store[key];
+  if (cur && ts.some(x => x.id === cur)) return cur;
+  const has = (Array.isArray(lanes) ? lanes : []).find(l => l && ts.some(x => x.id === l.target));
+  return has ? has.target : (ts.some(x => x.id === 'cut') ? 'cut' : 'vol');
+}
+function auTgtOptions(tr, lanes, sel) {
+  const ts = autoTargets(tr), grps = [];
+  ts.forEach(x => { let g = grps.find(y => y.n === x.grp); if (!g) grps.push(g = { n: x.grp, l: [] }); g.l.push(x); });
+  return grps.map(g => `<optgroup label="${esc(g.n)}">${g.l.map(x => `<option value="${esc(x.id)}"${x.id === sel ? ' selected' : ''}>${auLaneGet(lanes, x.id) ? '● ' : ''}${esc(x.name)}</option>`).join('')}</optgroup>`).join('');
+}
+// ---------- drawing ----------
+// g: 2d context, w x h, pts: the lane (or null), x0: first step at the left edge, spp: steps per pixel, L: the lane's end (steps)
+function auPaint(g, w, h, pts, x0, spp, L, opt) {
+  g.fillStyle = '#1d1d1d'; g.fillRect(0, 0, w, h);
+  const s0 = Math.floor(x0), s1 = Math.ceil(x0 + w * spp), every = spp > 1 ? 16 : spp > .25 ? 4 : 1;
+  for (let s = Math.ceil(s0 / every) * every; s <= Math.min(s1, L); s += every) { g.fillStyle = s % 16 === 0 ? '#4a4a4a' : s % 4 === 0 ? '#323232' : '#282828'; g.fillRect(Math.round((s - x0) / spp), 0, 1, h); }
+  if (L < s1) { g.fillStyle = 'rgba(0,0,0,.45)'; g.fillRect((L - x0) / spp, 0, w, h); }
+  const Y = v => 3 + (1 - v) * (h - 6);
+  g.fillStyle = 'rgba(255,255,255,.06)'; g.fillRect(0, Y(.5), w, 1);
+  if (opt.pos >= 0) { g.fillStyle = 'rgba(255,255,255,.08)'; g.fillRect((opt.pos - x0) / spp, 0, Math.max(2, 1 / spp), h); }
+  if (!pts || !pts.length) {
+    g.setLineDash([4, 4]); g.strokeStyle = 'rgba(255,255,255,.35)'; g.beginPath(); g.moveTo(0, Y(opt.def) + .5); g.lineTo(w, Y(opt.def) + .5); g.stroke(); g.setLineDash([]);
+    g.fillStyle = '#8a8a8a'; g.font = '10px Inter, system-ui, sans-serif'; g.textBaseline = 'top'; g.fillText(opt.hint || 'Draw to automate', 6, 4);
+  } else {
+    g.strokeStyle = opt.color || '#ffa64d'; g.lineWidth = 1.5; g.beginPath();
+    for (let x = 0; x <= w; x++) { const s = x0 + x * spp, v = s > L ? null : autoVal(pts, s); if (v == null) break; const y = Y(v); if (x) g.lineTo(x, y); else g.moveTo(x, y); }
+    g.stroke(); g.lineWidth = 1;
+    g.fillStyle = 'rgba(255,166,77,.12)'; g.beginPath(); g.moveTo(0, h);
+    for (let x = 0; x <= w; x += 2) { const s = x0 + x * spp; if (s > L) break; g.lineTo(x, Y(autoVal(pts, s))); }
+    g.lineTo(Math.min(w, (L - x0) / spp), h); g.closePath(); g.fill();
+    if (pts.length / Math.max(1, w * spp) < 2 || pts.length < 300) { g.fillStyle = '#fff'; pts.forEach(q => { const x = (q[0] - x0) / spp; if (x < -4 || x > w + 4) return; g.fillRect(Math.round(x) - 2, Math.round(Y(q[1])) - 2, 4, 4); }); }
+    if (opt.pos >= 0) { const v = autoVal(pts, opt.pos); g.fillStyle = '#fff'; g.beginPath(); g.arc((opt.pos - x0) / spp, Y(v), 3.5, 0, 7); g.fill(); }
+  }
+  if (opt.label) { g.fillStyle = '#d6d6d6'; g.font = '600 10px Inter, system-ui, sans-serif'; g.textBaseline = 'bottom'; g.fillText(opt.label, 6, h - 3); }
+}
+// ---------- editing (shared by both lanes) ----------
+// The stroke: base = the lane's points before it; the tool writes into the range it covers.
+// draw: a point per grid cell the pointer crosses (linear segments); a point under the pointer moves instead; a tap on a point
+// deletes it. line: a straight line from where it started to where it ends.
+function auStrokeStart(lanePts, xs, v, pxPerStep, unit, tool, maxX) {
+  const base = (lanePts || []).map(q => q.slice());
+  const st = { base, tool, unit, maxX, x0: xs, v0: v, moved: false, cells: new Map(), hit: -1, lo: Infinity, hi: -Infinity };
+  if (tool === 'draw') {
+    const hit = base.findIndex(q => Math.abs(q[0] - xs) * pxPerStep < 7 && Math.abs(q[1] - v) < .12);
+    if (hit >= 0) { st.hit = hit; st.mode = 'move'; return st; }
+    st.mode = 'paint'; auStrokeCell(st, xs, v);
+  } else st.mode = 'line';
+  return st;
+}
+const auSnap = (x, u) => clamp(Math.round(Math.floor(x / u + 1e-9) * u * 48) / 48, 0, 1e9);
+function auStrokeCell(st, xs, v) {
+  const c = clamp(auSnap(xs, st.unit), 0, st.maxX);
+  const last = st.last; st.last = { c, v };
+  if (last && last.c !== c) { const n = Math.round(Math.abs(c - last.c) / st.unit); for (let k = 1; k < n; k++) { const cc = Math.round((last.c + (c - last.c) * k / n) * 48) / 48; st.cells.set(cc, last.v + (v - last.v) * k / n); } }
+  st.cells.set(c, v); st.lo = Math.min(st.lo, c); st.hi = Math.max(st.hi, c);
+}
+function auStrokeMove(st, xs, v) {
+  st.moved = true;
+  if (st.mode === 'move') {
+    const q = st.base[st.hit], prev = st.base[st.hit - 1], next = st.base[st.hit + 1];
+    q[0] = clamp(Math.round(xs * 48) / 48, prev ? prev[0] : 0, next ? next[0] : st.maxX); q[1] = v;
+  } else if (st.mode === 'paint') auStrokeCell(st, xs, v);
+  else { st.x1 = clamp(xs, 0, st.maxX); st.v1 = v; }
+}
+// the lane's points with the stroke in them
+function auStrokePts(st) {
+  if (st.mode === 'move') return st.moved ? st.base : st.base.filter((_, k) => k !== st.hit); // a tap on a point deletes it
+  if (st.mode === 'line') {
+    const sn = x => clamp(Math.round(Math.round(x / st.unit) * st.unit * 48) / 48, 0, st.maxX); // the ends on the grid
+    const xa = sn(st.x0), xb = st.x1 == null ? xa : sn(st.x1), va = st.v0, vb = st.v1 == null ? st.v0 : st.v1;
+    const a = Math.min(xa, xb), b = Math.max(xa, xb), keep = st.base.filter(q => q[0] < a || q[0] > b);
+    return keep.concat(a === b ? [[a, vb, 0]] : xa < xb ? [[xa, va, 0], [xb, vb, 0]] : [[xb, vb, 0], [xa, va, 0]]).sort((p, q) => p[0] - q[0]);
+  }
+  const keep = st.base.filter(q => q[0] < st.lo || q[0] > st.hi);
+  return keep.concat([...st.cells].map(([x, v]) => [x, v, 0])).sort((p, q) => p[0] - q[0]);
+}
+// pointer plumbing on a canvas: map(e) -> { xs, v }; get() -> current points; set(pts) writes; draw(pts) redraws
+function auBindLane(cv, o) {
+  let st = null, undone = false, pid = null;
+  const at = e => { const r = cv.getBoundingClientRect(); return o.map(e.clientX - r.left, e.clientY - r.top, r); };
+  const down = e => {
+    if (e.button !== 0 || st) return;
+    e.preventDefault(); e.stopPropagation();
+    try { cv.setPointerCapture(e.pointerId); } catch (err) { /* synthetic */ }
+    pid = e.pointerId; undone = false;
+    const p = at(e); st = auStrokeStart(o.get(), p.xs, p.v, o.pxPerStep(), o.unit(), o.tool(), o.maxX());
+    o.preview(auStrokePts(st), p);
+  };
+  const move = e => { if (!st || e.pointerId !== pid) return; const p = at(e); auStrokeMove(st, p.xs, p.v); o.preview(auStrokePts(st), p); };
+  const up = e => {
+    if (!st || (e && e.pointerId !== pid)) return;
+    const pts = auStrokePts(st); st = null;
+    const before = JSON.stringify(o.get() || []), after = JSON.stringify(pts);
+    if (before !== after) { if (!undone) { pushUndo(); undone = true; } o.set(pts); save(); }
+    o.done();
+  };
+  cv.addEventListener('pointerdown', down); cv.addEventListener('pointermove', move);
+  cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+}
+
+// ---------- the clip editor lane ----------
+function auEdShow(clip) { return AU_UI.show != null ? AU_UI.show : !!(clip && Array.isArray(clip.auto) && clip.auto.length); }
+function auEdInject(body) {
+  const t = UI.sel.t, s = UI.sel.s, tr = P.tracks[t], clip = tr && tr.clips[s];
+  if (!clip || tr.type === 'audio' || !$('.ed-inner', body)) return;
+  const id = auTgtOf(tr, t, clip.auto, AU_UI.tgt), show = auEdShow(clip), lg = tr.legato || {};
+  const box = document.createElement('div'); box.className = 'au-box';
+  box.innerHTML = `<div class="cb-row"><span>AUTOMATION</span><button class="btn au-lane ${show ? 'on' : ''}" data-info="Show or hide the automation lane under the piano roll">LANE</button></div>
+    <select class="au-tgt" data-info="The parameter the lane draws (a dot: it has an envelope). The envelope loops with the clip and plays in the export too">${auTgtOptions(tr, clip.auto, id)}</select>
+    <div class="cb-row"><button class="btn au-tool ${AU_UI.tool === 'draw' ? 'on' : ''}" data-tool="draw" data-info="Pencil: drag to draw on the grid; drag a point to move it, tap a point to delete it">&#9998; DRAW</button><button class="btn au-tool ${AU_UI.tool === 'line' ? 'on' : ''}" data-tool="line" data-info="Line: drag from one value to another for a straight ramp">&#8725; LINE</button><button class="btn au-clr" data-info="Remove this parameter's envelope from the clip">CLR</button></div>
+    <div class="cb-row"><select class="au-shape" data-info="A tempo-synced LFO shape written as an envelope over the whole clip">${AUTO_SHAPES.map(([k, n]) => `<option value="${k}"${k === AU_UI.shape ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select><select class="au-rate" data-info="Shape rate (one cycle)">${Object.keys(AUTO_RATES).map(k => `<option${k === AU_UI.rate ? ' selected' : ''}>${k}</option>`).join('')}</select></div>
+    <div class="cb-row"><input type="number" class="au-lo" min="0" max="100" value="${AU_UI.lo}" data-info="Shape: lowest value (%)"><input type="number" class="au-hi" min="0" max="100" value="${AU_UI.hi}" data-info="Shape: highest value (%)"><button class="btn au-apply" data-info="Write the shape into the lane (CTRL+Z undoes it)">SHAPE</button></div>
+    ${tr.type === 'synth' ? `<div class="cb-row"><button class="btn au-leg ${lg.on ? 'on' : ''}" data-info="Legato: overlapping notes play as one voice that glides to each new pitch, with no new attack (every engine)">LEGATO</button><input type="number" class="au-gl" min="0" max="${lg.unit === 'st' ? 16 : 2000}" step="${lg.unit === 'st' ? .25 : 10}" value="${lg.on ? lg.glide : 60}" data-info="Legato glide time"><select class="au-glu" data-info="Glide time in milliseconds or in 16th steps"><option value="ms"${lg.unit !== 'st' ? ' selected' : ''}>ms</option><option value="st"${lg.unit === 'st' ? ' selected' : ''}>steps</option></select></div>` : ''}`;
+  const left = $('.cb-left', body), hint = left && left.querySelector('.cb-hint:last-child');
+  if (left) left.insertBefore(box, hint && hint.parentElement === left ? hint : null);
+  const inner = $('.ed-inner', body);
+  if (show) {
+    inner.classList.add('has-auto');
+    const c = document.createElement('div'); c.className = 'ed-acorner'; c.id = 'ed-acorner'; c.innerHTML = `<b>AUTO</b><span class="au-cl"></span>`;
+    const cv = document.createElement('canvas'); cv.className = 'ed-auto'; cv.id = 'ed-auto'; cv.dataset.info = 'Automation lane: draw the envelope of the parameter chosen on the left';
+    inner.appendChild(c); inner.appendChild(cv);
+  }
+  box.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const cl = P.tracks[t].clips[s]; if (!cl) return;
+    if (b.classList.contains('au-lane')) { AU_UI.show = !auEdShow(cl); try { localStorage.setItem('dnb808.autoLane', AU_UI.show ? '1' : '0'); } catch (er) { /* private */ } renderDetail(); }
+    else if (b.classList.contains('au-tool')) { AU_UI.tool = b.dataset.tool; $$('.au-tool', box).forEach(x => x.classList.toggle('on', x === b)); }
+    else if (b.classList.contains('au-clr')) { const tg = auTgtOf(P.tracks[t], t, cl.auto, AU_UI.tgt); if (auLaneGet(cl.auto, tg)) { pushUndo(); autoSetLane(cl, tg, null); save(); renderDetail(); flash(`${autoImpl(P.tracks[t], tg) ? autoImpl(P.tracks[t], tg).name : tg}: envelope removed. CTRL+Z to undo`); } }
+    else if (b.classList.contains('au-apply')) {
+      const tg = auTgtOf(P.tracks[t], t, cl.auto, AU_UI.tgt); pushUndo();
+      autoShapeLane(cl, tg, AU_UI.shape, AU_UI.rate, AU_UI.lo / 100, AU_UI.hi / 100); AU_UI.show = true; save(); renderDetail();
+      flash(`${AUTO_SHAPES.find(x => x[0] === AU_UI.shape)[1]} ${AU_UI.rate} written to ${autoImpl(P.tracks[t], tg) ? autoImpl(P.tracks[t], tg).name : tg}. CTRL+Z to undo`);
+    } else if (b.classList.contains('au-leg')) {
+      pushUndo(); const L = P.tracks[t].legato;
+      if (L && L.on) delete P.tracks[t].legato; else autoSetLegato(P.tracks[t], true, +$('.au-gl', box).value, $('.au-glu', box).value);
+      save(); renderDetail(); flash(P.tracks[t].legato ? `${P.tracks[t].name}: LEGATO on: overlapping notes glide (${P.tracks[t].legato.glide} ${P.tracks[t].legato.unit})` : `${P.tracks[t].name}: LEGATO off`);
+    }
+  });
+  box.addEventListener('change', e => {
+    e.stopPropagation();
+    const x = e.target;
+    if (x.classList.contains('au-tgt')) { AU_UI.tgt[t] = x.value; renderDetail(); }
+    else if (x.classList.contains('au-shape')) AU_UI.shape = x.value;
+    else if (x.classList.contains('au-rate')) AU_UI.rate = x.value;
+    else if (x.classList.contains('au-lo')) AU_UI.lo = clamp(Math.round(+x.value) || 0, 0, 100);
+    else if (x.classList.contains('au-hi')) AU_UI.hi = clamp(Math.round(+x.value) || 0, 0, 100);
+    else if ((x.classList.contains('au-gl') || x.classList.contains('au-glu')) && P.tracks[t].legato) { pushUndo(); autoSetLegato(P.tracks[t], true, +$('.au-gl', box).value, $('.au-glu', box).value); save(); if (x.classList.contains('au-glu')) renderDetail(); }
+  });
+  auEdMount();
+}
+function auEdMount() {
+  const cv = $('#ed-auto'); if (!cv || ED.t < 0 || !ED.clip) return;
+  ED.cv.auto = setupCanvas(cv, ED.W, AU_UI.H);
+  const lane = () => { const tr = P.tracks[ED.t], c = tr && tr.clips[ED.s]; return { tr, c, id: c ? auTgtOf(tr, ED.t, c.auto, AU_UI.tgt) : null }; };
+  auBindLane(cv, {
+    map: (x, y) => ({ xs: clamp(x / ED.cw, 0, ED.L), v: clamp(1 - (y - 3) / (AU_UI.H - 6), 0, 1) }),
+    get: () => { const { c, id } = lane(); const l = c && auLaneGet(c.auto, id); return l ? l.points : null; },
+    set: pts => { const { c, id } = lane(); if (c) autoSetLane(c, id, pts); },
+    pxPerStep: () => ED.cw, unit: () => (ED.u && ED.u < 1 ? ED.u : 1), tool: () => AU_UI.tool, maxX: () => ED.L,
+    preview: (pts, p) => { const { tr, id } = lane(); auEdDraw(pts, `${autoImpl(tr, id) ? autoImpl(tr, id).name : id}: ${autoFmt(tr, id, p.v)}`); },
+    done: () => auEdRefresh(),
+  });
+  auEdDraw();
+}
+function auEdDraw(over, label) {
+  const A = ED.cv.auto; if (!A || !A.cv.isConnected || ED.t < 0) return;
+  const tr = P.tracks[ED.t], c = tr && tr.clips[ED.s]; if (!c) return;
+  const id = auTgtOf(tr, ED.t, c.auto, AU_UI.tgt), l = auLaneGet(c.auto, id), im = autoImpl(tr, id);
+  auPaint(A.g, A.w, A.h, over || (l ? l.points : null), 0, 1 / ED.cw, ED.L, { pos: ED.pos, def: autoDefault(tr, id), color: tr.color, label: label || '',
+    hint: im ? `${im.name}: draw to automate (now ${autoFmt(tr, id, autoDefault(tr, id))})` : 'This instrument has no such parameter' });
+  const cl = $('#ed-acorner .au-cl'); if (cl) cl.textContent = im ? im.name : id;
+}
+// after a stroke: the target menu marks the lanes that exist
+function auEdRefresh() {
+  auEdDraw();
+  const sel = $('.au-box .au-tgt'), tr = P.tracks[ED.t], c = tr && tr.clips[ED.s]; if (sel && c) sel.innerHTML = auTgtOptions(tr, c.auto, auTgtOf(tr, ED.t, c.auto, AU_UI.tgt));
+}
+if (typeof renderClipDetail === 'function') {
+  const auRCD0 = renderClipDetail;
+  renderClipDetail = function (body) { auRCD0(body); try { auEdInject(body); } catch (e) { console.error('[dnb808] automation lane', e); } }; // eslint-disable-line no-func-assign
+}
+if (typeof edDrawAll === 'function') {
+  const auDA0 = edDrawAll;
+  edDrawAll = function () { auDA0(); auEdDraw(); }; // eslint-disable-line no-func-assign
+}
+if (typeof edFrame === 'function') {
+  const auEF0 = edFrame;
+  edFrame = function (m) { const p0 = ED.pos; auEF0(m); if (ED.pos !== p0) auEdDraw(); }; // eslint-disable-line no-func-assign
+}
+
+// ---------- the arrangement lanes ----------
+function auArrInject() {
+  const v = $('#arr-view'); if (!v) return;
+  const bw = UI.bw, sc = $('#a-scroll');
+  P.tracks.forEach((tr, i) => {
+    const body = v.querySelector(`.lane-body[data-t="${i}"]`); if (!body) return;
+    const row = body.parentElement, head = row.querySelector('.lane-head'), has = Array.isArray(tr.autoArr) && tr.autoArr.length;
+    if (head && !head.querySelector('.au-a')) {
+      const b = document.createElement('button'); b.className = 'mbtn au-a' + (AU_UI.arrShow[i] ? ' on' : '') + (has ? ' has' : ''); b.dataset.aua = i; b.textContent = has ? 'A•' : 'A';
+      b.dataset.info = `Show the automation lane of ${tr.name} (arrangement automation: long sweeps over many bars)`;
+      head.insertBefore(b, head.querySelector('select'));
+    }
+    if (!AU_UI.arrShow[i]) return;
+    const id = auTgtOf(tr, 'a' + i, tr.autoArr, AU_UI.arrTgt);
+    const r = document.createElement('div'); r.className = 'arr-row au-row'; r.dataset.aut = i;
+    r.innerHTML = `<div class="lane-head au-head" style="--c:${tr.color}"><select class="au-atgt" data-t="${i}" data-info="The parameter this arrangement lane draws">${auTgtOptions(tr, tr.autoArr, id)}</select>
+      <button class="btn au-atool ${AU_UI.arrTool === 'draw' ? 'on' : ''}" data-tool="draw" data-info="Pencil">&#9998;</button><button class="btn au-atool ${AU_UI.arrTool === 'line' ? 'on' : ''}" data-tool="line" data-info="Line: a straight sweep from where you press to where you let go">&#8725;</button><button class="btn au-aclr" data-t="${i}" data-info="Remove this lane's envelope">&#10005;</button></div>
+      <div class="au-body" style="width:${P.arr.len * bw}px"><canvas></canvas></div>`;
+    row.after(r);
+    auArrMount(r, i);
+  });
+  if (sc && !sc._auScroll) { sc._auScroll = true; sc.addEventListener('scroll', () => auArrDrawAll(), { passive: true }); }
+}
+function auArrMount(r, i) {
+  const cv = r.querySelector('canvas'), bodyEl = r.querySelector('.au-body');
+  const id = () => auTgtOf(P.tracks[i], 'a' + i, P.tracks[i].autoArr, AU_UI.arrTgt);
+  const spp = () => 16 / UI.bw; // steps per pixel
+  r._au = { cv, bodyEl, i, id };
+  auBindLane(cv, {
+    map: (x, y) => { const left = parseFloat(cv.style.left) || 0; return { xs: clamp((x + left) * spp(), 0, P.arr.len * 16), v: clamp(1 - (y - 3) / (AU_UI.AH - 6), 0, 1) }; },
+    get: () => { const l = auLaneGet(P.tracks[i].autoArr, id()); return l ? l.points : null; },
+    set: pts => { autoArrSet(P.tracks[i], id(), pts); },
+    pxPerStep: () => UI.bw / 16, unit: () => (UI.bw >= 48 ? 1 : UI.bw >= 16 ? 4 : 16), tool: () => AU_UI.arrTool, maxX: () => P.arr.len * 16,
+    preview: (pts, p) => auArrDraw(r, pts, `${autoImpl(P.tracks[i], id()) ? autoImpl(P.tracks[i], id()).name : id()}: ${autoFmt(P.tracks[i], id(), p.v)}  bar ${(p.xs / 16 + 1).toFixed(2)}`),
+    done: () => { auArrDraw(r); const sel = r.querySelector('.au-atgt'); if (sel) sel.innerHTML = auTgtOptions(P.tracks[i], P.tracks[i].autoArr, id()); const b = $(`#arr-view .au-a[data-aua="${i}"]`); if (b) b.textContent = P.tracks[i].autoArr ? 'A•' : 'A'; },
+  });
+  auArrDraw(r);
+}
+// the canvas covers the visible part of the lane only (a song is up to 512 bars wide)
+function auArrDraw(r, over, label) {
+  const o = r && r._au; if (!o || !o.cv.isConnected) return;
+  const sc = $('#a-scroll'), head = ARR_HEAD, full = P.arr.len * UI.bw;
+  const left = sc ? clamp(sc.scrollLeft - 0, 0, Math.max(0, full - 1)) : 0, w = Math.max(1, Math.min(full - left, (sc ? sc.clientWidth - head : 800) + 40));
+  o.cv.style.left = left + 'px';
+  const A = setupCanvas(o.cv, w, AU_UI.AH), tr = P.tracks[o.i], id = o.id(), l = auLaneGet(tr.autoArr, id), im = autoImpl(tr, id);
+  const m = typeof currentMark === 'function' ? currentMark() : null;
+  auPaint(A.g, A.w, A.h, over || (l ? l.points : null), left * 16 / UI.bw, 16 / UI.bw, P.arr.len * 16, { pos: m ? m.song : -1, def: autoDefault(tr, id), color: tr.color, label: label || '',
+    hint: im ? `${im.name}: draw a sweep (now ${autoFmt(tr, id, autoDefault(tr, id))})` : 'This lane has no such parameter' });
+}
+function auArrDrawAll() { $$('#arr-view .au-row').forEach(r => auArrDraw(r)); }
+if (typeof renderArrangement === 'function') {
+  const auRA0 = renderArrangement;
+  renderArrangement = function () { auRA0(); try { auArrInject(); } catch (e) { console.error('[dnb808] automation lanes', e); } }; // eslint-disable-line no-func-assign
+}
+// the arrangement view's clicks and menus (the view keeps its own handlers; these act on the automation controls only)
+function auArrBind() {
+  const v = typeof document !== 'undefined' && $('#arr-view'); if (!v || v._auBound) return; v._auBound = true;
+  v.addEventListener('click', e => {
+    const a = e.target.closest('.au-a');
+    if (a) { e.stopPropagation(); const i = +a.dataset.aua; AU_UI.arrShow[i] = !AU_UI.arrShow[i]; renderArrangement(); return; }
+    const tl = e.target.closest('.au-atool'); if (tl) { AU_UI.arrTool = tl.dataset.tool; $$('.au-atool', v).forEach(x => x.classList.toggle('on', x.dataset.tool === AU_UI.arrTool)); return; }
+    const c = e.target.closest('.au-aclr');
+    if (c) { const i = +c.dataset.t, tr = P.tracks[i], id = auTgtOf(tr, 'a' + i, tr.autoArr, AU_UI.arrTgt); if (auLaneGet(tr.autoArr, id)) { pushUndo(); autoArrSet(tr, id, null); save(); renderArrangement(); flash(`${tr.name}: arrangement lane removed. CTRL+Z to undo`); } }
+  }, true);
+  v.addEventListener('change', e => { const s = e.target.closest('.au-atgt'); if (!s) return; e.stopPropagation(); AU_UI.arrTgt['a' + s.dataset.t] = s.value; renderArrangement(); }, true);
+}
+// the playhead dot follows the transport on the lanes
+(function auRaf() {
+  if (typeof requestAnimationFrame !== 'function') return;
+  let last = -2;
+  const f = () => {
+    try {
+      auArrBind();
+      if (typeof UI !== 'undefined' && UI.view === 'arr' && typeof TR !== 'undefined') { const m = TR.playing && typeof currentMark === 'function' ? currentMark() : null, s = m ? m.song : -1; if (s !== last) { last = s; auArrDrawAll(); } }
+    } catch (e) { /* the page is not built yet */ }
+    requestAnimationFrame(f);
+  };
+  requestAnimationFrame(f);
+})();
 // ===================== 3s. SYNTH ENGINE: SPECTRA (additive, engine 'spectra') =====================
 // An original additive instrument. Every voice is a bank of up to 256 sine partials (an AudioWorklet: one node per note), so
 // nothing is ever above Nyquist: a partial that would pass 0.47 x the sample rate fades out before it gets there, and a
@@ -5422,9 +6145,12 @@ function spxWorkletMain(coreFactory) {
   const SMOOTH = ['level', 'morph', 'pw', 'sync', 'stretch', 'inh', 'eo', 'tilt', 'rnd', 'pdec', 'width', 'uniDet', 'uniWidth', 'bVol', 'pan', 'fine',
     'mac1', 'mac2', 'mac3', 'mac4', 's', 'e2s', 'e3s', 'p1freq', 'p1res', 'p1amt', 'p1mix', 'p1key', 'p2freq', 'p2res', 'p2amt', 'p2mix', 'p2key'];
   const LOGS = { p1freq: 1, p2freq: 1 };
+  // automation lanes (c16_auto.js): parameter z<k> at 0..1 replaces the knob of ZK's field (p1freq 20 Hz..20 kHz), under 0 the knob plays
+  const ZK = { mac1: 0, mac2: 1, mac3: 2, mac4: 3, p1freq: 4, p1res: 5, morph: 6, p1amt: 7 }, ZN = ['z0', 'z1', 'z2', 'z3', 'z4', 'z5', 'z6', 'z7'];
   const rng = seed => { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 4294967296; }; };
   class SpxVoice extends AudioWorkletProcessor {
-    static get parameterDescriptors() { return [{ name: 'gate', defaultValue: 1, minValue: 0, maxValue: 1, automationRate: 'a-rate' }, { name: 'pitch', defaultValue: 0, minValue: -96, maxValue: 96, automationRate: 'k-rate' }]; }
+    static get parameterDescriptors() { return [{ name: 'gate', defaultValue: 1, minValue: 0, maxValue: 1, automationRate: 'a-rate' }, { name: 'pitch', defaultValue: 0, minValue: -96, maxValue: 96, automationRate: 'k-rate' }]
+      .concat(ZN.map(name => ({ name, defaultValue: -1, minValue: -1, maxValue: 2, automationRate: 'k-rate' }))); } // z0..z7: automation lanes (c16_auto.js), -1 = the knob
     constructor(o) {
       super();
       const q = o.processorOptions || {}; this.q = q; const P = q.P || {};
@@ -5455,7 +6181,8 @@ function spxWorkletMain(coreFactory) {
     // the controls of one frame: knob values (smoothed), envelopes, LFOs, the matrix
     control(te, gate, pitchP) {
       const P = this.P, cur = this.cur, a = this.first ? 1 : .3;
-      for (const k of SMOOTH) { const t = +P[k] || 0; if (LOGS[k]) { const x = Math.log(Math.max(1, cur[k])), y = Math.log(Math.max(1, t)); cur[k] = Math.exp(x + a * (y - x)); } else cur[k] += a * (t - cur[k]); }
+      const zv = this.zv;
+      for (const k of SMOOTH) { let t = +P[k] || 0; const zi = ZK[k]; if (zi !== undefined && zv && zv[zi] >= 0) { const z = Math.min(1, zv[zi]); t = zi === 4 ? 20 * Math.pow(1000, z) : z; } if (LOGS[k]) { const x = Math.log(Math.max(1, cur[k])), y = Math.log(Math.max(1, t)); cur[k] = Math.exp(x + a * (y - x)); } else cur[k] += a * (t - cur[k]); }
       const dt = FR / this.sr, q = this.q;
       // mod envelopes (release when the gate starts to fall)
       for (let n = 0; n < 2; n++) {
@@ -5570,6 +6297,7 @@ function spxWorkletMain(coreFactory) {
       const live = inputs[0] && inputs[0].length > 0;
       if (this.done) return live;
       const gp = params.gate, pitchP = params.pitch[0];
+      const zv = this.zv || (this.zv = new Float64Array(8)); for (let k = 0; k < 8; k++) { const a = params[ZN[k]]; zv[k] = a ? a[0] : -1; }
       let n = 0;
       if (g0 + 128 <= this.s0) return true;
       const bl = this.bufL, br = this.bufR; bl.fill(0); br.fill(0);
@@ -5711,7 +6439,7 @@ Engine.prototype.spxBuild = function (i, midi, vel, t, srcs) {
   const hold = (prm, at) => { if (prm.cancelAndHoldAtTime) prm.cancelAndHoldAtTime(at); else prm.cancelScheduledValues(at); };
   let pOff = 0; if (pitch) pitch.setValueAtTime(0, t); // the legato offset in semitones; the event anchors the first glide ramp
   const voice = {
-    t, ended: false, relAt: Infinity, n: Math.max(1, Math.round(spxNoteCost(s) * (uni != null && uni < 1 ? uni : 1))), spx: true, track: i, heavy: uni != null,
+    t, ended: false, relAt: Infinity, n: Math.max(1, Math.round(spxNoteCost(s) * (uni != null && uni < 1 ? uni : 1))), spx: true, track: i, heavy: uni != null, node, // node: its z0..z7 parameters take the automation lanes (c16_auto.js)
     bend: (t0, pts) => { if (pitch) { pitch.setValueAtTime(pOff, t0); pts.forEach(([at, semi]) => { if (Number.isFinite(at) && Number.isFinite(semi)) pitch.linearRampToValueAtTime(pOff + semi, Math.max(at, t0 + .001)); }); } }, // a note's pitch bend, in semitones (d_transport.js)
     release: (tOff, rOv, force) => {
       if (voice.ended || (!force && tOff >= voice.relAt)) return;
@@ -7960,6 +8688,637 @@ function audHide(p, fn) {
   try { const s = document.createElement('style'); s.id = 'aud-css'; s.textContent = css; document.head.append(s); } catch (e) { /* no document */ }
 })();
 if (typeof window !== 'undefined') audInitDrop();
+// ===================== 3q. LOOP LIBRARY: built-in loops and the user's own =====================
+// BUILT-IN loops ship as recipes, not samples: a recipe names a style, a fixed song seed and one clip of that song (a lane,
+// a scene, a window of bars) or a clip the generator writes on the song (genClip with a fixed seed). The song comes from
+// GENERATE SONG (genSong, section 3g), so a loop has the style's preset or kit, its track FX, its returns and its groove.
+// A loop is rendered on demand by the arrangement renderer (renderArrangementOffline): the lane alone, played from 1 or 2
+// bars before the loop so the tails of the bars before it are in it (the loop joins without a click), cut to the bars,
+// peak-normalized to -1 dBFS. The WAV goes into the sampler's IndexedDB store like a user file ('user:<hash>', section 3b),
+// and 'loop:<recipe>@<version>' remembers which file a recipe made: a loop renders once per browser.
+// MY LOOPS: every file of the user's packs (LOAD PACK, Splice downloads, AUDIO CLIPS: VOX.index, section 3c), with the
+// tempo, key and role read from the file name. No audio is bundled: the page holds the recipes, the browser the files.
+// The BROWSER (menu bar LOOPS, browser section Loops) searches and filters both lists, previews a loop at the set tempo
+// (repitched at once, then the stretched copy in the set key from the next loop on) in time with the transport, and puts it
+// on an audio track (slot or arrangement; STRETCH and TO KEY fit it to the set) or as an editable MIDI clip on its lane.
+// A set keeps only the clip's file key and, for a built-in loop, audio.lib = the recipe (a browser that lacks the file
+// renders it again). The generator API: loopFind (scored candidates) and loopPlace (section end).
+// Hooks, all wrapped here (no edit of another section): audClipFix (keeps audio.lib), smpReady (renders a missing built-in
+// loop before a render or the boot), renderBrowser (the Loops section and the menu button).
+const LIB_VER = 1;
+const LIB_ID_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+){1,5}$/; // style-role(-x): never a name of Object.prototype
+const LIB_T = { DRUMS: 0, BREAK: 1, BASS: 2, SUB: 3, STAB: 4, PAD: 5, LEAD: 6, FX: 7 };
+const LIB_ROLES = { drums: 'Drums', top: 'Tops', perc: 'Percussion', bass: 'Bass', growl: 'Growl', chords: 'Chords', pad: 'Pad', arp: 'Arp', lead: 'Lead', fx: 'FX', 'vocal-chop': 'Vocal chops' };
+const LIB_SR = 44100;
+const LIB_PEAK = Math.pow(10, -1 / 20);   // -1 dBFS
+const LIB_RMS = Math.pow(10, -14 / 20);   // a loud loop is not pushed past -14 dBFS RMS
+const LIB_MAX_GAIN = 16;
+// the render is this late after its grid (track compressor, glue, limiter look-ahead; measured 18.4 ms). MASTER_LAT (section 3d) is
+// declared after this section: read when a loop renders
+const libLat = () => { try { return typeof MASTER_LAT === 'number' ? MASTER_LAT : .018; } catch (e) { return .018; } };
+// Two songs per style (fixed seeds): two keys, two sets of clips
+const LIB_SEEDS = { festival: [1701, 2702], darkrave: [3703, 4704], neurofunk: [5705, 6706], techroller: [7707, 8708], brostep: [9709, 1810],
+  liquid: [2811, 3812], jungle: [4813, 5814], jumpup: [6815, 7816], futurebass: [8817, 9818], halfdnb: [1919, 2920] };
+const LIB_ARP = { festival: 'up16', darkrave: 'updown8t', neurofunk: 'random16', techroller: 'up8', brostep: 'updown8t', liquid: 'updown8', jungle: 'down8',
+  jumpup: 'updown16', futurebass: 'updown16t', halfdnb: 'up8t' };
+const LIB_VOXS = { festival: 'callresp', darkrave: 'offbeat', neurofunk: 'stutter', techroller: 'offbeat', brostep: 'stutter', liquid: 'callresp', jungle: 'offbeat',
+  jumpup: 'callresp', futurebass: 'stutter', halfdnb: 'offbeat' };
+const LIB_GROWL = { festival: 1, neurofunk: 1, brostep: 1, jumpup: 1, halfdnb: 1 }; // styles whose bass preset is a growl, a talker or a wobble
+// The recipes of every style: [id suffix, role, source, bars, first bar, energy, name, options]
+// source 'scene:LANE' = that clip of the generated song (8 bars), 'gen:LANE' = a clip the generator writes on the song
+const LIB_PLAN = [
+  ['beat-a', 'drums', 'drop:DRUMS', 2, 0, 1, 'beat A', { k: 0 }],
+  ['beat-b', 'drums', 'dropB:DRUMS', 4, 4, 1, 'beat B', { k: 1 }],
+  ['beat-intro', 'drums', 'intro2:DRUMS', 2, 0, .5, 'intro beat', { k: 0 }],
+  ['tops', 'top', 'drop:BREAK', 2, 0, .8, 'break tops', { k: 1 }],
+  ['perc', 'perc', 'drop:DRUMS', 2, 2, .65, 'percussion', { k: 1, perc: true }],
+  ['bass-a', 'bass', 'drop:BASS', 2, 0, 1, 'bass A', { k: 0 }],
+  ['bass-b', 'bass', 'dropB:BASS', 2, 2, .95, 'bass B', { k: 1, preset: 1 }],
+  ['sub', 'bass', 'drop:SUB', 2, 0, .85, 'sub', { k: 0 }],
+  ['chords', 'chords', 'drop:STAB', 4, 0, .8, 'chords', { k: 0 }],
+  ['pad', 'pad', 'gen:PAD', 4, 0, .45, 'pad', { k: 1, rhythm: 'hold', tie: true }],
+  ['arp', 'arp', 'gen:STAB', 2, 0, .7, 'arp', { k: 0, asLead: true, reg: [62, 81] }],
+  ['lead', 'lead', 'drop:LEAD', 4, 0, .9, 'lead hook', { k: 1 }],
+  ['riser', 'fx', 'build:FX', 4, 4, .65, 'riser', { k: 0 }],
+  ['vox', 'vocal-chop', 'gen:FX', 2, 0, .7, 'vocal chops', { k: 1 }],
+];
+const LIB = { recipes: null, byId: null, songs: new Map(), ids: new Map(), jobs: new Map(), chain: Promise.resolve(), favs: null, mine: null,
+  pv: null, pvMade: 0, pvFreed: 0, renders: 0, ui: null, f: { q: '', src: 'all', style: '', role: '', key: '', bars: 0, bmin: 0, bmax: 0 }, sel: null };
+const libHas = (o, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
+
+// ---------- the catalogue ----------
+// The key of song style:seed without generating it: genSong's first two picks from its seed (checked by the tests)
+function libSongKey(style, seed) {
+  const st = GEN_STYLES[style], rng = genRng(seed), prog = rng.pick(st.progs.filter(x => genHas(GEN_PROGS, x))), key = rng.pick(st.keys), scale = GEN_PROGS[prog].scale;
+  return { key, scale, text: NOTE_NAMES[key] + (MINOR_LIKE.includes(scale) ? 'm' : '') };
+}
+function libRecipes() {
+  if (LIB.recipes) return LIB.recipes;
+  const out = [];
+  Object.keys(LIB_SEEDS).forEach(style => {
+    const st = GEN_STYLES[style]; if (!st) return;
+    LIB_PLAN.forEach(([suf, role0, src, bars, off, energy, word, op]) => {
+      const seed = LIB_SEEDS[style][op.k], k = libSongKey(style, seed), growl = role0 === 'bass' && suf !== 'sub' && LIB_GROWL[style];
+      const role = growl ? 'growl' : role0, w = growl ? word.replace('bass', 'growl') : word;
+      const r = { id: `${style}-${suf}`, kind: 'builtin', style, role, src, bars, off, energy, seed, bpm: st.bpm, key: k.text, scale: k.scale,
+        name: `${st.short} ${w}`, opt: op };
+      if (suf === 'arp') r.opt = Object.assign({}, op, { rhythm: LIB_ARP[style] });
+      if (suf === 'vox') r.opt = Object.assign({}, op, { vox: LIB_VOXS[style] });
+      r.words = `${r.name} ${style} ${st.name} ${LIB_ROLES[role]} ${role} ${r.bpm} ${r.key} ${bars} bar${bars > 1 ? 's' : ''} built-in`.toLowerCase();
+      out.push(r);
+    });
+  });
+  LIB.recipes = out; LIB.byId = new Map(out.map(r => [r.id, r]));
+  return out;
+}
+const libRecipe = id => (libRecipes(), typeof id === 'string' ? LIB.byId.get(id) || null : null);
+
+// ---------- a recipe as notes on a lane of its song ----------
+function libSong(style, seed) {
+  const k = style + ':' + seed;
+  let p = LIB.songs.get(k);
+  if (!p) {
+    p = genSong(style, { seed });
+    LIB.songs.set(k, p); if (LIB.songs.size > 6) LIB.songs.delete(LIB.songs.keys().next().value);
+  }
+  return p;
+}
+// -> { R: a copy of the song, t: the lane, clip: { name, bars, notes, groove? }, key, scale, bpm }
+function libBuild(r) {
+  const P0 = libSong(r.style, r.seed), R = clone(P0), [where, laneName] = r.src.split(':'), t = LIB_T[laneName], tr = R.tracks[t], op = r.opt || {}, bars = r.bars, L = bars * 16;
+  if (op.preset && tr.type === 'synth') { // the style's next preset for this role (variety between the two bass loops)
+    const st = GEN_STYLES[r.style], list = ((st.presets && st.presets[tr.role]) || []).filter(n => genHas(SYNTH_PRESETS, n));
+    if (list.length > op.preset) tr.synth = makeSynth(list[op.preset]);
+  }
+  let notes = [], groove = null;
+  if (where === 'gen') {
+    if (op.vox) { tr.kit = 'vox'; tr.pads = makePads('vox'); }
+    const res = genClip(R, t, bars, Object.assign({ seed: (r.seed * 31 + t * 7 + bars) >>> 0, dry: true },
+      op.vox ? { style: op.vox, ctx: false } : { s: GEN_SONG_ROWS.drop[0], rhythm: op.rhythm, asLead: !!op.asLead, reg: op.reg, tie: !!op.tie }));
+    notes = res.notes;
+    const src = R.tracks[t].clips[GEN_SONG_ROWS.drop[0]]; if (src && src.groove) groove = clone(src.groove);
+  } else {
+    const c = tr.clips[GEN_SONG_ROWS[where][0]];
+    if (c) {
+      const a = r.off * 16, b = a + L;
+      notes = c.notes.filter(n => n.s >= a && n.s < b).map(n => Object.assign({}, n, { s: n.s - a, l: Math.min(n.l, b - n.s) }));
+      if (c.groove) groove = clone(c.groove);
+    }
+  }
+  if (op.perc) { const kit = genKitMap(tr), keep = new Set([].concat(...['H', 'O', 'R', 'T', 'M', 'TOM', 'CR'].map(x => kit.roles[x] || []))); notes = notes.filter(n => keep.has(n.p)); }
+  const clip = { name: r.name.toUpperCase().slice(0, 24), bars, notes };
+  if (groove) clip.groove = groove;
+  return { R, t, clip, key: NOTE_NAMES[R.key] + (MINOR_LIKE.includes(R.scale) ? 'm' : ''), scale: R.scale, bpm: R.bpm };
+}
+
+// ---------- render ----------
+// The lane alone, from `pre` bars before the loop, through the classic master (the style's mastering chain is for a mix)
+async function libRenderBuilt(b) {
+  const R = b.R, bars = b.clip.bars, pre = Math.min(bars, 2), tr = R.tracks[b.t];
+  R.tracks.forEach(x => { x.arr = []; if (x.mix) x.mix.solo = false; });
+  tr.clips[0] = b.clip; tr.mix.mute = false;
+  tr.arr = [{ start: 0, slot: 0, len: pre + bars, off: mod(bars - pre, bars) * 16 }];
+  R.arr = Object.assign({}, R.arr, { len: pre + bars, loop: false });
+  if (typeof masterProFix === 'function') R.master.pro = masterProFix(Object.assign({}, R.master.pro, { on: false }));
+  const res = await renderArrangementOffline(R, LIB_SR);
+  if (!res) throw new Error('nothing to render');
+  const sd = 15 / R.bpm, i0 = Math.round((.05 + pre * 16 * sd + libLat()) * LIB_SR), n = Math.round(bars * 16 * sd * LIB_SR), src = res.buffer;
+  const out = new AudioBuffer({ length: n, numberOfChannels: 2, sampleRate: LIB_SR });
+  let peak = 0, sq = 0;
+  const chs = [0, 1].map(c => { const d = src.getChannelData(Math.min(c, src.numberOfChannels - 1)).slice(i0, i0 + n); return d; });
+  chs.forEach(d => { for (let k = 0; k < d.length; k++) { const v = d[k]; if (!Number.isFinite(v)) throw new Error('the render has NaN'); const a = Math.abs(v); if (a > peak) peak = a; sq += v * v; } });
+  const rms = Math.sqrt(sq / Math.max(1, 2 * n));
+  if (!(peak > 1e-5)) throw new Error('the render is silent');
+  const g = Math.min(LIB_PEAK / peak, rms > 0 ? LIB_RMS / rms : LIB_MAX_GAIN, LIB_MAX_GAIN);
+  chs.forEach((d, c) => { for (let k = 0; k < d.length; k++) d[k] *= g; out.copyToChannel(d, c); });
+  LIB.renders++;
+  return { buf: out, peak: peak * g, rms: rms * g, gain: g };
+}
+const libFileName = r => `${r.name.toLowerCase().replace(/[^a-z0-9]+/g, '_')}_${r.bpm}bpm_${r.key}.wav`;
+const libMapKey = id => `loop:${id}@${LIB_VER}`;
+// A recipe's audio in this browser: { id, buf, fresh } (fresh: rendered now). One render at a time; the same recipe twice is one job.
+function libAudio(r) {
+  if (!r) return Promise.reject(new Error('no such loop'));
+  const have = LIB.ids.get(r.id);
+  if (have && SMP.bufs.has(have)) return Promise.resolve({ id: have, buf: SMP.bufs.get(have), fresh: false });
+  let job = LIB.jobs.get(r.id); if (job) return job;
+  job = (async () => {
+    try {
+      const rec = await smpDbGet(libMapKey(r.id));
+      if (rec && typeof rec.id === 'string' && /^user:[0-9a-f]{8,64}$/i.test(rec.id)) {
+        if (!SMP.bufs.has(rec.id)) { SMP.jobs.delete(rec.id); await smpUserLoad(rec.id); }
+        if (SMP.bufs.has(rec.id)) { LIB.ids.set(r.id, rec.id); return { id: rec.id, buf: SMP.bufs.get(rec.id), fresh: false }; }
+      }
+      const done = LIB.chain.then(async () => {
+        const b = libBuild(r), res = await libRenderBuilt(b);
+        const bytes = await encodeWav(res.buf).arrayBuffer(), got = await audStore(libFileName(r), bytes);
+        await smpDbPut(libMapKey(r.id), { id: got.id, at: Date.now(), peak: res.peak });
+        LIB.ids.set(r.id, got.id);
+        return { id: got.id, buf: got.buf, fresh: true, kept: got.kept };
+      });
+      LIB.chain = done.catch(() => null);
+      return await done;
+    } finally { LIB.jobs.delete(r.id); }
+  })();
+  LIB.jobs.set(r.id, job);
+  return job;
+}
+
+// ---------- the set: audio.lib, and a built-in loop rendered again when this browser lacks its file ----------
+const libAudClipFix0 = audClipFix;
+audClipFix = function (c) { // eslint-disable-line no-func-assign
+  const o = libAudClipFix0(c);
+  if (o && c.audio && typeof c.audio.lib === 'string' && LIB_ID_RE.test(c.audio.lib)) o.audio.lib = c.audio.lib;
+  return o;
+};
+async function libRepair(p) {
+  try {
+    const want = [];
+    ((p && p.tracks) || []).forEach(tr => { if (audIsTrack(tr)) tr.clips.forEach(c => { if (c && c.audio && c.audio.lib && libRecipe(c.audio.lib)) want.push(c); }); });
+    for (const c of want) {
+      const a = c.audio; if (SMP.bufs.has(a.src)) continue;
+      if (a.src) { await smpUserLoad(a.src); if (SMP.bufs.has(a.src)) continue; }
+      const got = await libAudio(libRecipe(a.lib)), old = a.src;
+      if (got.id !== old) {
+        a.src = got.id;
+        if (typeof P === 'object' && P && p !== P) P.tracks.forEach(tr => { if (audIsTrack(tr)) tr.clips.forEach(x => { if (x && x.audio && x.audio.lib === a.lib && x.audio.src === old) x.audio.src = got.id; }); });
+        if (typeof P === 'object' && P && typeof save === 'function') save();
+      }
+    }
+  } catch (e) { console.warn('[dnb808] a library loop could not be rendered again', e); }
+  return true;
+}
+if (typeof smpReady === 'function') {
+  const libSmpReady0 = smpReady;
+  smpReady = function (p) { return libRepair(p).then(() => libSmpReady0(p)); }; // eslint-disable-line no-func-assign
+}
+
+// ---------- my loops: the files of the user's packs, tagged from their names ----------
+const LIB_WORDS = [['vocal-chop', /vox|vocal|voice|chop|acap|adlib|ad_lib|phrase|chant|sing|hook_vox|spoken|\bmc\b/], ['fx', /\bfx\b|sfx|riser|rise|uplift|downlift|impact|sweep|whoosh|noise|fx_/],
+  ['growl', /growl|wobble|neuro|talk|yoi|screech|formant|wub/], ['bass', /bass|\bsub\b|sub_|reese|808/], ['top', /top|hat|hihat|ride|shaker|cymbal/],
+  ['perc', /perc|conga|bongo|tamb|clap|rim|tom|snap/], ['drums', /drum|beat|break|kick|snare|groove|full_?kit|amen/], ['chords', /chord|stab|keys|piano|rhodes|organ|\bep\b|wurli/],
+  ['pad', /pad|atmos|ambien|drone|string|texture/], ['arp', /arp|pluck|seq/], ['lead', /lead|synth|hoover|melod|riff|line/]];
+const LIB_STYLE_WORDS = [['neurofunk', /neuro/], ['liquid', /liquid|soul/], ['jungle', /jungle|amen|ragga/], ['brostep', /dubstep|brostep|riddim|140/], ['futurebass', /future|wonky/],
+  ['halfdnb', /half_?time|halftime/], ['jumpup', /jump_?up|jumpup/], ['techroller', /roller|tech/], ['darkrave', /dark/], ['festival', /festival|rave|anthem/]];
+function libTagName(name) {
+  const s = String(name).toLowerCase().replace(/\.[a-z0-9]{2,4}$/, '').replace(/[\s\-.()[\]]+/g, '_');
+  const role = (LIB_WORDS.find(([, re]) => re.test(s)) || [''])[0], style = (LIB_STYLE_WORDS.find(([, re]) => re.test(s)) || [''])[0];
+  return { role, style };
+}
+async function libMine() {
+  let idx = [];
+  try { if (typeof voxIndex === 'function') idx = await voxIndex(); } catch (e) { idx = []; }
+  const out = [], seen = new Set();
+  (idx || []).forEach(pk => (pk.files || []).forEach(f => {
+    if (!f || typeof f.id !== 'string' || seen.has(f.id) || !(f.dur >= .5)) return; seen.add(f.id);
+    const nm = String(f.name || 'file'), tag = libTagName(nm + ' ' + pk.name), bpm = +f.bpm || (typeof voxNameBpm === 'function' ? voxNameBpm(nm) : 0);
+    const key = audKeyText(f.key) || (() => { const k = typeof voxNameKey === 'function' ? voxNameKey(nm) : null; return k ? NOTE_NAMES[k.root] + (k.minor ? 'm' : '') : ''; })();
+    const beats = bpm ? f.dur * bpm / 60 : 0, bars = beats ? AUD_BARS.reduce((b, x) => (Math.abs(Math.log2(x) - Math.log2(Math.max(.25, beats / 4))) < Math.abs(Math.log2(b) - Math.log2(Math.max(.25, beats / 4))) ? x : b), 1) : 0;
+    const label = nm.replace(/\.[a-z0-9]{2,4}$/i, '');
+    out.push({ id: f.id, kind: 'mine', name: label.slice(0, 60), file: nm, pack: String(pk.name || ''), style: tag.style, role: tag.role, bpm, key, bars, dur: f.dur, energy: .7,
+      words: `${label} ${pk.name} ${tag.role} ${tag.style} ${bpm || ''} ${key} mine my`.toLowerCase() });
+  }));
+  LIB.mine = out;
+  return out;
+}
+
+// ---------- favourites (this browser) ----------
+const LIB_FAV_KEY = 'loop:favs';
+async function libFavs() {
+  if (LIB.favs) return LIB.favs;
+  let rec = null; try { rec = await smpDbGet(LIB_FAV_KEY); } catch (e) { rec = null; }
+  LIB.favs = new Set((rec && Array.isArray(rec.keys) ? rec.keys : []).filter(k => typeof k === 'string' && /^(b:[a-z0-9-]{2,48}|m:user:[0-9a-f]{8,64})$/i.test(k)).slice(0, 500));
+  return LIB.favs;
+}
+async function libFavToggle(key) {
+  const f = await libFavs();
+  if (f.has(key)) f.delete(key); else f.add(key);
+  try { await smpDbPut(LIB_FAV_KEY, { keys: [...f].slice(-500) }); } catch (e) { /* a convenience */ }
+  return f.has(key);
+}
+const libKeyOf = it => (it.kind === 'builtin' ? 'b:' + it.id : 'm:' + it.id);
+
+// ---------- search ----------
+// Semitones STRETCH + TO KEY moves key k by in set p (0 = the same notes)
+function libShift(k, p) { return k ? audSemis(p || P, { mode: 'stretch', toKey: true, key: k, semis: 0 }) : 0; }
+function libFilter(list, f) {
+  const toks = String(f.q || '').toLowerCase().split(/\s+/).filter(Boolean);
+  return list.filter(it => (!f.style || it.style === f.style) && (!f.role || it.role === f.role) && (!f.key || it.key === f.key) && (!f.bars || it.bars === +f.bars)
+    && (!(f.bmin > 0) || it.bpm >= f.bmin) && (!(f.bmax > 0) || (it.bpm > 0 && it.bpm <= f.bmax)) && toks.every(t => it.words.includes(t)));
+}
+// The generator's search: { style, role, key, bpm, energy, bars, source: 'builtin' | 'mine' | 'all', limit } -> scored candidates, best first
+async function loopFind(q = {}) {
+  q = q && typeof q === 'object' ? q : {};
+  const src = q.source === 'mine' || q.source === 'all' ? q.source : 'builtin';
+  let list = src === 'mine' ? [] : libRecipes().slice();
+  if (src !== 'builtin') list = list.concat(await libMine());
+  const role = libHas(LIB_ROLES, q.role) ? q.role : '', key = audKeyText(q.key), bpm = +q.bpm > 0 ? +q.bpm : 0, en = Number.isFinite(+q.energy) && q.energy !== null && q.energy !== '' ? clamp(+q.energy, 0, 1) : null;
+  const kp = key ? (() => { const k = audKeyOf(key); return { key: k.root, scale: k.minor ? 'minor' : 'major' }; })() : null;
+  const out = list.filter(it => !role || it.role === role || (role === 'bass' && it.role === 'growl')).map(it => {
+    let sc = 0;
+    if (q.style && it.style === q.style) sc += 3;
+    if (role && it.role === role) sc += 1;
+    if (kp && it.key) sc -= Math.abs(libShift(it.key, kp)) * .15;
+    if (bpm && it.bpm) sc -= Math.abs(Math.log2(bpm / it.bpm)) * 12 * .25; else if (bpm) sc -= 1;
+    if (en != null) sc -= Math.abs(en - it.energy) * 2;
+    if (q.bars && it.bars === +q.bars) sc += .5;
+    return { item: it, score: Math.round(sc * 1000) / 1000 };
+  }).sort((a, b) => b.score - a.score || (a.item.id < b.item.id ? -1 : 1));
+  return out.slice(0, clamp(Math.round(+q.limit) || 20, 1, 200)).map(x => Object.assign({ score: x.score }, libPublic(x.item)));
+}
+const libPublic = it => ({ id: it.id, kind: it.kind, name: it.name, style: it.style, role: it.role, bpm: it.bpm, key: it.key, bars: it.bars, energy: it.energy });
+const libItem = id => libRecipe(id) || (LIB.mine || []).find(x => x.id === id) || null;
+
+// ---------- place: an audio clip on an audio track, or a MIDI clip on the loop's lane ----------
+// The buffer and the clip of item it (built-in or mine): -> { id, buf, clip }
+async function libAudioClip(it) {
+  if (it.kind === 'builtin') {
+    const got = await libAudio(it), clip = { name: it.name.toUpperCase().slice(0, 24), bars: AUD_BARS.includes(it.bars) ? it.bars : 1, notes: [],
+      audio: Object.assign(audBase(), { src: got.id, file: libFileName(it), bpm: it.bpm, key: it.key, mode: 'stretch', lib: it.id }) };
+    return { id: got.id, buf: got.buf, clip };
+  }
+  if (!SMP.bufs.has(it.id)) { SMP.jobs.delete(it.id); await smpUserLoad(it.id); }
+  const buf = SMP.bufs.get(it.id); if (!buf) throw new Error(`${it.name} is not in the storage of this browser any more`);
+  return { id: it.id, buf, clip: audClipFor(it.file || it.name, it.id, buf, P) };
+}
+// where: { t, s } (a slot) or { t, bar } (the arrangement); t may be a MIDI lane: the audio goes to an audio track then.
+// o.undo === false: no undo step (the caller made one), o.quiet: no message. -> { t, s, clip }
+async function libPlaceAudio(it, where, o = {}) {
+  const got = await libAudioClip(it);
+  let t = where && Number.isInteger(where.t) && P.tracks[where.t] ? where.t : UI.sel.t, made = '';
+  if (o.undo !== false) pushUndo();
+  if (!audIsTrack(P.tracks[t])) {
+    const was = P.tracks[t] ? P.tracks[t].name : '';
+    let k = P.tracks.findIndex(audIsTrack); // the first audio track with room, else a new one
+    const n = audCount(P);
+    if (n < AUD_MAX_TRACKS) { k = audAddTrack(true); made = `a new audio track ${P.tracks[k].name} holds it`; }
+    else made = `${P.tracks[k].name} holds it`;
+    if (was) made = `${was} is a MIDI track, so ${made}`;
+    t = k;
+  }
+  const tr = P.tracks[t]; let s;
+  if (where && where.bar != null) {
+    s = audFreeSlot(tr); if (s < 0) throw new Error(`${tr.name} has no free slot`);
+    tr.clips[s] = got.clip;
+    const bar = clamp(where.bar | 0, 0, 511), len = clamp(Math.round(+where.len) || got.clip.bars, 1, 512);
+    carve(tr, bar, bar + len); tr.arr.push({ start: bar, slot: s, len, off: 0 });
+    P.arr.len = Math.min(512, Math.max(P.arr.len, bar + len)); UI.arrSel = { t, k: tr.arr.length - 1 };
+  } else {
+    s = clamp(where && Number.isInteger(where.s) ? where.s : UI.sel.s, 0, tr.clips.length - 1);
+    tr.clips[s] = got.clip;
+  }
+  if (E) E.applyAll();
+  if (!o.quiet) {
+    renderSession(); renderArrIfVisible(); select(t, s, 'clip'); save();
+    const a = got.clip.audio;
+    flash(`${got.clip.name} on ${tr.name}, ${where && where.bar != null ? 'bar ' + (where.bar + 1) : sceneLabel(s)}: ${got.clip.bars} bar${got.clip.bars > 1 ? 's' : ''}` +
+      (a.bpm ? `, ${Math.round(a.bpm)} BPM fitted to ${P.bpm}` : ', WARP OFF (no tempo found)') + (a.key ? `, ${a.key}${a.mode === 'stretch' && a.toKey ? ' moved to the set key' : ''}` : '') + (made ? `. ${made}` : '') + '. CTRL+Z to undo');
+  }
+  audPrefetch();
+  return { t, s, clip: got.clip };
+}
+// A built-in loop as notes on its own lane (BASS, DRUMS...), moved into the set key. A drum loop brings its kit when the lane has
+// another one (its notes name pads); o.sound: a synth loop brings its preset and track FX too. -> { t, s, clip }
+function libPlaceMidi(it, where, o = {}) {
+  if (it.kind !== 'builtin') throw new Error('Only built-in loops have notes');
+  const b = libBuild(it), t = b.t, tr = P.tracks[t], src = b.R.tracks[t], drums = tr.type === 'drums';
+  if (o.undo !== false) pushUndo();
+  const sh = drums ? 0 : libShift(b.key, P), notes = b.clip.notes.map(n => Object.assign({}, n, { p: clamp(n.p + sh, 0, 127) }));
+  const clip = { name: b.clip.name, bars: b.clip.bars, notes }; if (b.clip.groove) clip.groove = clone(b.clip.groove);
+  let sound = '';
+  if (drums && JSON.stringify(tr.pads) !== JSON.stringify(src.pads)) { tr.kit = src.kit; tr.pads = clone(src.pads); sound = `${tr.name} gets the loop's kit`; }
+  if ((o.sound || (drums && sound)) && tr.type === 'synth') { tr.synth = clone(src.synth); sound = `${tr.name} gets ${src.synth.preset}`; }
+  if (o.sound) { tr.fx = Object.assign({}, FX_BASE, clone(src.fx)); if (typeof fxSanitize === 'function') fxSanitize(tr.fx); if (!sound) sound = `${tr.name} gets the loop's sound`; }
+  let s;
+  if (where && where.bar != null) {
+    s = tr.clips.findIndex((c, k) => !c && P.tracks.every(x => !x.clips[k])); for (let k = tr.clips.length - 1; s < 0 && k >= 0; k--) if (!tr.clips[k]) s = k;
+    if (s < 0) throw new Error(`${tr.name} has no free slot`);
+    tr.clips[s] = clip;
+    const bar = clamp(where.bar | 0, 0, 511), len = clamp(Math.round(+where.len) || clip.bars, 1, 512);
+    carve(tr, bar, bar + len); tr.arr.push({ start: bar, slot: s, len, off: 0 }); P.arr.len = Math.min(512, Math.max(P.arr.len, bar + len)); UI.arrSel = { t, k: tr.arr.length - 1 };
+  } else {
+    s = clamp(where && Number.isInteger(where.s) ? where.s : UI.sel.s, 0, tr.clips.length - 1);
+    tr.clips[s] = clip;
+  }
+  if (E) { E.applyTrack(t); E.applyAll(); }
+  if (!o.quiet) {
+    renderSession(); renderArrIfVisible(); renderBrowser(); select(t, s, 'clip'); save();
+    flash(`${clip.name} as notes on ${tr.name}, ${where && where.bar != null ? 'bar ' + (where.bar + 1) : sceneLabel(s)}` + (sh ? `, moved ${sh > 0 ? '+' : ''}${sh} st into the set key` : '') + (sound ? `. ${sound}` : '') + '. Edit the notes in the clip view. CTRL+Z to undo');
+  }
+  return { t, s, clip };
+}
+// Where a tap puts item it: the selected slot. On the loop's own MIDI lane it lands as notes, on an audio track (or any other lane) as audio
+function libTapPlace(it, how) {
+  const t = UI.sel.t, tr = P.tracks[t], lane = it.kind === 'builtin' ? LIB_T[it.src.split(':')[1]] : -1;
+  if (how === 'arr') return libPlaceAudio(it, { t: audIsTrack(tr) ? t : -1, bar: TR.startBar | 0 });
+  if (how === 'midi' || how === 'midis' || (how == null && it.kind === 'builtin' && t === lane)) return Promise.resolve(libPlaceMidi(it, { s: UI.sel.s }, { sound: how === 'midis' }));
+  return libPlaceAudio(it, { t, s: UI.sel.s });
+}
+// A drop at screen point x, y (the drag from the browser): a slot or a lane of the arrangement
+function libDropAt(it, x, y) {
+  const elx = document.elementFromPoint(x, y); if (!elx) return null;
+  const tg = audDropTarget({ target: elx, clientX: x, clientY: y }); if (!tg) return null;
+  const where = tg.bar != null ? { t: tg.t, bar: tg.bar } : { t: tg.t, s: tg.s }, tr = P.tracks[tg.t];
+  const lane = it.kind === 'builtin' ? LIB_T[it.src.split(':')[1]] : -1;
+  if (tg.t === lane && tr && !audIsTrack(tr)) return Promise.resolve(libPlaceMidi(it, where));
+  return libPlaceAudio(it, where);
+}
+// The generator's placement: loopPlace(id or candidate, { t, s } | { t, bar, len } | { lane: 'BASS', s | bar }, { as: 'audio' | 'midi', sound,
+// undo, quiet }) -> promise of { t, s, clip }. GENERATE SONG can call it with undo: false and quiet: true inside its own step.
+async function loopPlace(x, where = {}, o = {}) {
+  const it = typeof x === 'string' ? libItem(x) : x && typeof x.id === 'string' ? libItem(x.id) : null;
+  if (!it) throw new Error('no such loop');
+  where = where && typeof where === 'object' ? Object.assign({}, where) : {};
+  if (typeof where.lane === 'string' && libHas(LIB_T, where.lane)) where.t = LIB_T[where.lane];
+  if (o.as === 'midi') return libPlaceMidi(it, where, o);
+  return libPlaceAudio(it, where, o);
+}
+
+// ---------- preview: the loop at the set tempo, in time with the transport ----------
+// One source per loop pass, scheduled 0.3 s ahead; repitched at first, then (STRETCH, TO KEY) the stretched copy of the audio
+// tracks (audFitJob) from the next pass. Each pass leaves the graph when it ends.
+function libStop() {
+  const pv = LIB.pv; LIB.pv = null; if (!pv) return;
+  clearInterval(pv.iv);
+  const now = ctx ? ctx.currentTime : 0;
+  pv.segs.forEach(sg => { try { sg.g.gain.cancelScheduledValues(0); sg.g.gain.setValueAtTime(sg.g.gain.value, now); sg.g.gain.linearRampToValueAtTime(0, now + .01); sg.src.stop(now + .012); } catch (e) { /* ended */ } });
+  libUiPlaying();
+}
+async function libPreview(it) {
+  const same = LIB.pv && LIB.pv.it === it; libStop(); if (same) return;
+  if (!E || !ctx) { flash('Start the audio first'); return; }
+  if (ctx.state === 'suspended') ctx.resume();
+  const pv = LIB.pv = { it, segs: [], loading: true, fit: null, fitFor: '', iv: 0, next: 0 }; libUiPlaying();
+  let got;
+  try { got = it.kind === 'builtin' ? await libAudio(it) : await libAudioClip(it); } catch (err) { if (LIB.pv === pv) { LIB.pv = null; libUiPlaying(); } flash(`Could not play ${it.name}: ${(err && err.message) || err}`); return; }
+  if (LIB.pv !== pv) return; // stopped or another loop meanwhile
+  pv.loading = false; pv.buf = got.buf; pv.bpm = it.bpm > 0 ? it.bpm : 0;
+  const bar = 240 / P.bpm, now = ctx.currentTime;
+  pv.next = TR.playing ? TR.grid + mod(16 - TR.tick, 16) * stepDur() : now + .05; // the next bar line of the transport
+  if (pv.next < now + .02) pv.next += bar;
+  const pump = () => {
+    if (LIB.pv !== pv) return;
+    const fitK = pv.bpm ? `${P.bpm}|${libShift(it.key, P)}` : '';
+    if (pv.bpm && pv.fitFor !== fitK) { // the stretched copy for this tempo and key (the audio tracks' cache)
+      pv.fitFor = fitK; pv.fit = null;
+      const sem = libShift(it.key, P);
+      if (Math.abs(P.bpm - pv.bpm) > 1e-3 || sem) audFitJob(audFitKey(P, Object.assign(audBase(), { src: got.id, bpm: pv.bpm }), sem), pv.buf, pv.bpm / P.bpm, sem).then(fb => { if (LIB.pv === pv && pv.fitFor === fitK) pv.fit = fb; });
+      else pv.fit = pv.buf;
+    }
+    const len = pv.bpm ? (it.bars || 1) * 240 / P.bpm : pv.buf.duration;
+    for (let guard = 0; pv.next < ctx.currentTime + .3 && guard < 8; guard++) {
+      const T = Math.max(pv.next, ctx.currentTime + .005), src = ctx.createBufferSource(), g = ctx.createGain();
+      src.buffer = pv.fit || pv.buf; src.playbackRate.value = pv.fit || !pv.bpm ? 1 : P.bpm / pv.bpm;
+      g.gain.setValueAtTime(0, T); g.gain.linearRampToValueAtTime(.85, T + .003); g.gain.setValueAtTime(.85, T + len - .003); g.gain.linearRampToValueAtTime(0, T + len);
+      src.connect(g); g.connect(E.m.bus); src.start(T, T - pv.next > 0 ? (T - pv.next) * src.playbackRate.value : 0); src.stop(T + len + .001);
+      LIB.pvMade++;
+      const sg = { src, g }; pv.segs.push(sg);
+      src.onended = () => { if (sg.done) return; sg.done = true; try { g.disconnect(); src.disconnect(); } catch (e) { /* gone */ } LIB.pvFreed++; const k = pv.segs.indexOf(sg); if (k >= 0) pv.segs.splice(k, 1); };
+      pv.next += len;
+    }
+  };
+  pump(); pv.iv = setInterval(pump, 60);
+  libUiPlaying();
+}
+
+// ---------- UI: the loop browser (a panel beside the views; a sheet at the bottom on a phone) ----------
+const LIB_SHOW = 300; // rows listed at most (search or filter for the rest)
+function libAll() { return (LIB.f.src === 'mine' ? [] : libRecipes()).concat(LIB.f.src === 'builtin' ? [] : LIB.mine || []); }
+function libOpen() {
+  let pn = $('#lib-panel');
+  if (pn) { pn.hidden = false; libRenderList(); const q = $('.lib-q', pn); if (q && innerWidth > 640) q.focus(); return; }
+  libRecipes();
+  pn = el('div', 'lib-panel'); pn.id = 'lib-panel'; pn.setAttribute('role', 'dialog'); pn.setAttribute('aria-label', 'Loop library');
+  const opt = (v, t, cur) => `<option value="${esc(v)}"${String(v) === String(cur) ? ' selected' : ''}>${esc(t)}</option>`, f = LIB.f;
+  const keys = [''].concat(...NOTE_NAMES.map(n => [n + 'm', n]));
+  pn.innerHTML = `<div class="lib-head"><b>LOOP LIBRARY</b><span class="lib-count"></span><button class="btn lib-x" data-l="close" aria-label="Close the loop library" data-info="Close the loop library [Esc]">&#10005;</button></div>
+  <div class="lib-filters">
+    <input class="lib-q" type="search" placeholder="Search: bass, neuro, 174, Fm..." value="${esc(f.q)}" aria-label="Search loops" data-info="Search the loops: words of the name, the style, the role, the tempo or the key">
+    <div class="lib-row">
+      <select data-f="src" aria-label="Source" data-info="Which loops: the built-in ones (made by the app, rendered in this browser), your own (the files of your packs and Splice downloads) or your favourites">${[['all', 'All loops'], ['builtin', 'Built-in'], ['mine', 'My loops'], ['fav', 'Favourites']].map(([v, t]) => opt(v, t, f.src)).join('')}</select>
+      <select data-f="style" aria-label="Style" data-info="Style">${opt('', 'Any style', f.style)}${Object.keys(LIB_SEEDS).map(k => opt(k, GEN_STYLES[k].short, f.style)).join('')}</select>
+      <select data-f="role" aria-label="Role" data-info="Role in the track">${opt('', 'Any role', f.role)}${Object.entries(LIB_ROLES).map(([k, t]) => opt(k, t, f.role)).join('')}</select>
+    </div>
+    <div class="lib-row">
+      <select data-f="key" aria-label="Key" data-info="The key of the loop. STRETCH with TO KEY moves any key into the key of the set">${keys.map(k => opt(k, k || 'Any key', f.key)).join('')}</select>
+      <select data-f="bars" aria-label="Bars" data-info="Length in bars">${[0, 1, 2, 4, 8].map(b => opt(b, b ? b + ' bar' + (b > 1 ? 's' : '') : 'Any length', f.bars)).join('')}</select>
+      <label class="lib-bpm" data-info="Tempo range of the loops (BPM). Every loop is fitted to the tempo of the set">BPM<input type="number" data-f="bmin" min="0" max="300" placeholder="min" value="${f.bmin || ''}" aria-label="Lowest BPM"><span>-</span><input type="number" data-f="bmax" min="0" max="300" placeholder="max" value="${f.bmax || ''}" aria-label="Highest BPM"></label>
+    </div>
+  </div>
+  <div class="lib-list" role="listbox" aria-label="Loops"></div>
+  <div class="lib-foot">
+    <div class="lib-tgt"></div>
+    <div class="lib-acts">
+      <button class="btn go" data-l="slot" data-info="Put the selected loop in the selected slot: as audio on an audio track (a new one when the slot is on a MIDI lane), as notes on its own lane">TO SLOT</button>
+      <button class="btn" data-l="arr" data-info="Put the selected loop in the arrangement, on an audio track, from the start marker">TO ARRANGE</button>
+      <button class="btn" data-l="midi" data-info="Built-in loops: the notes as an editable MIDI clip on the loop's lane (BASS, DRUMS...), moved into the set key">AS MIDI</button>
+      <button class="btn" data-l="midis" data-info="As MIDI, and the lane takes the loop's preset or kit and its track FX">MIDI + SOUND</button>
+    </div>
+  </div>`;
+  document.body.append(pn);
+  LIB.ui = pn;
+  const bot = () => { const sb = $('.statusbar'); pn.style.setProperty('--lib-bot', (sb && innerWidth <= 640 ? Math.round(sb.getBoundingClientRect().height) : 0) + 'px'); }; // the sheet sits on the status bar
+  bot(); window.addEventListener('resize', bot);
+  pn.addEventListener('input', e => {
+    const x = e.target;
+    if (x.classList.contains('lib-q')) { f.q = x.value.slice(0, 80); libRenderList(); return; }
+    const k = x.dataset.f; if (!k) return;
+    if (k === 'bmin' || k === 'bmax') { const v = +x.value; f[k] = v > 0 && v <= 300 ? v : 0; } else if (k === 'bars') f.bars = +x.value || 0; else f[k] = x.value;
+    if (k === 'src' && (x.value === 'mine' || x.value === 'all' || x.value === 'fav') && !LIB.mine) libMine().then(libRenderList);
+    libRenderList();
+  });
+  pn.addEventListener('click', e => {
+    const b = e.target.closest('[data-l]'), row = e.target.closest('.lib-it');
+    const it = row ? libFindKey(row.dataset.k) : LIB.sel;
+    if (b && b.dataset.l === 'close') { libClose(); return; }
+    if (row && it) { LIB.sel = it; $$('.lib-it.sel', pn).forEach(r => r.classList.remove('sel')); row.classList.add('sel'); row.setAttribute('aria-selected', 'true'); libTarget(); }
+    if (!b) return;
+    const a = b.dataset.l;
+    if (a === 'play' && it) libPreview(it);
+    else if (a === 'fav' && it) libFavToggle(libKeyOf(it)).then(on => { b.classList.toggle('on', on); b.innerHTML = on ? '&#9733;' : '&#9734;'; if (LIB.f.src === 'fav') libRenderList(); });
+    else if ((a === 'add' || a === 'slot' || a === 'arr' || a === 'midi' || a === 'midis') && it) {
+      if ((a === 'midi' || a === 'midis') && it.kind !== 'builtin') { flash('Your own loops are audio: TO SLOT or TO ARRANGE puts them on an audio track'); return; }
+      libBusy(it, libTapPlace(it, a === 'add' || a === 'slot' ? null : a));
+    }
+  });
+  pn.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); libClose(); return; }
+    e.stopPropagation(); // typing in the search must not play notes or start the transport
+  });
+  pn.addEventListener('keyup', e => e.stopPropagation());
+  libInitDrag(pn);
+  Promise.all([libFavs(), libMine()]).then(libRenderList, libRenderList);
+  libRenderList();
+  const q = $('.lib-q', pn); if (q && innerWidth > 640) q.focus();
+  const mb = $('#m-loops'); if (mb) mb.classList.add('on');
+}
+function libClose() { libStop(); const pn = $('#lib-panel'); if (pn) pn.hidden = true; const mb = $('#m-loops'); if (mb) mb.classList.remove('on'); }
+const libFindKey = k => (typeof k === 'string' ? (k.startsWith('b:') ? libRecipe(k.slice(2)) : (LIB.mine || []).find(x => 'm:' + x.id === k)) : null) || null;
+async function libBusy(it, job) {
+  const pn = $('#lib-panel'); if (pn) pn.classList.add('busy');
+  const tm = it.kind === 'builtin' && !LIB.ids.has(it.id) ? setTimeout(() => flash(`Rendering ${it.name}... (once: the loop stays in this browser)`), 120) : 0;
+  try { await job; } catch (err) { console.warn(err); flash(`Could not place ${it.name}: ${(err && err.message) || err}`); }
+  finally { clearTimeout(tm); if (pn) pn.classList.remove('busy'); libRenderList(); }
+}
+function libTags(it) {
+  const st = it.style && GEN_STYLES[it.style] ? GEN_STYLES[it.style].short : it.pack || '';
+  return [st, LIB_ROLES[it.role] || (it.kind === 'mine' ? 'loop' : ''), it.bpm ? Math.round(it.bpm) + ' BPM' : '', it.key, it.bars ? it.bars + ' bar' + (it.bars > 1 ? 's' : '') : (it.dur ? it.dur.toFixed(1) + ' s' : '')].filter(Boolean).join(' · ');
+}
+function libRenderList() {
+  const pn = $('#lib-panel'); if (!pn || pn.hidden) return;
+  const f = LIB.f, favs = LIB.favs || new Set();
+  let list = f.src === 'fav' ? libRecipes().concat(LIB.mine || []).filter(it => favs.has(libKeyOf(it))) : libAll();
+  list = libFilter(list, f);
+  const n = list.length, shown = list.slice(0, LIB_SHOW);
+  $('.lib-count', pn).textContent = `${n} loop${n === 1 ? '' : 's'}${f.src !== 'builtin' && !LIB.mine ? '' : ''}`;
+  const cur = LIB.pv && LIB.pv.it, sel = LIB.sel;
+  $('.lib-list', pn).innerHTML = shown.map(it => {
+    const k = libKeyOf(it), fav = favs.has(k), ready = it.kind === 'mine' || LIB.ids.has(it.id);
+    return `<div class="lib-it${it === sel ? ' sel' : ''}${it.kind === 'mine' ? ' mine' : ''}" role="option" aria-selected="${it === sel}" data-k="${esc(k)}" data-info="${esc(it.name)}: ${esc(libTags(it))}${it.kind === 'builtin' ? (ready ? ' (rendered in this browser)' : ' (renders on first use, a few seconds)') : ' (your file' + (it.pack ? ', ' + esc(it.pack) : '') + ')'}. Drag it onto a slot or a lane, or tap + for the selected slot">`
+      + `<button class="lib-pl${it === cur ? ' on' : ''}" data-l="play" aria-label="Preview ${esc(it.name)}" data-info="Preview at the set tempo, in time with the transport (again: stop)">${it === cur ? '&#9632;' : '&#9654;'}</button>`
+      + `<span class="lib-nm"><b>${esc(it.name)}</b><small>${esc(libTags(it))}</small></span>`
+      + `<button class="lib-fv${fav ? ' on' : ''}" data-l="fav" aria-label="Favourite" data-info="Favourite (kept in this browser)">${fav ? '&#9733;' : '&#9734;'}</button>`
+      + `<button class="lib-add" data-l="add" aria-label="Put ${esc(it.name)} in the selected slot" data-info="Put it in the selected slot">+</button>`
+      + `<span class="lib-grip" data-l="grip" aria-hidden="true" data-info="Drag onto a slot of Session view or a lane of the arrangement">&#8942;&#8942;</span></div>`;
+  }).join('') + (n > LIB_SHOW ? `<div class="lib-more">${n - LIB_SHOW} more: search or filter to see them</div>` : '')
+    + (!n ? `<div class="lib-more">${f.src === 'mine' && !(LIB.mine || []).length ? 'No loops of your own yet: LOAD PACK on a drum lane, or drop audio files on an audio track (a Splice download too). They stay in this browser.' : 'No loop matches: clear a filter.'}</div>` : '');
+  libTarget();
+}
+function libUiPlaying() {
+  const pn = $('#lib-panel'); if (!pn) return;
+  const cur = LIB.pv && LIB.pv.it;
+  $$('.lib-it', pn).forEach(r => { const b = $('.lib-pl', r), on = cur && libKeyOf(cur) === r.dataset.k; if (b) { b.classList.toggle('on', !!on); b.classList.toggle('wait', !!(on && LIB.pv.loading)); b.innerHTML = on ? '&#9632;' : '&#9654;'; } });
+}
+function libTarget() {
+  const pn = $('#lib-panel'); if (!pn || !P) return;
+  const t = UI.sel.t, tr = P.tracks[t], it = LIB.sel, box = $('.lib-tgt', pn);
+  if (!box) return;
+  const lane = it && it.kind === 'builtin' ? LIB_T[it.src.split(':')[1]] : -1;
+  const where = !tr ? 'select a slot first' : audIsTrack(tr) ? `${tr.name}, ${sceneLabel(UI.sel.s)}` : t === lane ? `${tr.name} as notes, ${sceneLabel(UI.sel.s)}` : `a new audio track (${tr.name} is a MIDI lane), ${sceneLabel(UI.sel.s)}`;
+  box.innerHTML = it ? `<b>${esc(it.name)}</b> &#8594; ${esc(where)}` : 'Tap a loop to select it, &#9654; to hear it, + to put it in the selected slot, or drag it onto a slot or a lane';
+  $$('[data-l="midi"], [data-l="midis"]', pn).forEach(b => { b.disabled = !!it && it.kind !== 'builtin'; });
+}
+// Drag a row by its grip (mouse or touch) onto a slot or an arrangement lane
+function libInitDrag(pn) {
+  let d = null;
+  pn.addEventListener('pointerdown', e => {
+    const g = e.target.closest('.lib-grip, .lib-nm'), row = e.target.closest('.lib-it'); if (!g || !row || e.button > 0) return;
+    const it = libFindKey(row.dataset.k); if (!it) return;
+    d = { it, x0: e.clientX, y0: e.clientY, on: false, id: e.pointerId, grip: g.classList.contains('lib-grip'), row };
+    if (d.grip) { e.preventDefault(); try { g.setPointerCapture(e.pointerId); } catch (err) { /* old browser */ } }
+  });
+  const move = e => {
+    if (!d || e.pointerId !== d.id) return;
+    if (!d.on) {
+      if (Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 8 || (!d.grip && e.pointerType === 'touch')) return; // a touch on the name scrolls the list
+      d.on = true; d.ghost = el('div', 'lib-ghost', esc(d.it.name)); document.body.append(d.ghost); pn.classList.add('dragging');
+    }
+    e.preventDefault();
+    d.ghost.style.transform = `translate(${e.clientX + 10}px, ${e.clientY + 8}px)`;
+    const elx = document.elementFromPoint(e.clientX, e.clientY), tg = elx && !pn.contains(elx) ? audDropTarget({ target: elx, clientX: e.clientX }) : null;
+    if (typeof midiDropHilite === 'function') midiDropHilite(tg && tg.el);
+    d.tg = tg;
+  };
+  const up = e => {
+    if (!d || e.pointerId !== d.id) return;
+    const was = d; d = null;
+    if (!was.on) return;
+    was.ghost.remove(); pn.classList.remove('dragging'); if (typeof midiDropHilite === 'function') midiDropHilite(null);
+    const job = was.tg ? libDropAt(was.it, e.clientX, e.clientY) : null;
+    if (job) libBusy(was.it, job); else flash('Drop a loop on a slot of Session view or on a lane of the arrangement');
+  };
+  window.addEventListener('pointermove', move, { passive: false });
+  window.addEventListener('pointerup', up); window.addEventListener('pointercancel', e => { if (d && d.ghost) d.ghost.remove(); pn.classList.remove('dragging'); d = null; });
+}
+// The browser section and the menu button
+function libBrowserSec() {
+  const br = $('#browser'); if (!br || br.querySelector('.lib-sec')) return;
+  const n = libRecipes().length;
+  const sec = el('div', 'br-sec lib-sec', `<div class="br-title"><span>Loops</span><span>${n} built-in</span></div>
+    <button class="br-item" data-libopen="1" data-info="Open the loop library: ${n} loops the app makes itself (drums, bass, growls, chords, pads, arps, leads, FX, vocal chops in ${Object.keys(LIB_SEEDS).length} styles) and your own loops. Preview them at the set tempo, drop them on a slot or a lane"><span>Loop library...</span></button>`);
+  const after = br.querySelector('.gs-sec') || br.querySelector('.br-sec'); if (after) after.after(sec); else br.prepend(sec);
+  if (!br.dataset.libsec) { br.dataset.libsec = '1'; br.addEventListener('click', e => { if (e.target.closest('[data-libopen]')) { e.stopPropagation(); libOpen(); if (innerWidth <= 980) br.classList.remove('open'); } }, true); }
+  if (!$('#m-loops') && $('#m-save')) {
+    const b = el('button', 'mb', 'Loops'); b.id = 'm-loops';
+    b.dataset.info = 'LOOPS: the loop library. Built-in loops in every style and your own loops: search, preview at the set tempo, drop on a slot or the arrangement';
+    b.onclick = () => { const pn = $('#lib-panel'); if (pn && !pn.hidden) libClose(); else libOpen(); };
+    $('#m-save').before(b);
+  }
+}
+const libBaseRenderBrowser = typeof renderBrowser === 'function' ? renderBrowser : null;
+if (libBaseRenderBrowser) renderBrowser = function () { libBaseRenderBrowser(); try { libBrowserSec(); libTarget(); } catch (e) { /* the UI is not up yet */ } }; // eslint-disable-line no-func-assign
+// the selection changes the target line
+const libBaseMarkSel = typeof markSel === 'function' ? markSel : null;
+if (libBaseMarkSel) markSel = function () { libBaseMarkSel(); try { libTarget(); } catch (e) { /* not up yet */ } }; // eslint-disable-line no-func-assign
+(function libStyle() {
+  const css = `.lib-panel{position:fixed;z-index:60;right:8px;top:64px;bottom:30px;width:min(400px,calc(100vw - 16px));display:flex;flex-direction:column;background:var(--panel,#2a2a2a);border:1px solid #3a3a3a;border-radius:6px;box-shadow:0 12px 40px rgba(0,0,0,.55);box-sizing:border-box;overflow:hidden;font-size:12px}
+.lib-panel[hidden]{display:none}.lib-panel.busy .lib-list{opacity:.6;cursor:progress}
+.lib-head{display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid var(--line,#111)}.lib-head b{color:var(--bright,#f2f2f2);letter-spacing:.06em}.lib-count{flex:1;color:var(--dim,#8e8e8e)}
+.lib-x{height:24px;min-width:28px}
+.lib-filters{display:flex;flex-direction:column;gap:5px;padding:6px 8px;border-bottom:1px solid var(--line,#111)}
+.lib-q{width:100%;box-sizing:border-box;height:28px;padding:0 8px}
+.lib-row{display:flex;gap:5px;min-width:0}.lib-row select{flex:1 1 0;min-width:0;height:26px}
+.lib-bpm{display:flex;align-items:center;gap:3px;flex:1.4 1 0;min-width:0;color:var(--dim,#8e8e8e)}.lib-bpm input{width:0;flex:1;min-width:0;height:26px;box-sizing:border-box}
+.lib-list{flex:1;overflow-y:auto;overflow-x:hidden;min-height:60px;overscroll-behavior:contain}
+.lib-it{display:flex;align-items:center;gap:4px;padding:3px 6px;border-bottom:1px solid rgba(255,255,255,.04);cursor:default;min-width:0}
+.lib-it:hover{background:rgba(255,255,255,.04)}.lib-it.sel{background:rgba(255,166,77,.14);box-shadow:inset 3px 0 0 var(--accent,#ffa64d)}
+.lib-it.mine .lib-nm b{color:#9fd8ff}
+.lib-it button{flex:none;width:30px;height:30px;border-radius:4px;background:var(--surface,#232323);color:var(--text,#d6d6d6);font-size:13px;border:0;cursor:pointer}
+.lib-it .lib-pl.on{background:var(--accent,#ffa64d);color:#1a1a1a}.lib-it .lib-pl.wait{animation:libw 1s infinite alternate}@keyframes libw{to{opacity:.4}}
+.lib-it .lib-fv.on{color:var(--accent,#ffa64d)}.lib-it .lib-add{font-size:17px;font-weight:600}
+.lib-nm{flex:1;min-width:0;display:flex;flex-direction:column;cursor:grab;user-select:none}.lib-nm b{font-weight:600;color:var(--bright,#f2f2f2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lib-nm small{color:var(--dim,#8e8e8e);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lib-grip{flex:none;width:22px;height:30px;display:flex;align-items:center;justify-content:center;color:var(--dim2,#5f5f5f);cursor:grab;touch-action:none;letter-spacing:-3px}
+.lib-more{padding:10px;color:var(--dim,#8e8e8e);text-align:center;white-space:normal}
+.lib-foot{border-top:1px solid var(--line,#111);padding:6px 8px;display:flex;flex-direction:column;gap:5px}
+.lib-tgt{color:var(--dim,#8e8e8e);font-size:11px;white-space:normal;min-height:14px}.lib-tgt b{color:var(--text,#d6d6d6)}
+.lib-acts{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}.lib-acts .btn{height:28px;padding:0 4px;font-size:11px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lib-ghost{position:fixed;left:0;top:0;z-index:200;pointer-events:none;padding:4px 8px;border-radius:4px;background:var(--accent,#ffa64d);color:#1a1a1a;font-weight:600;font-size:12px;white-space:nowrap;max-width:60vw;overflow:hidden;text-overflow:ellipsis}
+.lib-panel.dragging{opacity:.55}
+@media (max-width:640px){.lib-panel{left:0;right:0;top:auto;bottom:var(--lib-bot,0px);width:100%;height:calc(58vh - var(--lib-bot,0px));border-radius:10px 10px 0 0;border-left:0;border-right:0;transition:height .15s}
+.lib-panel.dragging{height:15vh;opacity:.8}.lib-acts .btn{font-size:10.5px;padding:0 2px}.lib-it button{width:36px;height:36px}.lib-grip{width:30px;height:36px}.lib-it{padding:4px 6px}}`;
+  try { const s = document.createElement('style'); s.id = 'lib-css'; s.textContent = css; document.head.append(s); } catch (e) { /* no document */ }
+})();
 
 // ===================== 3d. MASTERING =====================
 // A mastering chain after the master fader: M/S tone, a 3-band compressor, a 4x oversampled clipper and a
@@ -8628,6 +9987,7 @@ async function masterPreRender(project, a, b, sr, onProgress, signal) {
       return Object.assign({}, e, { start: s - a0, len: en - s, off: (e.off || 0) + (s - e.start) * 16 });
     });
   });
+  if (typeof autoSlice === 'function') autoSlice(p, a0); // the arrangement automation moves with the slice (c16_auto.js)
   const bars = b - a0, sd = 15 / p.bpm, t0 = .05, off = new OfflineAudioContext(2, Math.ceil(sr * (t0 + bars * 16 * sd + .3)), sr);
   const OE = await new Engine(off, p).init();
   OE.m.mon.disconnect(); OE.m.out.connect(off.destination);
@@ -10043,6 +11403,7 @@ async function mixRender(project, a, b, o = {}) {
       return Object.assign({}, e, { start: s - a0, len: en - s, off: (e.off || 0) + (s - e.start) * 16 });
     });
   });
+  if (typeof autoSlice === 'function') autoSlice(p, a0); // the arrangement automation moves with the slice (c16_auto.js)
   const nl = p.tracks.length, mono = 2 + 2 * nl + 8 > 32, laneCh = i => 2 + (mono ? i : 2 * i), busCh = k => 2 + (mono ? nl : 2 * nl) + 2 * k;
   const nch = Math.min(32, 2 + (mono ? nl : 2 * nl) + 8), bars = b - a0, sd = 15 / p.bpm, t0 = .05;
   const off = new OfflineAudioContext(nch, Math.ceil(sr * (t0 + bars * 16 * sd + .5)), sr);
@@ -17862,6 +19223,7 @@ function lessonSlice(p, a, b) { // bars a..b of the arrangement, moved to bar 1
     });
   });
   p.arr.loop = false;
+  if (typeof autoSlice === 'function') autoSlice(p, a); // the arrangement automation moves with the slice (c16_auto.js)
   return p;
 }
 // Like renderArrangementOffline, bar by bar, but the master (after the trim) goes to channels 0-1 and each
