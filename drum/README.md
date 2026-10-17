@@ -43,7 +43,9 @@ A static server works too, for example `npx serve .`
   ghost / normal / accent hits, velocity lane
 - Piano roll for synths: scale highlighting, draw / move / resize /
   delete notes, transpose, note length
-- **⚡ GENERATE** writes a fresh DnB pattern in the set's key
+- **GENERATE NOTES** (synth lanes) and **GENERATE BEAT** (drum lanes) write parts you can
+  study: every synth lane follows one chord progression, every drum lane plays a named style.
+  See [The generator](#the-generator-harmony-scales-progressions-and-drum-styles) below
 
 **Devices**
 - Drum Rack: 8 synthesized pads per kit, with tune, decay, level, pan,
@@ -74,11 +76,20 @@ A static server works too, for example `npx serve .`
   - **Classic**: unison detune (Reese), resonant filter + envelope,
     tempo-synced LFO (wobble), drive, glide, sub oscillator, mono mode
   - **Polar VA** (multi-oscillator virtual analog): 4 oscillators in two
-    parts, up to 8 unison voices per oscillator with stereo spread, a
-    filter and an amp envelope per part, 2 mod envelopes and 2 LFOs
-  - **Tidal WT** (wavetable): 3 wavetable oscillators with
-    a morphing position, FM, sub and noise, 2 filters in series or in
-    parallel, a mod envelope, 2 LFOs and a 16-step stepper
+    parts, up to 16 unison voices per oscillator (classic or supersaw spread),
+    hard sync, FM 2>1 and 4>3, a filter (with a ladder mode) and a drive with
+    5 types before or after the filter per part, 2 mod envelopes and 2 LFOs
+  - **Tidal WT** (wavetable): 3 wavetable oscillators with a morphing position
+    (8 more 16-frame tables: Neuro Growl, Neuro Tear, Talk U-O-A-E-I, Sync Sweep,
+    Sync Square, Sync Tri, PWM Sweep, Metallic), warp per oscillator (fold, sine fold,
+    bend, hard clip), FM from osc 2 or 3, a sub with 5 shapes, noise, 2 filters in
+    series or in parallel (ladder, comb, formant A-E-I-O-U, notch sweep and the
+    classic types), a post drive, a mod envelope, 2 LFOs and a 16-step stepper
+  - Both: new LFO shapes (Wobble, Neuro steps, Random steps, Pump...), rates up to 4/1,
+    a "once" mode that plays one cycle (an LFO used as a tempo-synced envelope), and
+    **LOW MONO** (the sound turns mono below a chosen frequency)
+  - Heavy patches (the new features above) are limited to a few live voices: the oldest
+    releasing tail fades first, a held note is never cut. Old presets and exports are not limited
 - **Nine new presets** for the masterclass. Each one reaches its track at about the same
   loudness, so the faders do the mix:
   - Polar Rave Hoover: detuned saws, a pulse one octave down, a pitch dive into every note and glide
@@ -90,10 +101,32 @@ A static server works too, for example `npx serve .`
   - Polar Switch Reese: slow, beating saws that roll
   - Polar Dark Pad: a dark bed that opens slowly
   - Polar Hook Pluck: a short hook that leaves room for the MC
+- **Eight heavy presets** for modern basses and leads, each at about the same loudness:
+  Neuro Reese Wide, Festival Hoover 16, Jump-Up Talker FM, Growl Formant, Supersaw Rave Stab,
+  Sub Square Grit, Neuro Metal Bass and Rolling Reese
 - Per track: Auto Filter, Saturator, Chorus, Compressor, Sidechain
-  ducking from the kick
-- Master: DJ filter, glue compressor, drive, 8-bit crusher (AudioWorklet),
-  limiter. Return A reverb, return B ping-pong delay
+  ducking from the kick (with a hold time per track), and five stages that start off,
+  so an old set sounds the same:
+  - **Distortion**: tube, hard clip, foldback, rectify and bitcrush, with DRIVE above the
+    track's own level, TONE, MIX and OUTPUT. 4x oversampling keeps high notes clean
+  - **EQ**: low cut and high cut (12, 24 or 48 dB/oct), two shelves and two bells. Drag the
+    points on the curve
+  - **OTT**: 3-band upward and downward compression, for the bright "fizz" of a neuro bass
+  - **Phaser / Flanger**: free or tempo-synced, locked to the bar
+  - **Width**: wider highs, mono lows below a frequency you choose
+- Master: DJ filter, glue compressor, drive, 8-bit crusher (AudioWorklet).
+  Return A reverb, return B ping-pong delay
+- **Mastering chain** (master device view), off on old sets:
+  - Presets **Club loud** (about -6 LUFS on the drop), **Streaming** (-9 LUFS on the song),
+    **Gentle** (-11 LUFS) and **Off** (the classic limiter)
+  - **M/S Tone** (mono below a frequency, tilt, width of the highs), **Multiband** (3 bands,
+    with solo), **Clipper** (4x oversampled, hard to soft knee) and a **true-peak limiter**
+    with lookahead. The ceiling is -1 dBTP
+  - **PUSH** drives the clipper and the limiter: it is the loudness knob
+  - **LEARN** renders the song once, finds the loudest 16 bars (the drop) and sets PUSH so
+    the master reaches the TARGET. Change the set or the preset while it runs and it applies nothing
+  - Meters: true peak, short-term and integrated loudness, PLR and the gain reduction of each stage
+  - Exports and the lesson's Measure go through the same chain as what you hear
 
 **Templates**: Rave DnB Masterclass and Empty Set.
 - **Rave DnB Masterclass** is an original 160-bar rave / jump-up DnB teaching track,
@@ -171,6 +204,187 @@ A static server works too, for example `npx serve .`
 - **CAPTURE** records everything you hear, live
 - Undo / redo, autosave in the browser, save / open sets as `.json`
 
+## The generator: harmony, scales, progressions and drum styles
+
+GENERATE fills a clip with a part that you can study, play and change. It does not throw random notes at the grid. Every
+synth lane follows one chord progression, and every drum lane plays a named style. The clip panel shows what was made and
+why, so the generator also works as a harmony lesson.
+
+### Where it is
+
+Select a clip. The clip panel (on the left of the piano roll) has the generator block under LAUNCH:
+
+- **GENERATE NOTES** (blue) on the synth lanes: BASS, SUB, STAB, PAD, LEAD.
+- **GENERATE BEAT** (red) on the drum lanes. A lane with the Rave FX kit shows **GENERATE FX**; a lane with the Vox Chops kit
+  shows **GENERATE CHOPS**.
+- The gear button shows or hides the settings. The browser remembers your choice.
+- An empty slot offers **CREATE + GENERATE**.
+
+Every press is one undo step (CTRL+Z). A change of a setting is its own undo step. Nothing in a set changes until you press
+a generate button, so old sets load and sound as before.
+
+### Key and scale
+
+The transport's KEY and scale menus decide the notes. The generator uses them for every lane. The scale menu has these
+scales (each one has a teaching line in the info bar when you point at the menu):
+
+| Scale | Notes from the root | Sound and use |
+|---|---|---|
+| Minor (natural minor) | 1 2 b3 4 5 b6 b7 | The home of DnB. i, iv and v are minor chords; bIII, bVI and bVII are major. |
+| Phrygian | 1 b2 b3 4 5 b6 b7 | The half step from the root to b2: the darkest colour. Neuro and techstep. |
+| Dorian | 1 2 b3 4 5 6 b7 | The major 6th makes IV a major chord. Minor but hopeful: soulful liquid. |
+| Harmonic minor | 1 2 b3 4 5 b6 7 | The major 7th makes V a major chord that pulls back to i. Dramatic. |
+| Major | 1 2 3 4 5 6 7 | Bright. Liquid and old-skool piano chords. |
+| Melodic minor | 1 2 b3 4 5 6 7 | Smooth and jazzy. The minor chord with a major 7th is a liquid colour. |
+| Minor pentatonic | 1 b3 4 5 b7 | 5 notes, no half steps. Leads stay on them; the chords, the sub and the bass come from natural minor. |
+| Locrian | 1 b2 b3 4 b5 b6 b7 | The home chord is diminished and never rests. Tense riffs over one sub note. |
+| Phrygian dominant | 1 b2 3 4 5 b6 b7 | A major home chord with b2 above it. Tense and exotic. |
+| Hungarian minor | 1 2 b3 #4 5 b6 7 | Two steps of a minor 3rd inside the scale. Exotic and dramatic. |
+| Mixolydian | 1 2 3 4 5 6 b7 | bVII is a major chord a tone under I. Bright rave stabs. |
+| Lydian | 1 2 3 #4 5 6 7 | Dreamy, no pull home. Intros and breakdowns. |
+| Chromatic | all 12 | The piano roll marks no rows. The generator takes chords and melodies from natural minor. |
+
+The piano roll now names the scale notes as the key spells them: in F minor a row reads Ab3, not G#3. The lesson texts use
+the same names.
+
+### Roman numerals
+
+A roman numeral names a chord by the scale degree of its root. The generator counts from the **major scale of the key**:
+
+- **I II III IV V VI VII** are the degrees of the major scale. A **b** in front means a semitone lower: in F, bVI is Db.
+- **Upper case** means a major 3rd (a major chord). **Lower case** means a minor 3rd (a minor chord).
+- **°** is diminished, **ø7** is half-diminished (m7b5), **+** is augmented.
+- A number after the numeral is the chord type: i7, bVImaj7, bVII7, i9.
+
+So in F minor the seven chords are: i (Fm), ii° (Gdim), bIII (Ab), iv (Bbm), v (Cm), bVI (Db), bVII (Eb). The same numerals
+work in any key: that is why a progression can move to another key with Match key or Transpose and stay the same song.
+
+### Progressions
+
+PROG chooses the song progression. It is shared by every synth lane of the set (it is saved with the set). The menu shows
+each progression with its numerals and its chord names in the current key. The card under the menus shows the chords as
+they will sound (with the CHORDS setting), how long each chord lasts, the teaching note, and the scale.
+
+Each progression is written for one scale. In another scale the same degrees change their quality: in natural minor the V
+of "Dramatic minor" becomes a minor v. The card then offers a button to switch the set to the written scale.
+
+The table shows each progression in F, in its written scale.
+
+| Progression | Family | Written in | Numerals | Triads in F | Default chords in F | Bars per chord |
+|---|---|---|---|---|---|---|
+| Minor loop | Rollers | Natural minor | i-bVI-bIII-bVII | Fm Db Ab Eb | 7ths: Fm7 Dbmaj7 Abmaj7 Eb7 | 2 |
+| Two-chord vamp | Rollers | Natural minor | i-bVII | Fm Eb | 7ths: Fm7 Eb7 | 2 |
+| Deep minor | Rollers | Natural minor | i-v-bVI-bVII | Fm Cm Db Eb | 7ths: Fm7 Cm7 Dbmaj7 Eb7 | 2 |
+| Rave anthem | Anthems | Natural minor | i-bVII-bVI-bVII | Fm Eb Db Eb | Triads | 1 |
+| Festival build | Anthems | Natural minor | i-i-bVI-bVII | Fm Fm Db Eb | Sus: Fsus2 Fsus2 Dbsus2 Ebsus2 | 2 |
+| Liquid ii-v-i | Liquid | Natural minor | ii°-v-i-i | Gdim Cm Fm Fm | 9ths: Gm7b5 Cm7 Fm9 Fm9 | 2 |
+| Liquid sway | Liquid | Natural minor | i-iv | Fm Bbm | 9ths: Fm9 Bbm9 | 2 |
+| Liquid major | Liquid | Major | IV-iii-vi-vi | Bb Am Dm Dm | 7ths: Bbmaj7 Am7 Dm7 Dm7 | 2 |
+| Dorian lift | Liquid | Dorian | i-IV | Fm Bb | 7ths: Fm7 Bb7 | 2 |
+| Dramatic minor | Dark | Harmonic minor | i-iv-bVI-V | Fm Bbm Db C | 7ths: Fm(maj7) Bbm7 Dbmaj7 C7 | 2 |
+| Dark minor | Dark | Harmonic minor | i-bVI-iv-V | Fm Db Bbm C | Triads | 2 |
+| Neuro half-step | Neuro | Phrygian | i-bII | Fm Gb | Power: F5 Gb5 | 1 |
+| Dominant menace | Neuro | Phrygian dominant | I-bII-I-bvii | F Gb F Ebm | Triads | 1 |
+| Jump-up pedal | Jump-up | Natural minor | i-i-i-bVI | Fm Fm Fm Db | Power: F5 F5 F5 Db5 | 1 |
+| Rave major | Bright | Mixolydian | I-bVII-IV-I | F Eb Bb F | Triads | 1 |
+| Lydian float | Bright | Lydian | I-II | F G | 7ths: Fmaj7 G7 | 2 |
+
+How a progression fits a clip: the chords keep their written length while the whole progression fits the clip. In a shorter
+clip each chord gets half as long (down to half a bar). A 1-bar clip holds 2 chords; the card says how many fit. Give lanes
+that play together the same clip length, so their chords change at the same time (GENERATE SCENE does this for you).
+
+### Chords (CHORDS)
+
+| Setting | Notes | Sound |
+|---|---|---|
+| Triads | root, 3rd, 5th | The plainest, strongest chords. |
+| 7ths | + the 7th | Warmer: maj7, m7, 7, m7b5. |
+| 9ths | 7th chord + 9th, without the 5th | The soft liquid colour. A b9 (a semitone above the root) is left out. |
+| 11ths | 9th chord + 11th, without the 5th | Deep, open pads. An 11th over a major 3rd would clash, so it is left out. |
+| Sus2 / Sus4 | the 3rd replaced by the 2nd or 4th | Neither major nor minor: open, good for builds. |
+| Power (1-5-8) | root, 5th, octave | Hard and neutral. On a degree without a perfect 5th: octaves only. |
+| Stacked 5ths | root, 5th, the 5th above it | Wide and hollow rave and neuro stabs. |
+| Stacked 4ths | three scale notes a 4th apart | Modern and cold. |
+
+AUTO uses the chord type the progression was written with.
+
+### Voicing and voice leading
+
+Each chord takes the inversion that is **nearest to the chord before**. The common notes stay where they are and the others
+move by a step. Example in F minor with 7ths: Fm7 (F Ab C Eb) goes to Dbmaj7 (F Ab C Db): only Eb moves, one semitone down.
+Over all progressions and keys, close voicing moves 0.9 semitones per voice per chord change on average. Root-position blocks
+would move 2.1, more than twice as much.
+
+VOICING (PAD and STAB): **Close** keeps the notes within an octave. **Open** moves one note an octave down (a "drop 2"), so
+the chord spreads wider and softer. AUTO plays a pad open and the other lanes close.
+
+### What each lane plays (RHYTHM)
+
+All lanes follow the same chords. AUTO picks a rhythm from the progression's family, a different one each press.
+
+- **SUB**: only roots, one note at a time, in the octave E1 to Eb2. Long roots, two-step lock (with the kick on 1 and on
+  the "and" of 3), one per bar, half bars.
+- **BASS**: the root on every chord change. Between changes: the octave, the 5th or the 3rd, and a passing note (the scale
+  note next to the next chord's root) just before the change. Patterns: roller, two-step bounce, neuro stepper (16ths with
+  octave jumps), jump-up wobble (long notes, the synth's LFO does the wobble), liquid walking (quarter notes), long notes.
+- **PAD**: held chords, every bar, or half bars.
+- **STAB**: offbeats, 3-3-2, anthem (two bars, syncopated), hits on 1 and on the "and" of 2, push.
+- **LEAD**: a motif in **call and answer**: a one-bar rhythm repeats with the same shape. Chord tones fall on the beats,
+  scale steps fall between them. The call ends open (on the 3rd or the 5th), the answer comes home to the root. Or an
+  arpeggio (up, down, up-down, random) in 16ths or 8ths over the chord tones.
+
+After GENERATE NOTES the ruler of the piano roll shows each chord by name and numeral. The names stay while the notes are
+the generated ones; they disappear when you edit the clip.
+
+### Drum styles (STYLE, FILL, DENSITY)
+
+Each press with STYLE on **Auto** picks a style other than the last one, and a new variation. **LOCK** keeps the style of the
+last press and only changes its variation. The info line names what you got, for example "Generated: Neuro stepper,
+variation 3 of 27 (2 bars, fill: snare pickup)".
+
+| Style | Signature |
+|---|---|
+| Two-step | Kick on 1 and on the "and" of 3, snare on 2 and 4; the second bar pushes an extra kick. |
+| Roller | The two-step with a kick on the last 16ths that rolls into the next bar; ghost snares; 16th hats. |
+| Halftime | The snare on beat 3 only: the beat feels half as fast. |
+| Neuro stepper | Tight kicks on the 16ths between the beats, hard snares, sparse hats. |
+| Jump-up | A bouncy kick on the "and" of 2, claps on the backbeat. |
+| Liquid shuffle | Soft kick and snare, quiet ghost notes, a swung ride (dotted 8th + 16th). |
+| Jungle chop | Busy break-style kicks and snares. On the Jungle Breaks kit: the 8 chops played in a new order. |
+| Minimal dancefloor | Kick, snare and one hat, nothing else. |
+
+The styles are written for the **sound** of each pad, not its number, so they work on every kit: a ghost note goes to the
+GHOST pad (or softly to the snare), tops go to TOPS or SHAKER (or the closed hat). On **Jungle Breaks** the pads are the 8
+chops of one break (one 8th each: kick, hat, snare, kick, kick, ghost, snare, snare). "Jungle chop" re-sequences them:
+straight bars, edits (a beat restarts, a beat repeats, a chop comes early), and at the end a reversed fill or a stutter. The
+other styles swap the kick, snare and ghost chops in where the style plays them.
+
+FILL: none, phrase end (the last bar ends with a snare pickup, a stop, a tom run or a ghost roll; an 8-bar clip also gets a
+small fill after 4 bars), or a snare roll that builds through the last bar. DENSITY: low (fewer ghosts and hats), mid (the
+style as written), high (an extra 16th tops layer and an open hat).
+
+**FX** lanes: Drop hit (impact and crash on bar 1, a shout at the end), Build-up (a riser timed to end with the clip),
+Breakdown (downlifter, crash, soft vocal pads), Hype (horn, siren and laser on the last bar's offbeats). **Vox** lanes:
+offbeat chops, call and response, stutter.
+
+### DICE and GENERATE SCENE
+
+- **DICE** picks random settings for this lane (chords, voicing, rhythm; or style, fill, density) and generates. The song
+  progression stays.
+- **SCENE** generates every lane of the selected scene at the selected clip's length, on the song progression, as one undo
+  step. Drum lanes on Auto get a style from the progression's family (the same style on every kit lane; a re-sequenced break
+  on the Jungle Breaks kit).
+
+### Ideas for a class
+
+1. Choose "Minor loop", press SCENE, and play it. Then change only CHORDS on the PAD: triads, 7ths, 9ths. What changes, and
+   what stays? (The roots and the bass stay; the colour changes.)
+2. Choose "Dramatic minor" in natural minor, generate, listen. Press "WRITTEN IN HARMONIC MIN: USE IT" and generate again.
+   The v becomes V: listen for the leading tone (E) pulling back to F.
+3. Turn VOICING to Close, then Open, on the same pad. Look at the piano roll: the same chord names, different spacing.
+4. Press GENERATE BEAT five times on Auto and name each style before you read the info line.
+5. LOCK a style you like and press again: the signature stays (kick and snare), the details move (ghosts, hats, fills).
+
 ## Shortcuts
 
 | Key | Action |
@@ -195,9 +409,10 @@ Everything lives in `index.html`, in this order:
 2. project model, templates, the lesson data and the clip generator
 3. audio engine (`Engine`): drum voices, the classic synth, effects,
    master bus, then the Polar VA and Tidal WT engines, the sample bank
-   (CC0 one-shots and breaks as MP3 data) and the sampler. It only depends
-   on the `AudioContext` it receives, so the same code drives live playback
-   and the offline WAV export
+   (CC0 one-shots and breaks as MP3 data), the sampler, the mastering chain,
+   the track FX and the generator (harmony, progressions, drum styles). It only
+   depends on the `AudioContext` it receives, so the same code drives live
+   playback and the offline WAV export
 4. transport: lookahead scheduler, clip launching, arrangement playback
    and recording
 5. UI: control bar, browser, session view, mixer
