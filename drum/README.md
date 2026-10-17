@@ -686,6 +686,17 @@ Silk Lead, Silk Pad, Smooth Growl, Smooth Hoover, Soft Pluck, Talking Bass, Velv
 - Shapes, tempo synced from 2 bars to 1/32 with triplets: wobble, triangle, saw, ramp, square, S&H, rise, fall
 - Live playback and the WAV export play the same automation. Every stroke is one undo step
 
+**Talking wobble and the WOBBLE BUILDER**
+- Two more targets on every synth track: VOWEL (U, O, A, E, I) and TALK (how much the mouth acts). They drive a formant
+  filter (a talk box) that joins the track only when a vowel or talk lane plays; Spectra with a formant in its first
+  processor uses its own formant
+- WOBBLE BUILDER (clip panel) writes the cutoff, vowel, talk and volume lanes in one go from a pattern of half-beat or beat
+  cells: per cell a rate (1/4, 1/8, 1/8T, 1/16, 1/16T, 1/32, hold, off, tie), a depth, a shape and the vowels. The wobble
+  lengthens and shortens with the pattern; INTENSITY scales every depth
+- FOLLOW DRUMS reads the kick and snare of the scene's drum clip: a long open wobble after the kick, a fast stutter before
+  the snare, closed on the snare
+- 14 presets; PREVIEW plays the clip with the lanes, APPLY is one undo step
+
 **Long notes and legato**
 - Notes many bars long play to their end on every engine
 - LEGATO in the clip editor: overlapping notes play as one voice with no new attack, and glide from one pitch to the next

@@ -5221,7 +5221,7 @@ const auPct = v => Math.round(v * 100) + '%';
 const auFHz = hz => (hz >= 1000 ? (hz / 1000).toFixed(hz >= 10000 ? 1 : 2) + ' kHz' : Math.round(hz) + ' Hz');
 const auNum = (x, d) => (typeof x === 'number' && Number.isFinite(x) ? x : d);
 // the Spectra voice parameters (c12_spectra.js worklet z0..z7)
-const AUTO_SPX_Z = { mac1: 0, mac2: 1, mac3: 2, mac4: 3, cut: 4, res: 5, morph: 6, amt1: 7 };
+const AUTO_SPX_Z = { mac1: 0, mac2: 1, mac3: 2, mac4: 3, cut: 4, res: 5, morph: 6, amt1: 7, vowel: 7, talk: 8 };
 
 // ---------- targets ----------
 // Every track: the mixer and the track filter. kind 'trk': the bus goes into the params tp(E, T) returns; off(tr, v): the offset.
@@ -5275,8 +5275,63 @@ const AUTO_ENG = {
   AUTO_ENG.wtpro['mac' + k] = Object.assign(auMac(k), { kind: 'trk', def: s => s['mac' + k], tp: (E, T) => (T.wtp && T.wtp.mac && T.wtp.mac[k - 1] ? [T.wtp.mac[k - 1].offset] : []), off: (s, v) => v - auNum(s['mac' + k], 0) });
   AUTO_ENG.spectra['mac' + k] = Object.assign(auMac(k), { def: s => auNum(s['mac' + k], 0) }, auZ('mac' + k));
 });
+// ---------- the talk box: a formant filter for every synth lane (the talking wobble) ----------
+// Three band-passes on the formants of U O A E I (in that order along the vowel axis 0..1: dark to bright, the path a mouth
+// takes), a low body band, wet/dry. Built in the track input (T.in -> box -> T.filt) the first time a vowel or talk lane plays
+// on the track; until then nothing changes. Its vowel control: a ConstantSource at 0 plus the vowel bus (-1..1) through
+// WaveShaper curves (formant frequency in kHz, formant gain), so the vowel moves at audio rate, the same live and offline.
+const AUTO_VOWELS = 'uoaei', AUTO_VOW_TAB = { // F1 F2 F3 (Hz), their gains: adult averages
+  u: [[300, 870, 2240], [1, .35, .1]], o: [[450, 800, 2830], [1, .45, .12]], a: [[730, 1090, 2440], [1, .5, .25]],
+  e: [[530, 1840, 2480], [1, .45, .3]], i: [[270, 2290, 3010], [1, .3, .25]] };
+// the place of a vowel letter on the axis (w = u, y = i): spectra's own formant processor has its own order (A E I O U)
+const autoVowelPos = ch => { const c = ch === 'w' ? 'u' : ch === 'y' ? 'i' : ch; const k = AUTO_VOWELS.indexOf(c); return k < 0 ? .5 : k / 4; };
+const AU_SPX_VOW = [1, .75, 0, .25, .5]; // U O A E I -> Spectra's vowel knob (A 0, E .25, I .5, O .75, U 1)
+const auSpxVowel = v => { const x = clamp(v, 0, 1) * 4, k = Math.min(3, Math.floor(x)), u = x - k; return AU_SPX_VOW[k] + (AU_SPX_VOW[k + 1] - AU_SPX_VOW[k]) * u; };
+let AU_TB_CURVES = null;
+function auTbCurves() {
+  if (AU_TB_CURVES) return AU_TB_CURVES;
+  const N = 2049, out = [];
+  for (let j = 0; j < 3; j++) {
+    const f = new Float32Array(N), g = new Float32Array(N);
+    for (let n = 0; n < N; n++) {
+      const x = n / (N - 1) * 4, k = Math.min(3, Math.floor(x)), u = x - k, A = AUTO_VOW_TAB[AUTO_VOWELS[k]], B = AUTO_VOW_TAB[AUTO_VOWELS[k + 1]];
+      f[n] = Math.exp(Math.log(A[0][j]) + u * (Math.log(B[0][j]) - Math.log(A[0][j]))) / 1000; g[n] = A[1][j] + u * (B[1][j] - A[1][j]);
+    }
+    out.push({ f, g });
+  }
+  return (AU_TB_CURVES = out);
+}
+function auTalkBox(E, T) {
+  if (T.auTB) return T.auTB;
+  const c = E.ctx, TB = { in: c.createGain(), out: c.createGain(), wet: c.createGain(), dry: c.createGain(), vin: c.createGain(), ctl: c.createConstantSource() };
+  TB.wet.gain.value = 0; TB.dry.gain.value = 1; TB.ctl.offset.value = 0; TB.ctl.connect(TB.vin); TB.ctl.start();
+  TB.in.connect(TB.dry); TB.dry.connect(TB.out); TB.wet.connect(TB.out);
+  const cv = auTbCurves(), Q = [6, 8, 10], mk = c.createGain(); mk.gain.value = 2.6; mk.connect(TB.wet);
+  cv.forEach((C, j) => {
+    const bp = c.createBiquadFilter(), g = c.createGain(), fs = c.createWaveShaper(), gs = c.createWaveShaper(), fk = c.createGain();
+    bp.type = 'bandpass'; bp.Q.value = Q[j]; bp.frequency.value = 0; g.gain.value = 0; fk.gain.value = 1000;
+    fs.curve = C.f; gs.curve = C.g; TB.vin.connect(fs); fs.connect(fk); fk.connect(bp.frequency); TB.vin.connect(gs); gs.connect(g.gain);
+    TB.in.connect(bp); bp.connect(g); g.connect(mk);
+  });
+  const body = c.createBiquadFilter(), bg = c.createGain(); body.type = 'lowpass'; body.frequency.value = 220; bg.gain.value = .55; TB.in.connect(body); body.connect(bg); bg.connect(TB.wet);
+  try { T.in.disconnect(T.filt); } catch (e) { /* already moved */ }
+  T.in.connect(TB.in); TB.out.connect(T.filt);
+  return (T.auTB = TB);
+}
+// vowel: the bus is the vowel control (-1..1); talk: the wet amount (wet = v, dry = 1 - v). With a vowel lane and no talk lane
+// the box is fully on (autoStep); with neither, the box (if built) passes the sound dry
+const AUTO_TALK = {
+  vowel: { name: 'Vowel (talk box U O A E I)', grp: 'Talk', kind: 'trk', box: true, lin: true, fmt: v => 'UOAEI'[Math.round(clamp(v, 0, 1) * 4)] + ' ' + auPct(v), def: () => .5,
+    tp: (E, T) => [auTalkBox(E, T).vin], off: (s, v) => 2 * v - 1 },
+  talk: { name: 'Talk amount (wet)', grp: 'Talk', kind: 'trk', box: true, lin: true, fmt: auPct, def: () => 1, tp: (E, T) => { const B = auTalkBox(E, T); return [[B.wet.gain, 1], [B.dry.gain, -1]]; }, off: (s, v) => v },
+};
+// Spectra with a formant processor in slot 1: its own vowel (VOWEL knob) and its mix
+const AUTO_TALK_SPX = {
+  vowel: Object.assign({ name: 'Vowel (formant 1, U O A E I)', grp: 'Talk', fmt: AUTO_TALK.vowel.fmt, def: () => .5 }, auZ('vowel'), { lin: false, off: (s, v) => auSpxVowel(v) + 1 }),
+  talk: Object.assign({ name: 'Talk amount (formant 1 mix)', grp: 'Talk', fmt: auPct, def: s => s.p1mix }, auZ('talk')),
+};
 // every target id a saved lane may name (any engine), for the sanitizer
-const AUTO_IDS = (() => { const o = Object.create(null); Object.keys(AUTO_COMMON).forEach(k => { o[k] = 1; }); Object.values(AUTO_ENG).forEach(e => Object.keys(e).forEach(k => { o[k] = 1; })); return o; })();
+const AUTO_IDS = (() => { const o = Object.create(null); Object.keys(AUTO_COMMON).concat(Object.keys(AUTO_TALK)).forEach(k => { o[k] = 1; }); Object.values(AUTO_ENG).forEach(e => Object.keys(e).forEach(k => { o[k] = 1; })); return o; })();
 const autoIdOk = id => typeof id === 'string' && Object.prototype.hasOwnProperty.call(AUTO_IDS, id);
 const auEng = tr => (tr && tr.synth ? (hasOwnKey(AUTO_ENG, tr.synth.engine) ? tr.synth.engine : 'classic') : null);
 // the implementation of target id on track tr (null: this track has no such parameter, the lane stays silent)
@@ -5284,13 +5339,14 @@ function autoImpl(tr, id) {
   if (!tr || !autoIdOk(id)) return null;
   if (hasOwnKey(AUTO_COMMON, id)) return Object.assign({ kind: 'trk', common: true }, AUTO_COMMON[id]);
   const e = auEng(tr); if (!e || tr.type === 'audio') return null;
+  if (hasOwnKey(AUTO_TALK, id)) return e === 'spectra' && tr.synth.p1type === 'formant' ? AUTO_TALK_SPX[id] : AUTO_TALK[id];
   return hasOwnKey(AUTO_ENG[e], id) ? AUTO_ENG[e][id] : null;
 }
 // the targets a track offers (the editor menus): [{ id, name, grp }]
 function autoTargets(tr) {
   const out = Object.keys(AUTO_COMMON).map(id => ({ id, name: AUTO_COMMON[id].name, grp: AUTO_COMMON[id].grp }));
   const e = tr && tr.type === 'synth' ? auEng(tr) : null;
-  if (e) Object.keys(AUTO_ENG[e]).forEach(id => out.unshift({ id, name: AUTO_ENG[e][id].name, grp: AUTO_ENG[e][id].grp }));
+  if (e) { Object.keys(AUTO_TALK).reverse().forEach(id => { const im = autoImpl(tr, id); out.unshift({ id, name: im.name, grp: im.grp }); }); Object.keys(AUTO_ENG[e]).forEach(id => out.unshift({ id, name: AUTO_ENG[e][id].name, grp: AUTO_ENG[e][id].grp })); }
   return out;
 }
 // the knob's value of a target, 0..1 (the first point of a new lane)
@@ -5377,7 +5433,7 @@ function auReap(S) { S.voices.forEach(v => { if (v.ended) { auDropVoice(v); S.vo
 function auConnTrk(E, i, b, im) {
   const T = E.t[i]; if (!T) return;
   let ps = []; try { ps = (im.tp(E, T, E.p.tracks[i].synth) || []).filter(Boolean); } catch (e) { ps = []; }
-  ps.forEach(p => { if (!b.tc.has(p)) { try { b.cs.connect(p); b.tc.add(p); } catch (e) { /* not a param */ } } });
+  ps.forEach(e => { const p = Array.isArray(e) ? e[0] : e, k = Array.isArray(e) ? e[1] : 1; if (p && !b.tc.has(p)) { try { auKg(E, b, k).connect(p); b.tc.add(p); } catch (er) { /* not a param */ } } });
 }
 // What track i plays at song step `tick`: { clip, pos, src } ('s' session, 'a' arrangement). The live engine reads the transport
 // as scheduleStep does next (its queued launch included); an offline render plays the arrangement
@@ -5411,6 +5467,7 @@ function auSchedule(E, b, im, tr, pts, x0, g, sd) {
 }
 // tests: AUTO_TRACE(tag, method, value, time) sees every event the scheduler writes on a bus (window.AUTO_TRACE; unset in use)
 function auTraced(p) { return { setValueAtTime: (v, t) => { AUTO_TRACE(p._auBus, 'set', v, t); return p.setValueAtTime(v, t); }, linearRampToValueAtTime: (v, t) => { AUTO_TRACE(p._auBus, 'ramp', v, t); return p.linearRampToValueAtTime(v, t); } }; }
+const AU_FULL = [[0, 1, 0]];
 // every 16th, live and offline (after the other sections' stepTick)
 function autoStep(E, tick, time, sd, live) {
   if (!E.t || !E.p || !Array.isArray(E.p.tracks)) return;
@@ -5423,12 +5480,15 @@ function autoStep(E, tick, time, sd, live) {
     const cl = W.clip && Array.isArray(W.clip.auto) && W.clip.auto.length ? W.clip.auto : null, al = W.follow && Array.isArray(tr.autoArr) && tr.autoArr.length ? tr.autoArr : null;
     if (!cl && !al && !(S && S.buses.size)) continue;
     const ids = new Set(); if (cl) cl.forEach(l => l && ids.add(l.target)); if (al) al.forEach(l => l && ids.add(l.target)); if (S) S.buses.forEach((_, id) => ids.add(id));
+    let vBox = false;
+    if (ids.has('vowel')) { const iv = autoImpl(tr, 'vowel'); vBox = !!(iv && iv.box) && !!((cl && auLaneOf(cl, 'vowel')) || (al && auLaneOf(al, 'vowel'))); if (vBox) ids.add('talk'); }
     ids.forEach(id => {
-      const im = autoImpl(tr, id), lc = cl && auLaneOf(cl, id), la = !lc && al && auLaneOf(al, id);
+      const im = autoImpl(tr, id); let lc = cl && auLaneOf(cl, id), la = !lc && al && auLaneOf(al, id);
+      if (id === 'talk' && vBox && !lc && !la) lc = { points: AU_FULL }; // a vowel lane alone: the talk box fully on
       if (!im || (!lc && !la)) { const b = S && S.buses.get(id); if (b && b.on) { b.cs.offset.setValueAtTime(0, g); b.on = false; } return; }
       const b = auBus(E, i, id, im);
       if (im.kind === 'trk') auConnTrk(E, i, b, im);
-      try { auSchedule(E, b, im, tr, (lc || la).points, lc ? W.pos : tick, g, sd); b.on = true; } catch (err) { b.cs.offset.setValueAtTime(0, g); b.on = false; }
+      try { auSchedule(E, b, im, tr, (lc || la).points, lc ? (lc.points === AU_FULL ? 0 : W.pos) : tick, g, sd); b.on = true; } catch (err) { b.cs.offset.setValueAtTime(0, g); b.on = false; }
     });
   }
 }
@@ -5613,6 +5673,117 @@ function autoArrSet(tr, target, points) {
 // legato on a synth lane: autoSetLegato(tr, true, 80, 'ms') or (tr, true, 2, 'st')
 function autoSetLegato(tr, on, glide, unit) { if (!tr || tr.type !== 'synth') return null; const l = autoFixLegato({ on, glide, unit }); if (l) tr.legato = l; else delete tr.legato; return l; }
 
+// ---------- the wobble builder: talking wobbles from a rhythm pattern ----------
+// A pattern is a list of cells (cell = steps per cell: 2 = half a beat, 4 = a beat), repeated over the clip. A cell:
+// { r: rate ('1/4' '1/8' '1/8T' '1/16' '1/16T' '1/32', 'hold', 'off', or 'tie': the previous segment goes on), d: depth 0..1,
+// sh: shape (wobble tri saw ramp square), v: vowels ('uaio': one per cycle, its peak; the trough closes on U) }.
+// Tied cells make one segment; a segment fits a whole number of cycles of its rate (the cycle stretches or shortens to the
+// segment), so the wobble lengthens and shortens with the pattern. Lanes written: cut (closed lo .. open lo + d (hi - lo)),
+// vowel (the talk box / formant), talk (the wet amount: more depth, more mouth), vol (OFF cells and gaps close the gate).
+const AUTO_WOB_RATES = { '1/4': 4, '1/8': 2, '1/8T': 4 / 3, '1/16': 1, '1/16T': 2 / 3, '1/32': .5 };
+const AUTO_WOB_KINDS = ['1/4', '1/8', '1/8T', '1/16', '1/16T', '1/32', 'hold', 'off', 'tie'];
+const AUTO_WOB_SHAPES = ['wobble', 'tri', 'saw', 'ramp', 'square'];
+// presets: cells as 'rate:depth:vowels[:shape]', '-' ties to the previous cell. Original patterns, half-beat cells.
+const AUTO_WOB_PRESETS = [
+  ['Talker A', 2, ['1/8:.9:ua', '-', '1/16:.7:ia', '-', '1/8T:.8:oa', '-', '1/32:.6:ie', 'off']],
+  ['Talker B stutter', 2, ['1/4:1:ou', '-', '-', '1/16T:.7:ai', '1/32:.5:ee', '-', '1/8:.9:uo', 'off']],
+  ['Push and yell', 2, ['1/8:1:ui', '1/8:1:ua', '1/16:.8:io', '-', 'hold:.9:a', '1/16T:.6:ea', '1/32:.5:i', 'off']],
+  ['Halftime chew', 2, ['1/4:1:uo', '-', '-', '-', '1/8T:.8:ai', '-', '1/16:.6:e', 'off', '1/8:.9:ua', '-', '1/16T:.7:oi', '-', 'hold:1:a', '-', '1/32:.5:i', 'off']],
+  ['Robot chatter', 2, ['1/16:.7:aeio', '-', '1/16:.7:uaie', '-', '1/32:.5:ii', '1/32:.5:aa', '1/8:.9:uo', '-']],
+  ['Slow moan', 2, ['1/4:1:ua', '-', '-', '-', '1/4:.8:oi', '-', '-', 'off']],
+  ['Gallop talk', 2, ['1/8T:.9:uai', '-', '-', '1/8T:.8:oei', '-', '-', '1/16:.6:a', 'off']],
+  ['Bounce vowels', 2, ['1/8:.8:ae', '1/8:.6:ou', '1/8:.9:ia', '1/8:.5:eu', '1/16:.7:ai', '-', 'hold:.8:o', 'off']],
+  ['Snare bite', 2, ['1/4:1:ua', '-', '-', '-', 'off', '1/16T:.7:ie', '1/8:.8:oa', '-']],
+  ['Neuro chop', 2, ['1/16:.9:ia', '1/32:.6:ee', '1/16T:.8:oa', 'off', '1/8:1:ui', '-', '1/32:.7:aa', '1/16:.5:o']],
+  ['Wah swing', 2, ['1/8T:1:ua', '-', '-', '-', '1/8T:.6:ua', '-', '-', '-']],
+  ['Question and answer', 2, ['hold:.4:u', '1/8:.6:uo', '1/8:.8:oa', '1/16:1:ai', '1/32:.8:i', '-', 'hold:.3:u', 'off']],
+  ['Saw growl talk', 2, ['1/8:1:ia:saw', '-', '1/16:.8:ao:saw', '-', '1/8T:.9:ua:ramp', '-', '1/32:.6:ee:saw', 'off']],
+  ['Halftime scream', 2, ['hold:1:a', '-', '1/16:.9:ai', '-', 'off', '1/32:.7:ee', '1/8:1:ia', '-', '1/4:1:oa', '-', '-', '1/16T:.8:ie', 'off', '-', '1/32:.6:i', '1/16:.8:u']],
+];
+function autoWobCell(x) {
+  if (x && typeof x === 'object') return { r: AUTO_WOB_KINDS.includes(x.r) ? x.r : '1/8', d: clamp(auNum(+x.d, .8), 0, 1), sh: AUTO_WOB_SHAPES.includes(x.sh) ? x.sh : 'wobble', v: typeof x.v === 'string' ? x.v.toLowerCase().replace(/[^aeiouwy]/g, '').slice(0, 16) : '' };
+  const s = typeof x === 'string' ? x.trim() : '';
+  if (s === '-' || s === 'tie') return { r: 'tie', d: 0, sh: 'wobble', v: '' };
+  const [r, d, v, sh] = s.split(':');
+  return autoWobCell({ r: r || '1/8', d: d == null || d === '' ? .8 : +d, v: v || '', sh });
+}
+function autoWobPreset(name) { const p = AUTO_WOB_PRESETS.find(x => x[0] === name); return p ? { cell: p[1], cells: p[2].map(autoWobCell) } : null; }
+// the segments of a pattern over len steps: [{ s, len, r, d, sh, v }]
+function autoWobSegments(cells, cell, len) {
+  const out = []; if (!cells.length) return out;
+  const n = Math.ceil(len / cell - 1e-9);
+  for (let k = 0; k < n; k++) {
+    const c = cells[k % cells.length], s = k * cell, l = Math.min(cell, len - s);
+    if (c.r === 'tie' && out.length) { out[out.length - 1].len += l; continue; }
+    out.push(Object.assign({ s, len: l }, c.r === 'tie' ? { r: 'hold', d: 0, sh: 'wobble', v: '' } : c));
+  }
+  return out;
+}
+// write the lanes. opts: { pattern: cells | preset name, cell: 2, cut: [lo, hi], depth: scale 0..1+, lanes: { cut, vowel, talk, vol },
+// vol: [gate, open] fader values, segments: explicit [{ s, len, r, d, sh, v }] (instead of a pattern) }. Returns the lanes written.
+function autoWobble(clip, opts = {}) {
+  if (!clip || !(clip.bars > 0)) return [];
+  const L = clip.bars * 16, q = x => Math.round(x * 48) / 48;
+  let cells = opts.pattern, cell = clamp(auNum(+opts.cell, 2), .5, 16);
+  if (typeof cells === 'string') { const pr = autoWobPreset(cells); cells = pr ? pr.cells : []; if (pr && opts.cell == null) cell = pr.cell; }
+  cells = Array.isArray(cells) ? cells.slice(0, 256).map(autoWobCell) : [];
+  const segs = Array.isArray(opts.segments) ? opts.segments.map(x => Object.assign(autoWobCell(x), { s: clamp(auNum(+x.s, 0), 0, L), len: clamp(auNum(+x.len, 2), 1 / 3, L) })) : autoWobSegments(cells.length ? cells : AUTO_WOB_PRESETS[0][2].map(autoWobCell), cell, L);
+  const lo = clamp(auNum(opts.cut && +opts.cut[0], .18), 0, 1), hi = clamp(auNum(opts.cut && +opts.cut[1], .88), 0, 1), dk = clamp(auNum(+opts.depth, 1), 0, 2);
+  const want = Object.assign({ cut: true, vowel: true, talk: true, vol: false }, opts.lanes || {});
+  const vg = clamp(auNum(opts.vol && +opts.vol[0], .2), 0, 1), vo = clamp(auNum(opts.vol && +opts.vol[1], .78), 0, 1);
+  const P = { cut: [], vowel: [], talk: [], vol: [] }, add = (id, x, v, c = 0) => { const a = P[id]; x = q(clamp(x, 0, L)); if (a.length >= 2 && a[a.length - 1][0] === x && a[a.length - 2][0] === x) a[a.length - 1] = [x, v, c]; else a.push([x, clamp(v, 0, 1), c]); };
+  const U = autoVowelPos('u');
+  const step = (id, x, v) => { const a = P[id], pv = a.length ? a[a.length - 1][1] : null; if (pv == null) add(id, x, v, 2); else if (Math.abs(pv - v) > 1e-6) { add(id, x, pv, 0); add(id, Math.min(L, x + .125), v, 2); } }; // a level change: a 1/8-step ramp (no click)
+  segs.forEach(g => {
+    const s = g.s, e = Math.min(L, g.s + g.len), d = clamp(g.d * dk, 0, 1), open = lo + d * (hi - lo), vs = (g.v || 'a').split('');
+    if (g.r === 'off') {
+      add('cut', s, lo, 2); add('vowel', s, U, 2); step('talk', s, .5); step('vol', s, vg);
+      return;
+    }
+    step('talk', s, clamp(.55 + .45 * d, 0, 1)); step('vol', s, vo);
+    if (g.r === 'hold') { add('cut', s, open, 2); add('vowel', s, autoVowelPos(vs[0]), 2); return; }
+    const R = AUTO_WOB_RATES[g.r] || 2, n = Math.max(1, Math.round((e - s) / R)), cyc = (e - s) / n;
+    for (let k = 0; k < n; k++) {
+      const x = s + k * cyc, m = x + cyc / 2, V = autoVowelPos(vs[k % vs.length]);
+      if (g.sh === 'wobble' || g.sh === 'tri') { const c = g.sh === 'wobble' ? 1 : 0; add('cut', x, lo, c); add('cut', m, open, c); add('vowel', x, U, c); add('vowel', m, V, c); }
+      else if (g.sh === 'saw') { add('cut', x, open); add('cut', x + cyc * .98, lo); add('vowel', x, V); add('vowel', x + cyc * .98, U); }
+      else if (g.sh === 'ramp') { add('cut', x, lo); add('cut', x + cyc * .98, open); add('vowel', x, U); add('vowel', x + cyc * .98, V); }
+      else { add('cut', x, open, 2); add('cut', m, lo, 2); add('vowel', x, V, 2); add('vowel', m, U, 2); } // square
+    }
+    if (g.sh === 'wobble' || g.sh === 'tri') { add('cut', e, lo); add('vowel', e, U); }
+  });
+  const wrote = [];
+  ['cut', 'vowel', 'talk', 'vol'].forEach(id => { if (want[id] && P[id].length) { const l = autoSetLane(clip, id, P[id]); if (l) wrote.push(l); } else if (want[id] === false && opts.clear) autoSetLane(clip, id, null); });
+  return wrote;
+}
+// Follow the drums: kicks and snares of drumClip (pads: kick 0, snare 1, or opts.kick / opts.snare pad lists) over the clip's
+// span. After a kick: a long open wobble (slow rate, full depth, "oo-ah"); the last cell before a snare: a fast stutter; on the
+// snare: closed (OFF) for a cell, then a medium talk. Returns the lanes written (opts as autoWobble, plus cell, depth, vowels).
+function autoWobbleCells(clip, drumClip, opts = {}) {
+  const L = clip.bars * 16, cell = clamp(auNum(+opts.cell, 2), 1, 8), n = Math.ceil(L / cell - 1e-9);
+  const kick = Array.isArray(opts.kick) ? opts.kick : [0], snare = Array.isArray(opts.snare) ? opts.snare : [1];
+  const DL = drumClip && drumClip.bars > 0 ? drumClip.bars * 16 : 16, hits = [];
+  (drumClip && Array.isArray(drumClip.notes) ? drumClip.notes : []).forEach(nt => {
+    if (!nt || !Number.isFinite(nt.s) || nt.s >= DL) return; const kind = kick.includes(nt.p) ? 'k' : snare.includes(nt.p) ? 's' : null; if (!kind) return;
+    for (let x = nt.s; x < L; x += DL) hits.push({ x, kind });
+  });
+  const vw = typeof opts.vowels === 'string' && opts.vowels ? opts.vowels : 'uaioe', cells = [];
+  let vk = 0; const nv = c => vw[(vk++) % vw.length] + (c || '');
+  for (let k = 0; k < n; k++) {
+    const a = k * cell, b = a + cell, has = t => hits.some(h => h.kind === t && h.x >= a - 1e-9 && h.x < b - 1e-9), next = t => hits.some(h => h.kind === t && h.x >= b - 1e-9 && h.x < b + cell - 1e-9);
+    if (has('s')) cells.push({ r: 'off', d: 0, v: 'u' });
+    else if (has('k')) cells.push({ r: cell >= 4 ? '1/8' : '1/4', d: 1, v: 'u' + nv('a').slice(0, 1) + 'a', sh: 'wobble' });
+    else if (next('s')) cells.push({ r: k % 2 ? '1/32' : '1/16T', d: .65, v: nv() + nv(), sh: 'wobble' });
+    else { const prev = cells[cells.length - 1]; if (prev && (prev.r === '1/4' || prev.r === '1/8') && prev.d === 1 && !prev.tied) { cells.push({ r: 'tie' }); prev.tied = true; } else cells.push({ r: k % 3 === 2 ? '1/16' : '1/8T', d: .8, v: nv() + nv(), sh: 'wobble' }); }
+  }
+  return { cell, cells: cells.map(c => (c.r === 'tie' ? autoWobCell('-') : autoWobCell(c))) };
+}
+function autoWobbleFollow(clip, drumClip, opts = {}) {
+  if (!clip) return [];
+  const f = autoWobbleCells(clip, drumClip, opts);
+  return autoWobble(clip, Object.assign({}, opts, { pattern: f.cells, cell: f.cell }));
+}
+
 // ===================== 7q. UI: THE AUTOMATION LANES =====================
 // Clip editor: a lane under the piano roll (target menu, pencil and line tools, shapes, clear, legato) for the clip envelopes.
 // Arrangement: an A button per lane shows its automation lane under it. Mouse and touch (pointer events); one undo step per stroke.
@@ -5755,6 +5926,7 @@ function auEdInject(body) {
     <div class="cb-row"><button class="btn au-tool ${AU_UI.tool === 'draw' ? 'on' : ''}" data-tool="draw" data-info="Pencil: drag to draw on the grid; drag a point to move it, tap a point to delete it">&#9998; DRAW</button><button class="btn au-tool ${AU_UI.tool === 'line' ? 'on' : ''}" data-tool="line" data-info="Line: drag from one value to another for a straight ramp">&#8725; LINE</button><button class="btn au-clr" data-info="Remove this parameter's envelope from the clip">CLR</button></div>
     <div class="cb-row"><select class="au-shape" data-info="A tempo-synced LFO shape written as an envelope over the whole clip">${AUTO_SHAPES.map(([k, n]) => `<option value="${k}"${k === AU_UI.shape ? ' selected' : ''}>${esc(n)}</option>`).join('')}</select><select class="au-rate" data-info="Shape rate (one cycle)">${Object.keys(AUTO_RATES).map(k => `<option${k === AU_UI.rate ? ' selected' : ''}>${k}</option>`).join('')}</select></div>
     <div class="cb-row"><input type="number" class="au-lo" min="0" max="100" value="${AU_UI.lo}" data-info="Shape: lowest value (%)"><input type="number" class="au-hi" min="0" max="100" value="${AU_UI.hi}" data-info="Shape: highest value (%)"><button class="btn au-apply" data-info="Write the shape into the lane (CTRL+Z undoes it)">SHAPE</button></div>
+    <div class="cb-row"><button class="btn au-wob" data-info="Wobble builder: a talking wobble from a rhythm pattern (rate, depth, vowels per half beat), presets, follow the drums. Writes cutoff, vowel, talk and volume lanes in one undo step">&#12336; WOBBLE BUILDER</button></div>
     ${tr.type === 'synth' ? `<div class="cb-row"><button class="btn au-leg ${lg.on ? 'on' : ''}" data-info="Legato: overlapping notes play as one voice that glides to each new pitch, with no new attack (every engine)">LEGATO</button><input type="number" class="au-gl" min="0" max="${lg.unit === 'st' ? 16 : 2000}" step="${lg.unit === 'st' ? .25 : 10}" value="${lg.on ? lg.glide : 60}" data-info="Legato glide time"><select class="au-glu" data-info="Glide time in milliseconds or in 16th steps"><option value="ms"${lg.unit !== 'st' ? ' selected' : ''}>ms</option><option value="st"${lg.unit === 'st' ? ' selected' : ''}>steps</option></select></div>` : ''}`;
   const left = $('.cb-left', body), hint = left && left.querySelector('.cb-hint:last-child');
   if (left) left.insertBefore(box, hint && hint.parentElement === left ? hint : null);
@@ -5769,6 +5941,7 @@ function auEdInject(body) {
     const b = e.target.closest('button'); if (!b) return;
     const cl = P.tracks[t].clips[s]; if (!cl) return;
     if (b.classList.contains('au-lane')) { AU_UI.show = !auEdShow(cl); try { localStorage.setItem('dnb808.autoLane', AU_UI.show ? '1' : '0'); } catch (er) { /* private */ } renderDetail(); }
+    else if (b.classList.contains('au-wob')) auWobOpen(t, s);
     else if (b.classList.contains('au-tool')) { AU_UI.tool = b.dataset.tool; $$('.au-tool', box).forEach(x => x.classList.toggle('on', x === b)); }
     else if (b.classList.contains('au-clr')) { const tg = auTgtOf(P.tracks[t], t, cl.auto, AU_UI.tgt); if (auLaneGet(cl.auto, tg)) { pushUndo(); autoSetLane(cl, tg, null); save(); renderDetail(); flash(`${autoImpl(P.tracks[t], tg) ? autoImpl(P.tracks[t], tg).name : tg}: envelope removed. CTRL+Z to undo`); } }
     else if (b.classList.contains('au-apply')) {
@@ -5912,6 +6085,129 @@ function auArrBind() {
   };
   requestAnimationFrame(f);
 })();
+
+
+// ---------- the wobble builder dialog ----------
+const AU_WOB = { cell: 2, n: 8, preset: 'Talker A', cells: null, lanes: { cut: true, vowel: true, talk: true, vol: false }, depth: 100, lo: 18, hi: 88 };
+const AU_WOB_RL = { '1/4': '1/4', '1/8': '1/8', '1/8T': '1/8 T', '1/16': '1/16', '1/16T': '1/16 T', '1/32': '1/32', hold: 'HOLD', off: 'OFF', tie: '→ TIE' };
+(function auWobCss() {
+  if (typeof document === 'undefined') return;
+  const st = document.createElement('style');
+  st.textContent = `.au-dlg { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; padding: 10px; box-sizing: border-box; }
+.au-dlg .au-pn { background: var(--panel, #2a2a2a); border: 1px solid var(--line, #444); border-radius: 6px; width: min(980px, 100%); max-height: 100%; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden; }
+.au-dlg .au-hd { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--line, #444); font-weight: 600; }
+.au-dlg .au-hd span { flex: 1; }
+.au-dlg .au-ctl { display: flex; flex-wrap: wrap; gap: 6px 10px; padding: 8px 10px; align-items: center; font-size: 11px; border-bottom: 1px solid var(--line, #444); }
+.au-dlg .au-ctl label { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.au-dlg .au-ctl input[type=number] { width: 48px; }
+.au-dlg .au-ctl select { max-width: 170px; }
+.au-dlg .au-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 5px; padding: 8px 10px; overflow: auto; flex: 1; min-height: 60px; }
+.au-dlg .au-cell { background: #1f1f1f; border: 1px solid #333; border-radius: 4px; padding: 4px; display: flex; flex-direction: column; gap: 3px; font-size: 10px; min-width: 0; }
+.au-dlg .au-cell.beat { border-left: 2px solid #777; } .au-dlg .au-cell.bar { border-left: 2px solid var(--accent, #ffa64d); }
+.au-dlg .au-cell.tie { opacity: .6; } .au-dlg .au-cell.off { background: #181818; }
+.au-dlg .au-cell select, .au-dlg .au-cell input { width: 100%; min-width: 0; box-sizing: border-box; font-size: 11px; }
+.au-dlg .au-cell .au-dbar { height: 4px; background: #333; border-radius: 2px; overflow: hidden; } .au-dlg .au-cell .au-dbar i { display: block; height: 100%; background: var(--accent, #ffa64d); }
+.au-dlg .au-ft { display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--line, #444); justify-content: flex-end; flex-wrap: wrap; }
+.au-dlg canvas { display: block; width: 100%; height: 54px; }
+@media (max-width: 520px) { .au-dlg { padding: 0; } .au-dlg .au-pn { border-radius: 0; height: 100%; } .au-dlg .au-grid { grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); } }`;
+  document.head.appendChild(st);
+})();
+function auWobFromPreset(name) { const pr = autoWobPreset(name); if (!pr) return; AU_WOB.preset = name; AU_WOB.cell = pr.cell; AU_WOB.cells = pr.cells.map(c => Object.assign({}, c)); AU_WOB.n = pr.cells.length; }
+function auWobOpts() { return { pattern: AU_WOB.cells, cell: AU_WOB.cell, depth: AU_WOB.depth / 100, cut: [AU_WOB.lo / 100, AU_WOB.hi / 100], lanes: Object.assign({}, AU_WOB.lanes), clear: true }; }
+// the drum clip under this clip: the same scene of the first drum lane, else its first clip; kick and snare pads by their voice
+function auWobDrums(s) {
+  const di = P.tracks.findIndex(t => t.type === 'drums'); if (di < 0) return null;
+  const dt = P.tracks[di], dc = dt.clips[s] || dt.clips.find(c => c && c.notes && c.notes.length); if (!dc) return null;
+  const pads = dt.pads || [], kick = [], snare = [];
+  pads.forEach((pd, k) => { const v = String(pd && pd.voice || ''), nm = String(pd && pd.name || '').toLowerCase(); if (/kick/.test(v) || /kick|bd/.test(nm)) kick.push(k); else if (/snare|clap/.test(v) || /snare|clap|sd/.test(nm)) snare.push(k); });
+  return { clip: dc, kick: kick.length ? kick : [0], snare: snare.length ? snare : [1], name: dt.name };
+}
+function auWobOpen(t, s) {
+  const tr = P.tracks[t], clip = tr && tr.clips[s]; if (!clip) return;
+  if (!AU_WOB.cells) auWobFromPreset(AU_WOB.preset);
+  const snap = JSON.stringify(clip.auto || null), D = { t, s, wrote: false, undoN: -1 };
+  const old = $('.au-dlg'); if (old) old.remove();
+  const dlg = document.createElement('div'); dlg.className = 'au-dlg';
+  const lanesHtml = () => ['cut', 'vowel', 'talk', 'vol'].map(id => `<label data-info="Write the ${id} lane"><input type="checkbox" data-lane="${id}"${AU_WOB.lanes[id] ? ' checked' : ''}>${{ cut: 'CUTOFF', vowel: 'VOWEL', talk: 'TALK', vol: 'VOLUME' }[id]}</label>`).join('');
+  dlg.innerHTML = `<div class="au-pn" role="dialog" aria-label="Wobble builder">
+    <div class="au-hd"><span>WOBBLE BUILDER · ${esc(tr.name)} / ${esc(clip.name)}</span><button class="btn au-x" data-info="Close (Cancel)">&#10005;</button></div>
+    <div class="au-ctl">
+      <label>PRESET <select class="au-pre">${AUTO_WOB_PRESETS.map(p => `<option${p[0] === AU_WOB.preset ? ' selected' : ''}>${esc(p[0])}</option>`).join('')}<option value=""${AU_WOB.preset ? '' : ' selected'}>(custom)</option></select></label>
+      <label data-info="One cell = half a beat or a beat">CELL <select class="au-cellsz"><option value="2"${AU_WOB.cell === 2 ? ' selected' : ''}>1/2 beat</option><option value="4"${AU_WOB.cell === 4 ? ' selected' : ''}>1 beat</option></select></label>
+      <label data-info="Cells in the pattern (it repeats over the clip)">CELLS <select class="au-n">${[4, 8, 16, 32, 64].map(n => `<option${n === AU_WOB.n ? ' selected' : ''}>${n}</option>`).join('')}</select></label>
+      <button class="btn au-follow" data-info="Follow the drums: read the kicks and snares of the drum clip in this scene and build the pattern over the whole clip (open after the kick, stutter before the snare, closed on it)">FOLLOW DRUMS</button>
+      <label data-info="Scales every cell's depth: the same wobble softer or harder">INTENSITY <input type="number" class="au-dep" min="0" max="150" value="${AU_WOB.depth}">%</label>
+      <label data-info="Cutoff closed / fully open (%)">CUT <input type="number" class="au-lo" min="0" max="100" value="${AU_WOB.lo}">-<input type="number" class="au-hi" min="0" max="100" value="${AU_WOB.hi}"></label>
+      ${lanesHtml()}
+    </div>
+    <canvas class="au-prev" data-info="The cutoff (line) and the vowel (dots) the pattern writes, over the clip"></canvas>
+    <div class="au-grid"></div>
+    <div class="au-ft"><span class="cb-hint" style="flex:1;align-self:center">Rate per cell (TIE lengthens the cell before), depth 0-100, vowels a e i o u (one per cycle)</span>
+      <button class="btn au-cancel">CANCEL</button><button class="btn au-prevw" data-info="Write the lanes and play the clip (CANCEL takes them back)">&#9654; PREVIEW</button><button class="btn go au-ok" data-info="Write the lanes (one undo step)">APPLY</button></div></div>`;
+  document.body.appendChild(dlg);
+  const grid = $('.au-grid', dlg);
+  const fit = () => { const n = AU_WOB.n; while (AU_WOB.cells.length < n) AU_WOB.cells.push(Object.assign({}, AU_WOB.cells[AU_WOB.cells.length % Math.max(1, AU_WOB.cells.length)] || autoWobCell('1/8:.8:ua'))); AU_WOB.cells.length = n; };
+  const draw = () => {
+    const cv = $('.au-prev', dlg), w = Math.max(50, cv.clientWidth), h = 54, A = setupCanvas(cv, w, h), c = clone(clip);
+    autoWobble(c, Object.assign(auWobOpts(), { lanes: { cut: true, vowel: true, talk: false, vol: false } }));
+    const L = c.bars * 16, cl = auLaneGet(c.auto, 'cut'), vl = auLaneGet(c.auto, 'vowel');
+    auPaint(A.g, w, h, cl ? cl.points : null, 0, L / w, L, { pos: -1, def: .5, color: tr.color, label: '' });
+    if (vl) { A.g.fillStyle = '#fff'; for (let x = 0; x < w; x += 3) { const v = autoVal(vl.points, x * L / w); A.g.fillRect(x, 3 + (1 - v) * (h - 6), 1.5, 1.5); } }
+    cv.style.height = h + 'px';
+  };
+  const render = () => {
+    fit();
+    grid.innerHTML = AU_WOB.cells.map((c, k) => {
+      const x = k * AU_WOB.cell, cls = x % 16 === 0 ? ' bar' : x % 4 === 0 ? ' beat' : '';
+      return `<div class="au-cell${cls}${c.r === 'tie' ? ' tie' : ''}${c.r === 'off' ? ' off' : ''}" data-k="${k}"><b>${Math.floor(x / 16) + 1}.${Math.floor((x % 16) / 4) + 1}${x % 4 ? '+' : ''}</b>
+        <select data-f="r" data-info="Rate of this cell">${AUTO_WOB_KINDS.map(r => `<option value="${r}"${r === c.r ? ' selected' : ''}>${AU_WOB_RL[r]}</option>`).join('')}</select>
+        <input type="number" data-f="d" min="0" max="100" value="${Math.round(c.d * 100)}" data-info="Depth (%)"${c.r === 'tie' || c.r === 'off' ? ' disabled' : ''}><div class="au-dbar"><i style="width:${Math.round(c.d * 100)}%"></i></div>
+        <input type="text" data-f="v" maxlength="8" value="${esc(c.v)}" placeholder="ua" data-info="Vowels, one per cycle (a e i o u)"${c.r === 'tie' || c.r === 'off' ? ' disabled' : ''}>
+        <select data-f="sh" data-info="Shape"${c.r === 'tie' || c.r === 'off' || c.r === 'hold' ? ' disabled' : ''}>${AUTO_WOB_SHAPES.map(x => `<option${x === c.sh ? ' selected' : ''}>${x}</option>`).join('')}</select></div>`;
+    }).join('');
+    draw();
+  };
+  const write = () => {
+    const cl = P.tracks[t].clips[s]; if (!cl) return;
+    if (!D.wrote) { pushUndo(); D.wrote = true; D.undoN = HIST.undo.length; }
+    autoWobble(cl, auWobOpts()); AU_UI.show = true; save();
+  };
+  const close = keep => {
+    if (!keep && D.wrote) { const cl = P.tracks[t].clips[s]; if (cl) { const a = JSON.parse(snap); if (a) cl.auto = a; else delete cl.auto; } if (HIST.undo.length === D.undoN) HIST.undo.pop(); save(); }
+    if (!keep && TR.playing && D.played) stop();
+    dlg.remove(); renderDetail();
+  };
+  dlg.addEventListener('change', e => {
+    const x = e.target, cellEl = x.closest('.au-cell');
+    if (cellEl) {
+      const c = AU_WOB.cells[+cellEl.dataset.k], fld = x.dataset.f; if (!c) return;
+      if (fld === 'r') { c.r = x.value; if (c.r !== 'tie' && c.r !== 'off' && !(c.d > 0)) { c.d = .7; c.v = c.v || 'ua'; } } else if (fld === 'd') c.d = clamp((+x.value || 0) / 100, 0, 1); else if (fld === 'v') c.v = autoWobCell({ v: x.value }).v; else if (fld === 'sh') c.sh = x.value;
+      AU_WOB.preset = ''; $('.au-pre', dlg).value = ''; render(); return;
+    }
+    if (x.classList.contains('au-pre')) { if (x.value) auWobFromPreset(x.value); $('.au-n', dlg).value = AU_WOB.n; $('.au-cellsz', dlg).value = AU_WOB.cell; render(); }
+    else if (x.classList.contains('au-cellsz')) { AU_WOB.cell = +x.value; render(); }
+    else if (x.classList.contains('au-n')) { AU_WOB.n = +x.value; render(); }
+    else if (x.classList.contains('au-dep')) { AU_WOB.depth = clamp(Math.round(+x.value) || 0, 0, 150); draw(); }
+    else if (x.classList.contains('au-lo')) { AU_WOB.lo = clamp(Math.round(+x.value) || 0, 0, 100); draw(); }
+    else if (x.classList.contains('au-hi')) { AU_WOB.hi = clamp(Math.round(+x.value) || 0, 0, 100); draw(); }
+    else if (x.dataset.lane) AU_WOB.lanes[x.dataset.lane] = x.checked;
+  });
+  dlg.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) { if (e.target === dlg) close(false); return; }
+    if (b.classList.contains('au-x') || b.classList.contains('au-cancel')) close(false);
+    else if (b.classList.contains('au-ok')) { write(); close(true); flash(`Wobble written to ${clip.name}: ${Object.keys(AU_WOB.lanes).filter(k => AU_WOB.lanes[k]).join(', ')}. CTRL+Z to undo`); }
+    else if (b.classList.contains('au-prevw')) { write(); if (typeof launchClip === 'function' && ctx) { const r = RT[t]; if (!(r && r.playing && r.playing.slot === s)) launchClip(t, s); D.played = true; } }
+    else if (b.classList.contains('au-follow')) {
+      const dr = auWobDrums(s); if (!dr) { flash('No drum clip to follow: make a drum clip in this scene first'); return; }
+      const f = autoWobbleCells(clip, dr.clip, { cell: AU_WOB.cell, kick: dr.kick, snare: dr.snare });
+      AU_WOB.cells = f.cells; AU_WOB.n = f.cells.length; AU_WOB.preset = ''; $('.au-pre', dlg).value = '';
+      const sel = $('.au-n', dlg); if (![...sel.options].some(o => +o.value === AU_WOB.n)) sel.insertAdjacentHTML('beforeend', `<option>${AU_WOB.n}</option>`); sel.value = AU_WOB.n;
+      render(); flash(`Pattern from ${dr.name} (${clip.bars} bar${clip.bars > 1 ? 's' : ''}): open after the kicks, stutter before the snares, closed on them`);
+    }
+  });
+  render();
+  return dlg;
+}
 // ===================== 3s. SYNTH ENGINE: SPECTRA (additive, engine 'spectra') =====================
 // An original additive instrument. Every voice is a bank of up to 256 sine partials (an AudioWorklet: one node per note), so
 // nothing is ever above Nyquist: a partial that would pass 0.47 x the sample rate fades out before it gets there, and a
@@ -6146,11 +6442,11 @@ function spxWorkletMain(coreFactory) {
     'mac1', 'mac2', 'mac3', 'mac4', 's', 'e2s', 'e3s', 'p1freq', 'p1res', 'p1amt', 'p1mix', 'p1key', 'p2freq', 'p2res', 'p2amt', 'p2mix', 'p2key'];
   const LOGS = { p1freq: 1, p2freq: 1 };
   // automation lanes (c16_auto.js): parameter z<k> at 0..1 replaces the knob of ZK's field (p1freq 20 Hz..20 kHz), under 0 the knob plays
-  const ZK = { mac1: 0, mac2: 1, mac3: 2, mac4: 3, p1freq: 4, p1res: 5, morph: 6, p1amt: 7 }, ZN = ['z0', 'z1', 'z2', 'z3', 'z4', 'z5', 'z6', 'z7'];
+  const ZK = { mac1: 0, mac2: 1, mac3: 2, mac4: 3, p1freq: 4, p1res: 5, morph: 6, p1amt: 7, p1mix: 8 }, ZN = ['z0', 'z1', 'z2', 'z3', 'z4', 'z5', 'z6', 'z7', 'z8'];
   const rng = seed => { let s = seed >>> 0 || 1; return () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 4294967296; }; };
   class SpxVoice extends AudioWorkletProcessor {
     static get parameterDescriptors() { return [{ name: 'gate', defaultValue: 1, minValue: 0, maxValue: 1, automationRate: 'a-rate' }, { name: 'pitch', defaultValue: 0, minValue: -96, maxValue: 96, automationRate: 'k-rate' }]
-      .concat(ZN.map(name => ({ name, defaultValue: -1, minValue: -1, maxValue: 2, automationRate: 'k-rate' }))); } // z0..z7: automation lanes (c16_auto.js), -1 = the knob
+      .concat(ZN.map(name => ({ name, defaultValue: -1, minValue: -1, maxValue: 2, automationRate: 'k-rate' }))); } // z0..z8: automation lanes (c16_auto.js), -1 = the knob
     constructor(o) {
       super();
       const q = o.processorOptions || {}; this.q = q; const P = q.P || {};
@@ -6297,7 +6593,7 @@ function spxWorkletMain(coreFactory) {
       const live = inputs[0] && inputs[0].length > 0;
       if (this.done) return live;
       const gp = params.gate, pitchP = params.pitch[0];
-      const zv = this.zv || (this.zv = new Float64Array(8)); for (let k = 0; k < 8; k++) { const a = params[ZN[k]]; zv[k] = a ? a[0] : -1; }
+      const zv = this.zv || (this.zv = new Float64Array(9)); for (let k = 0; k < 9; k++) { const a = params[ZN[k]]; zv[k] = a ? a[0] : -1; }
       let n = 0;
       if (g0 + 128 <= this.s0) return true;
       const bl = this.bufL, br = this.bufR; bl.fill(0); br.fill(0);
@@ -6439,7 +6735,7 @@ Engine.prototype.spxBuild = function (i, midi, vel, t, srcs) {
   const hold = (prm, at) => { if (prm.cancelAndHoldAtTime) prm.cancelAndHoldAtTime(at); else prm.cancelScheduledValues(at); };
   let pOff = 0; if (pitch) pitch.setValueAtTime(0, t); // the legato offset in semitones; the event anchors the first glide ramp
   const voice = {
-    t, ended: false, relAt: Infinity, n: Math.max(1, Math.round(spxNoteCost(s) * (uni != null && uni < 1 ? uni : 1))), spx: true, track: i, heavy: uni != null, node, // node: its z0..z7 parameters take the automation lanes (c16_auto.js)
+    t, ended: false, relAt: Infinity, n: Math.max(1, Math.round(spxNoteCost(s) * (uni != null && uni < 1 ? uni : 1))), spx: true, track: i, heavy: uni != null, node, // node: its z0..z8 parameters take the automation lanes (c16_auto.js)
     bend: (t0, pts) => { if (pitch) { pitch.setValueAtTime(pOff, t0); pts.forEach(([at, semi]) => { if (Number.isFinite(at) && Number.isFinite(semi)) pitch.linearRampToValueAtTime(pOff + semi, Math.max(at, t0 + .001)); }); } }, // a note's pitch bend, in semitones (d_transport.js)
     release: (tOff, rOv, force) => {
       if (voice.ended || (!force && tOff >= voice.relAt)) return;
