@@ -711,6 +711,44 @@ Silk Lead, Silk Pad, Smooth Growl, Smooth Hoover, Soft Pluck, Talking Bass, Velv
 - Place a loop with +, TO SLOT, TO ARRANGE, AS MIDI or MIDI + SOUND, or drag it to a slot or an arrangement lane. On an audio
   track it plays in STRETCH, in the set's key; on its MIDI lane it becomes an editable clip moved to the set's key
 
+## House, orchestra, generated automation and song templates
+
+**Afro house and Swedish house**
+- Styles in GENERATE SONG: afrohouse (inspired by Keinemusik, &ME, Adam Port, Rampa), afrodeep, swedish (inspired by
+  Swedish House Mafia) and swedeprog (inspired by Avicii and Arno Cost). Original progressions with extended, suspended
+  and slash chords, pedal points and held common tones; the Swedish hook is the top voice of the stacked chords; long
+  DJ-friendly arrangements (176 to 200 bars) with builds, rolls and a beat of silence before the drop
+- Kits: Afro House Kit, Afro Perc Kit (16 pads), Swedish House Kit, House FX. New synthesized voices: house kicks tuned to
+  the set's key, house claps, congas, bongos, djembe, afro tom, shakers, tambourine, cowbell, agogo, clave, wood
+- Per-pad groove in the drum device (GROOVE): swing, nudge in 1/48 steps, chance, drop of weak hits, humanize, accent
+  templates, choke group, key tracking. Live and export play the same hits
+- 26 house presets: log drum, marimba, kalimba, flutes, chant pads, Afro EP, house piano, Swedish supersaw chords and lead,
+  plucks, house basses, deep pads
+
+**GENERATE writes automation**
+- GENERATE SONG has an Automation menu (full, subtle, off) and a Growl menu (Auto, Long, Chew & burst). Bass-led styles get
+  talking-wobble lanes that follow the drums and grow from the build to the second drop; pads and keys get filter and
+  reverb swells in the builds. The same seed gives the same automation
+- Chew & burst (the brostep default): slow, fat chewing wobbles with short fast bursts, stops and dives inside each 4-bar
+  phrase. Long: slow sweeps and held notes in 2- and 4-bar call-and-response figures (the DnB default)
+
+**Orchestra (engine Orchestra, sampled)**
+- 35 presets: Concert Grand (Salamander Grand Piano), Grand Light (Steinway B), strings (sustain, spiccato, tremolo),
+  horns, low brass, braam, woodwinds, choir, harp, celesta, glockenspiel, tubular bells, timpani, epic tutti. EXPRESSION is
+  an automation target
+- Kits of 16 pads: Orchestral Epic, Taiko Ensemble, World Frame, Cinematic FX
+- The samples load the first time an instrument plays and stay in the browser; a badge shows the loading; the WAV export
+  waits for every sample it needs. Credits: Salamander Grand Piano by Alexander Holm (CC BY 3.0), VSCO 2 Community
+  Edition and VCSL by Versilian Studios (CC0), FluidR3_GM by Frank Wen (MIT) - see the Credits dialog and orch/v1/LICENSES.txt
+- Cinematic styles: Cinematic trailer, Epic DnB (an orchestral intro into 174 drops where the orchestra plays over
+  chained growls), Cinematic dubstep, Orchestral liquid
+
+**Loops and song templates**
+- The loop library has 261 loops, now also for the house and cinematic styles
+- TEMPLATES (Loops panel, or "Song templates..." in the browser): 18 starter sets, one per style, with tempo, key, sounds,
+  mix, scenes INTRO / BUILD / DROP / BREAKDOWN / DROP 2 / OUTRO filled with library loops, a 64-bar arrangement and a filter
+  build. One undo step. GENERATE then fills empty slots in the same style
+
 ## Shortcuts
 
 | Key | Action |

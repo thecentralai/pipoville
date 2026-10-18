@@ -1,0 +1,1 @@
+{"id":"p_taikofl","name":"Taiko (FluidR3)","family":"perc","kind":"short","source":"FluidR3_GM (Frank Wen, MIT)","layers":1,"layerGainDb":null,"levelDb":-16.3,"trimDb":-1.7,"release":0.2,"sr":44100,"elements":{"fluid_taikos423":[{"layer":1,"of":1,"f":["fluid_taikos423_1_1.mp3"],"nz":[91],"srcGainDb":1.0}]},"bytes":7004,"files":1,"seconds":1.0}
