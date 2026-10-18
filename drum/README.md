@@ -817,6 +817,20 @@ harmony families, sounds and growl feel, loops in the loop library and a song te
   Bass, Liquid Sine Fifth Wob, Fifth Stab Bass, Deep Fifth Stab, Jump Fifth Saw, Jump Quarter Fifth, Jump Quarter Dark,
   Oldskool Square Bass, Dancefloor 80s Bass, Dancefloor Amp Bass, Dancefloor Dark Bass
 
+## Synth leads and bass lines
+
+- 24 lead presets with character, level-matched and mono-safe (Tidal Pro; macro 1 = DOUBLE raises the octave or fifth
+  layer): Liquid Fifth Saw, Silk Glide Lead, Glass FM Lead, Liquid Sine Whistle, Rave Hoover Pro, Dark Hoover Lead, Fifth
+  Anthem Lead, Saw Fifth Stack, Rave Stab Lead, Jump Porta Lead, Neuro Screech, Sync Siren Lead, Neuro Talk Lead, Riddim
+  Formant Lead, Laser Dive Lead, Future Bend Lead, Wonky Vox Lead, Emotive Vox Lead, Lofi Choir Lead, Swede Anthem Lead,
+  Swede Octave Pluck, Afro Pluck Flute, Afro Bell Pluck, Glass Hook Pluck. Each style lists its new lead first
+- GENERATE SONG has a LEADS choice (Pro writer or Classic). The Pro writer builds every LEAD clip from one 2-bar motif in
+  call and response, leaves room where the bass answers, never starts a note on the snare, glides, bends or dives on long
+  notes, opens the filter over each phrase, throws a delay at the phrase end and raises DOUBLE in the later drops
+- Bass lines from the owner's tutorials: liquid lines doubled at the fifth with the sub on the root, fifth stabs from long
+  notes, the jump-up quarter-note bassline (pauses, early steps, 8th-note pickups, a varied second phrase) and 80s 8th-note
+  basslines with off-beats shifted up. With SOUNDS: Whole bank the palette's bass sound is kept
+
 ## Shortcuts
 
 | Key | Action |

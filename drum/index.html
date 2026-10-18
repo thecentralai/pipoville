@@ -9913,7 +9913,8 @@ if (typeof window !== 'undefined') audInitDrop();
 // the TEMPLATES tab of the panel) and libRegisterRecipes (recipes from another section, validated and idempotent).
 // Hooks, all wrapped here (no edit of another section): audClipFix (keeps audio.lib), smpReady (renders a missing built-in
 // loop before a render or the boot), renderBrowser (the Loops section and the menu button).
-const LIB_VER = 2; // 2: the songs of GENERATE SONG changed under the recipes (automation, mix): every loop renders again once
+const LIB_VER = 3; // 3: new LEAD presets per style (c24)
+// 2: the songs of GENERATE SONG changed under the recipes (automation, mix): every loop renders again once
 const LIB_ID_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+){1,5}$/; // style-role(-x): never a name of Object.prototype
 const LIB_T = { DRUMS: 0, BREAK: 1, BASS: 2, SUB: 3, STAB: 4, PAD: 5, LEAD: 6, FX: 7 };
 const LIB_ROLES = { drums: 'Drums', top: 'Tops', perc: 'Percussion', bass: 'Bass', growl: 'Growl', chords: 'Chords', pad: 'Pad', arp: 'Arp', lead: 'Lead', brass: 'Brass',
@@ -21429,7 +21430,7 @@ if (typeof LFO_RATES !== 'undefined' && Array.isArray(LFO_RATES) && typeof BEATS
 // Generic names; every value is set by ear from the technique notes, nothing is copied from a project file.
 const PF_RAVE_PRESETS = {
   // the 2009+ dancefloor lead: two saws a 5th apart, LP with a retriggered 1/8-dotted LFO on the cutoff AND the drive, chorus, reverb
-  'Rave Fifth Lead': { engine: 'wtpro', level: .34, mono: true, glide: .02, o1table: 'Basic Shapes', o1pos: .66, o1voices: 3, o1det: .18, o1vol: .8,
+  'Rave Fifth Lead': { engine: 'wtpro', level: .11, mono: true, glide: .02, o1table: 'Basic Shapes', o1pos: .66, o1voices: 3, o1det: .18, o1vol: .8,
     o2table: 'Basic Shapes', o2pos: .66, o2semi: 7, o2voices: 3, o2det: .18, o2vol: .72, f1type: 'lp24', f1cut: 900, f1res: .28, f1drive: .2,
     e1a: .004, e1d: .4, e1s: .75, e1r: .25, l1rate: '1/8D', l1mode: 'retrig', l1pts: [[0, 1, 0], [.5, .25, 0], [1, 1, 0]],
     mods: [{ s: 'lfo1', d: 'f1cut', a: .45, b: false }, { s: 'lfo1', d: 'f1drive', a: .35, b: false }],
@@ -24330,6 +24331,625 @@ const M23_BASS2 = {
     xeOn: true, xeLc: 25, xeMF: 3000, xeMG: -2.5, xeMQ: 1.3, xeHc: 9000 },
 };
 Object.keys(M23_BASS2).forEach(n => { M23_BASS[n] = M23_BASS2[n]; M23_BASS_ROLE[n] = 'bass'; if (typeof SYNTH_PRESETS === 'object' && SYNTH_PRESETS && !m23Has(SYNTH_PRESETS, n)) SYNTH_PRESETS[n] = M23_BASS2[n]; });
+// ===================== 3y. LEADS: THE LEAD PRESETS AND THE LEAD WRITER (wave 5) =====================
+// The owner: "the synth leads are the worst part: basic, amateur, no character". This section gives the LEAD lane
+// (review3/wave5/leads/RESEARCH.md, technique only, generic names, every value set by ear):
+// - 24 lead presets (Tidal Pro): a body + an air layer an octave or a 5th away (+7, +12, +19), a pitch envelope at the note start
+//   (the hoover's dive, the laser's fall, the future-bass scoop), a delayed vibrato (5-5.5 Hz, 10-20 cents, fading in after
+//   about a quarter second), glide on the mono leads, a filter envelope, and a rack: saturation > EQ (high-pass 250-400 Hz,
+//   a cut near 3 kHz, a shelf down at the top, a high cut) > OTT on the aggressive ones > chorus > 1/8-dotted delay > reverb
+//   with a pre-delay. Macro 1 of every one is DOUBLE: it raises the octave / 5th layer (the drops automate it). Level: -18 LUFS
+//   on the audition phrase (the wave-3 PRO method), mono loss within 1.5 LU.
+// - a style map (data only): each style's LEAD list starts with the new lead that fits it (the old first choice stays second).
+// - the lead writer: the drops' LEAD clips become a motif in phrases (a 2-bar cell, repeated, the answer changing its end, the
+//   cadence on a long note that bends or glides), with rests where the bass answers (call and response) and none on the snare,
+//   in the register 72-88; the second drop develops it (a 3rd higher at the climax, the DOUBLE layer up). Automation on the
+//   LEAD lane: the filter opens over every phrase and over the builds, a delay throw on the last beat of a phrase.
+// - bass options from the owner's tutorials (coordinator): the liquid bassline doubled at the 5th (one sub on the root), fifth
+//   STABS from long notes, the jump-up quarter-note bassline (jumpup, mcjump175), the 80s 8th-note bassline (festival, the
+//   dancefloor / pop variants of liquid174 and raveclash174) with a vocal-chop lead over it.
+// Old sets load unchanged (nothing here touches normalizeProject or a saved field). A plain genSong(id, o) (the loop library,
+// templates, tests, old code) is exactly as before; GENERATE SONG (genSongGo: the dialog, the browser's Styles), and
+// genSong(id, { leads: true }) take the new path (o.leads false: never). The same seed makes the same song (the writer's RNG is
+// a hash of the song the old chain made). Hooks: genSong, genSongGo (wrappers), palCatalog (the palette's tags), data in
+// SYNTH_PRESETS, GEN_STYLES, PF / PF_VAR_PRESETS (section 3w) and PAL_CPU_MS (3x).
+
+const ldHas = (o, k) => o != null && typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
+const ldCl = (v, a, b) => Math.min(b, Math.max(a, v));
+const ldMod = (a, n) => ((a % n) + n) % n;
+const LD = { req: false, on: true, last: null };
+try { if (localStorage.getItem('dnb808.leads') === 'classic') LD.on = false; } catch (e) { /* private mode */ }
+
+// ---------- the presets ----------
+const LD_F = k => k / 15;                                                   // frame k of a 16-frame table
+const LD_SINE = [[0, .5, -.35], [.25, 1, .35], [.5, .5, -.35], [.75, 0, .35], [1, .5, 0]];
+const LD_TRI = [[0, 0, 0], [.5, 1, 0], [1, 0, 0]];
+const LD_TALK = [[0, .1, 0], [.25, .9, -.3], [.5, .3, 0], [.75, 1, .3], [1, .1, 0]];
+const LD_DOT = [[0, 1, 0], [.5, .25, 0], [1, 1, 0]];                         // the 1/8-dotted filter pulse (owner's rave lead)
+const LD_STEPS = [[0, 1, 0], [.25, 1, 0], [.25, .3, 0], [.5, .3, 0], [.5, .8, 0], [.625, .8, 0], [.625, 0, 0], [1, 0, 0]];
+const ldM = (s, d, a, b) => ({ s, d, a, b: !!b });
+// the delayed vibrato: LFO n at hz, waiting dly s, fading in over fade s; depth in cents
+const ldVib = (n, cents = 14, hz = 5.3, dly = .28, fade = .35) => ({ ['l' + n + 'pts']: LD_SINE, ['l' + n + 'rate']: 'hz', ['l' + n + 'hz']: hz, ['l' + n + 'dly']: dly, ['l' + n + 'fade']: fade, _vib: ['lfo' + n, cents / 2400] });
+// rack pieces: saturation, EQ (high-pass, the 3 kHz cut, the top shelf and cut), OTT, chorus, 1/8-dotted delay, reverb with pre-delay
+const LD_RACK = {
+  sat: (drive = 4, mix = .3, mode = 'tube') => ({ xdOn: true, xdMode: mode, xdDrive: drive, xdMix: mix }),
+  eq: (lc = 300, f2 = 3000, g2 = -3, hs = -2.5, hc = 11000, q2 = 1) => ({ xeOn: true, xeLc: lc, xeM2F: f2, xeM2G: g2, xeM2Q: q2, xeHsF: 8000, xeHsG: hs, xeHc: hc }),
+  ott: (d = .25) => ({ xoOn: true, xoDepth: d }),
+  comp: () => ({ xkOn: true, xkThr: -20, xkRatio: 3, xkAtt: .006, xkRel: .12, xkGain: 2 }),
+  ch: (mix = .25, depth = .45, rate = .45, delay = 11) => ({ xcOn: true, xcRate: rate, xcDepth: depth, xcDelay: delay, xcMix: mix }),
+  dl: (mix = .16, time = '1/8D', fb = .3, tone = 5500) => ({ xyOn: true, xyTime: time, xyFb: fb, xyTone: tone, xyMix: mix, xyLc: 400 }),
+  rv: (mix = .2, size = 2.4, pre = .03, damp = .55) => ({ xrOn: true, xrMode: 'smooth', xrSize: size, xrDamp: damp, xrPre: pre, xrMix: mix, xrLc: 350, xrHc: 8000 }),
+};
+// one preset: the fields, then the vibrato slot and the DOUBLE macro (mac1 -> the air layer) folded into the matrix
+function ldP(o, ...parts) {
+  const p = Object.assign({ engine: 'wtpro', lowMono: 220 }, o, ...parts), mods = (p.mods || []).slice();
+  if (p._vib) { mods.push(ldM(p._vib[0], 'pitch', p._vib[1], true)); delete p._vib; }
+  if (p._dbl !== false) mods.push(ldM('mac1', p._dbl || 'o2vol', p._dblA || .45));
+  delete p._dbl; delete p._dblA;
+  p.mods = mods.slice(0, 16);
+  return p;
+}
+const LDR = LD_RACK;
+const LD_PRESETS = {
+  // ----- liquid -----
+  // two soft saws a 12th apart (+19: the 5th an octave up), LP with keytrack, the filter envelope, glide, delayed vibrato
+  'Liquid Fifth Saw': ldP({ level: .6, mono: true, glide: .07, o1table: 'Silk Saw', o1pos: LD_F(12), o1voices: 3, o1det: .18, o1width: .6, o1rand: 0,
+    o2table: 'Silk Saw', o2pos: LD_F(9), o2oct: 1, o2semi: 7, o2vol: .3, o2voices: 2, o2det: .15, o2width: .8, o2rand: 0,
+    f1type: 'lp24', f1cut: 2600, f1res: .12, f1key: .35, e1a: .012, e1d: .5, e1s: .85, e1r: .3, e2a: .003, e2d: .4, e2s: .35,
+    mods: [ldM('env2', 'f1cut', .12), ldM('vel', 'f1cut', .05)] }, ldVib(1, 14), LDR.eq(300, 3000, -3), LDR.ch(.22), LDR.dl(.18), LDR.rv(.22, 2.8, .035)),
+  // a soft square that glides, the saw an octave up for the air
+  'Silk Glide Lead': ldP({ level: .6, mono: true, glide: .12, o1table: 'Silk Square', o1pos: LD_F(9), o1voices: 2, o1det: .1, o1width: .4, o1rand: 0,
+    o2table: 'Silk Saw', o2pos: LD_F(12), o2oct: 1, o2vol: .2, o2rand: 0, f1type: 'lp12', f1cut: 3000, f1res: .14, f1key: .3,
+    e1a: .02, e1d: .5, e1s: .9, e1r: .3, e2a: .004, e2d: .5, e2s: .5, mods: [ldM('env2', 'f1cut', .08)] }, ldVib(1, 13, 5.1, .32, .4),
+    LDR.eq(280, 3000, -2.5, -2), LDR.dl(.18, '1/4', .32, 5000), LDR.rv(.22, 2.6, .03)),
+  // FM glass: a sine modulated by a sine an octave up (2:1), the index falls after the attack; a short glide
+  'Glass FM Lead': ldP({ level: .6, mono: true, glide: .04, o1table: 'Basic Shapes', o1pos: 0, o1warp: 'fm', o1wsrc: 'other', o1wamt: .2, o1rand: 0,
+    o2table: 'Basic Shapes', o2pos: 0, o2oct: 1, o2vol: .08, o2rand: 0, f1type: 'lp12', f1cut: 6500, f1key: .3,
+    e1a: .005, e1d: .9, e1s: .45, e1r: .45, e2a: .004, e2d: .35, e2s: .15, mods: [ldM('env2', 'o1wamt', .35), ldM('vel', 'o1wamt', .12)], _dblA: .3 },
+    ldVib(1, 12), LDR.eq(320, 3200, -3, -2, 12000, 1.3), LDR.ch(.22, .4, .4, 12), LDR.dl(.22), LDR.rv(.22, 2.6, .025, .5)),
+  // a pure whistle: a sine with a breath of triangle, the octave layer, vibrato, a long delay and a pre-delayed reverb
+  'Liquid Sine Whistle': ldP({ level: .6, mono: true, glide: .08, o1table: 'Basic Shapes', o1pos: .08, o1vol: .85, o1rand: 0,
+    o2table: 'Basic Shapes', o2pos: 0, o2oct: 1, o2vol: .1, o2rand: 0, f1type: 'lp12', f1cut: 5000, f1key: .2,
+    e1a: .02, e1d: .4, e1s: .9, e1r: .35 }, ldVib(1, 16, 5.4, .25, .4), LDR.eq(400, 3000, -1.5, -2, 12000), LDR.ch(.2), LDR.dl(.24), LDR.rv(.26, 3, .035)),
+  // ----- rave / jump-up -----
+  // the hoover: pulse-saws (PWM on a saw) detuned wide, an octave-down PWM layer, the pitch dives into the note from 2 st above,
+  // a slow LFO on the PWM, heavy chorus and a phaser; high-passed at 220 Hz as a lead
+  'Rave Hoover Pro': ldP({ level: .6, mono: true, glide: .06, o1table: 'Basic Shapes', o1pos: LD_F(10), o1voices: 4, o1det: .55, o1width: 1, o1warp: 'pwm', o1wamt: .35, o1rand: 1,
+    o2table: 'PWM Sweep', o2pos: LD_F(6), o2oct: -1, o2vol: .5, o2voices: 2, o2det: .45, o2width: .8,
+    f1type: 'lp24', f1cut: 3400, f1res: .18, f1key: .2, e1a: .006, e1d: .6, e1s: .85, e1r: .3, e2a: .001, e2d: .14, e2s: 0,
+    l2pts: LD_TRI, l2rate: '1/2', mods: [ldM('env2', 'pitch', .08), ldM('lfo2', 'o1wamt', .25, true)], _dbl: 'o1det', _dblA: .2 },
+    ldVib(1, 10, 5.6, .3, .4), LDR.sat(5, .3), LDR.eq(220, 2800, -4, -3, 12000), { xcOn: true, xcRate: .5, xcDepth: .65, xcDelay: 13, xcMix: .45 },
+    { xpOn: true, xpRate: '1/1', xpDepth: .45, xpMix: .18 }, LDR.dl(.12), LDR.rv(.18, 2.4, .02, .6)),
+  // the dark one: the same family, lower and closed, a deeper dive, more drive and phaser
+  'Dark Hoover Lead': ldP({ level: .6, mono: true, glide: .07, o1table: 'Basic Shapes', o1pos: LD_F(10), o1voices: 4, o1det: .7, o1width: 1, o1warp: 'pwm', o1wamt: .45,
+    o2table: 'PWM Sweep', o2pos: LD_F(8), o2oct: -1, o2vol: .6, o2voices: 2, o2det: .5, o2width: .8,
+    f1type: 'lp24', f1cut: 1900, f1res: .25, f1key: .25, f1drive: .2, e1a: .006, e1d: .6, e1s: .85, e1r: .35, e2a: .001, e2d: .18, e2s: 0,
+    l2pts: LD_TRI, l2rate: '1/1', mods: [ldM('env2', 'pitch', .12), ldM('lfo2', 'o1wamt', .3, true), ldM('lfo2', 'f1cut', .04, true)], _dbl: 'f1cut', _dblA: .12 },
+    ldVib(1, 10, 5.4, .3, .4), LDR.sat(7, .35), LDR.eq(200, 2600, -4, -3.5, 10000), { xcOn: true, xcRate: .4, xcDepth: .7, xcDelay: 14, xcMix: .45 },
+    { xpOn: true, xpRate: '1/2', xpDepth: .6, xpMix: .25 }, LDR.rv(.2, 2.8, .02, .65)),
+  // the 2009+ dancefloor fifth lead: two saws root + 7, LP pulsing on the 1/8 dotted (cutoff AND drive), wide chorus, reverb
+  'Fifth Anthem Lead': ldP({ level: .6, mono: true, glide: .025, o1table: 'Basic Shapes', o1pos: LD_F(10), o1voices: 5, o1uni: 'super', o1det: .35, o1width: .7,
+    o2table: 'Basic Shapes', o2pos: LD_F(10), o2semi: 7, o2vol: .7, o2voices: 3, o2det: .3, o2width: .65,
+    f1type: 'lp24', f1cut: 1200, f1res: .25, f1drive: .2, f1key: .25, e1a: .004, e1d: .4, e1s: .8, e1r: .25,
+    l1pts: LD_DOT, l1rate: '1/8D', l1mode: 'retrig', mods: [ldM('lfo1', 'f1cut', .4), ldM('lfo1', 'f1drive', .3)], _dbl: 'f1cut', _dblA: .15 },
+    ldVib(2, 10, 5.2, .3, .35), LDR.sat(4, .35), LDR.eq(250, 3000, -4), LDR.ch(.35, .6, .5, 14), LDR.dl(.12), LDR.rv(.2, 2.6, .025)),
+  // Camo & Krooked-style saw fifths: one saw stacked in fifths (0, 7, 12, -12, 19), a soft saw under it, tight and bright
+  'Saw Fifth Stack': ldP({ level: .6, mono: true, glide: .04, o1table: 'Basic Shapes', o1pos: LD_F(10), o1voices: 5, o1uni: 'fifth', o1det: .15, o1width: .8,
+    o2table: 'Silk Saw', o2pos: LD_F(12), o2vol: .3, o2voices: 2, o2det: .2, o2width: .6, f1type: 'lp24', f1cut: 3000, f1res: .15, f1key: .3,
+    e1a: .005, e1d: .45, e1s: .8, e1r: .25, e2a: .002, e2d: .3, e2s: .3, mods: [ldM('env2', 'f1cut', .1)] }, ldVib(1, 12),
+    LDR.sat(3, .25), LDR.eq(300, 3000, -5), LDR.ch(.3), LDR.dl(.14), LDR.rv(.18, 2.4, .025)),
+  // a rave stab that plays the hook: +19 layer, a short filter envelope (the stab), poly so chords ring
+  'Rave Stab Lead': ldP({ level: .6, mono: false, o1table: 'Basic Shapes', o1pos: LD_F(10), o1voices: 3, o1det: .3, o1width: .8,
+    o2table: 'Basic Shapes', o2pos: LD_F(10), o2oct: 1, o2semi: 7, o2vol: .5, o2voices: 3, o2det: .3, o2width: .9,
+    f1type: 'lp24', f1cut: 700, f1res: .3, f1key: .3, e1a: .004, e1d: .3, e1s: .25, e1r: .15, e2a: .003, e2d: .18, e2s: .05,
+    mods: [ldM('env2', 'f1cut', .45), ldM('vel', 'f1cut', .08)], _dbl: 'f1cut', _dblA: .12 },
+    LDR.sat(6, .4), LDR.eq(250, 3200, -3), LDR.ott(.2), LDR.ch(.3), LDR.rv(.14, 2, .02)),
+  // the jump-up porta lead: a square and a saw an octave up, long glide, drive
+  'Jump Porta Lead': ldP({ level: .6, mono: true, glide: .1, o1table: 'Basic Shapes', o1pos: 1, o1voices: 2, o1det: .12, o1width: .5,
+    o2table: 'Basic Shapes', o2pos: LD_F(10), o2oct: 1, o2vol: .3, f1type: 'lp24', f1cut: 2600, f1res: .2, f1key: .3,
+    e1a: .004, e1d: .4, e1s: .85, e1r: .2, e2a: .002, e2d: .2, e2s: .3, mods: [ldM('env2', 'f1cut', .1)] }, ldVib(1, 12),
+    LDR.sat(6, .35), LDR.eq(300, 3000, -3), LDR.ott(.2), LDR.dl(.12), LDR.rv(.14, 2, .02)),
+  // ----- neuro / dubstep -----
+  // a hard-synced saw whose sync sweeps with an envelope and a stepped LFO, a detuned growl table under it, comb filter, drive, OTT
+  'Neuro Screech': ldP({ level: .6, mono: true, glide: .03, o1table: 'Basic Shapes', o1pos: LD_F(10), o1warp: 'sync', o1wamt: .35, o1voices: 2, o1det: .15, o1width: .5,
+    o2table: 'Neuro Tear', o2pos: .5, o2fine: 7, o2vol: .35, f1type: 'comb+', f1cut: 1800, f1res: .2, f1mix: .4, f2type: 'lp24', f2cut: 2500, f2res: .1,
+    e1a: .003, e1d: .3, e1s: .85, e1r: .12, e2a: .001, e2d: .25, e2s: .3, l2pts: LD_STEPS, l2rate: '1/8',
+    mods: [ldM('env2', 'o1wamt', .3), ldM('lfo2', 'o1wamt', .2)], _dbl: 'o1wamt', _dblA: .2 },
+    ldVib(1, 10, 6, .3, .3), LDR.sat(6, .28, 'hard'), LDR.eq(300, 3200, -8, -5, 8500, .7), LDR.ott(.2), LDR.ch(.15), LDR.rv(.1, 1.6, .02)),
+  // the siren: a synced saw with a slow wide vibrato and a long glide, a soft saw an octave down
+  'Sync Siren Lead': ldP({ level: .6, mono: true, glide: .18, o1table: 'Basic Shapes', o1pos: LD_F(10), o1warp: 'sync', o1wamt: .25, o1voices: 2, o1det: .12,
+    o2table: 'Silk Saw', o2pos: LD_F(10), o2oct: -1, o2vol: .35, f1type: 'lp24', f1cut: 3000, f1res: .15, f1key: .2,
+    e1a: .006, e1d: .5, e1s: .85, e1r: .25, e2a: .002, e2d: .5, e2s: .2, mods: [ldM('env2', 'o1wamt', .35)], _dbl: 'o1wamt', _dblA: .2 },
+    ldVib(1, 28, 6, .35, .5), LDR.sat(4, .25), LDR.eq(300, 3000, -5, -3, 10000, .9), LDR.ch(.12, .35), LDR.dl(.15, '1/4'), LDR.rv(.16, 2.2, .025)),
+  // a talking lead: the vowel table moves on the quarter notes, drive, OTT
+  'Neuro Talk Lead': ldP({ level: .6, mono: true, glide: .03, o1table: 'Talk U-O-A-E-I', o1pos: .1, o1voices: 2, o1det: .12, o1width: .5,
+    o2table: 'Silk Saw', o2pos: LD_F(10), o2oct: 1, o2vol: .15, f1type: 'lp24', f1cut: 2000, f1res: .1,
+    e1a: .004, e1d: .3, e1s: .9, e1r: .12, e2a: .002, e2d: .2, e2s: .2, l2pts: LD_TALK, l2rate: '1/4',
+    mods: [ldM('lfo2', 'o1pos', .35), ldM('env2', 'f1cut', .1)] }, ldVib(1, 10), LDR.sat(4, .3), LDR.eq(300, 3000, -8, -5, 8500, .7), LDR.ott(.15), LDR.rv(.1, 1.6, .02)),
+  // riddim: a square and a saw an octave down through a formant filter whose vowel talks in 8th triplets, fold drive, dimension width
+  'Riddim Formant Lead': ldP({ level: .6, mono: true, glide: .02, o1table: 'Basic Shapes', o1pos: 1, o1voices: 2, o1det: .1, o1width: .5,
+    o2table: 'Basic Shapes', o2pos: LD_F(10), o2oct: -1, o2vol: .5, f1type: 'formant', f1vowel: .3, f1res: .3, f1mix: .85, f2type: 'lp24', f2cut: 3800,
+    e1a: .003, e1d: .3, e1s: .9, e1r: .1, e2a: .002, e2d: .2, e2s: 0, l2pts: LD_TALK, l2rate: '1/8T',
+    mods: [ldM('lfo2', 'f1vowel', .5), ldM('env2', 'f2cut', .15)], _dbl: 'f1vowel', _dblA: .2 },
+    LDR.sat(8, .35, 'fold'), LDR.eq(250, 2800, -4), LDR.ott(.3), { xcOn: true, xcRate: .3, xcDepth: .6, xcDelay: 16, xcMix: .35 }, LDR.rv(.1, 1.6, .02)),
+  // the laser: a detuned saw stack whose pitch falls an octave in 70 ms at every note, a square an octave up
+  'Laser Dive Lead': ldP({ level: .6, mono: true, glide: .03, o1table: 'Basic Shapes', o1pos: LD_F(10), o1voices: 5, o1uni: 'super', o1det: .3, o1width: .9,
+    o2table: 'Silk Square', o2pos: LD_F(10), o2oct: 1, o2vol: .25, f1type: 'lp24', f1cut: 4200, f1res: .15, f1key: .2,
+    e1a: .002, e1d: .4, e1s: .8, e1r: .2, e2a: .001, e2d: .07, e2s: 0, mods: [ldM('env2', 'pitch', .5)] }, ldVib(1, 12),
+    LDR.sat(5, .3), LDR.eq(300, 3000, -3.5), LDR.dl(.18), LDR.rv(.15, 2.2, .02)),
+  // ----- future bass / emotive -----
+  // a supersaw and a square, a 1-st scoop into every note, a fast shimmer on the cutoff while it holds, delayed vibrato
+  'Future Bend Lead': ldP({ level: .6, mono: true, glide: .05, o1table: 'Basic Shapes', o1pos: LD_F(10), o1voices: 7, o1uni: 'super', o1det: .32, o1width: .7,
+    o2table: 'Basic Shapes', o2pos: 1, o2vol: .3, o2voices: 3, o2det: .2, o2width: .5, f1type: 'lp24', f1cut: 5000, f1res: .1, f1key: .2,
+    e1a: .005, e1d: .5, e1s: .8, e1r: .3, e2a: .001, e2d: .09, e2s: 0, l1pts: LD_SINE, l1rate: 'hz', l1hz: 7, l1mode: 'free',
+    mods: [ldM('env2', 'pitch', -.045), ldM('lfo1', 'f1cut', .03, true)] }, ldVib(2, 14, 5.4, .3, .4),
+    LDR.sat(3, .25), LDR.eq(300, 3200, -3), LDR.ch(.2), LDR.dl(.12, '1/4'), LDR.rv(.24, 3, .03)),
+  // a wonky vocal lead: a formant whose vowel drifts, a slow pitch drift, a scoop, a long glide
+  'Wonky Vox Lead': ldP({ level: .6, mono: true, glide: .09, o1table: 'Silk Saw', o1pos: LD_F(13), o1voices: 3, o1det: .2, o1width: .6,
+    f1type: 'formant', f1vowel: .55, f1res: .2, f1mix: .7, f2type: 'lp24', f2cut: 3500, e1a: .01, e1d: .5, e1s: .85, e1r: .3, e2a: .001, e2d: .1, e2s: 0,
+    l2pts: LD_SINE, l2rate: '1/2', l3pts: LD_SINE, l3rate: 'hz', l3hz: .35, l3mode: 'free',
+    mods: [ldM('lfo2', 'f1vowel', .25, true), ldM('lfo3', 'o1fine', .1, true), ldM('env2', 'pitch', -.03)], _dbl: 'f1vowel', _dblA: .2 },
+    ldVib(1, 16, 5.2, .3, .4), LDR.eq(300, 2800, -3.5), LDR.ch(.25), LDR.dl(.16), LDR.rv(.25, 2.8, .03)),
+  // Fred-again-style: a sung saw through a formant, a little lo-fi crush, a long pre-delayed room
+  'Emotive Vox Lead': ldP({ level: .6, mono: true, glide: .08, o1table: 'Silk Saw', o1pos: LD_F(12), o1voices: 3, o1det: .16, o1width: .6,
+    o2table: 'Formant Saw', o2pos: .35, o2vol: .3, f1type: 'formant', f1vowel: .4, f1res: .15, f1mix: .55, f2type: 'lp24', f2cut: 3200,
+    e1a: .03, e1d: .6, e1s: .9, e1r: .4, l2pts: LD_SINE, l2rate: '2/1', mods: [ldM('lfo2', 'f1vowel', .15, true)] },
+    ldVib(1, 17, 5.2, .3, .4), LDR.sat(2, .15), LDR.eq(300, 2800, -6, -3.5, 8500, .8), LDR.ch(.3), LDR.rv(.3, 3.5, .04)),
+  // an "ooh" choir lead: five detuned saws through an 'u/o' formant, slow attack, big room
+  'Lofi Choir Lead': ldP({ level: .6, mono: true, glide: .1, o1table: 'Silk Saw', o1pos: LD_F(10), o1voices: 5, o1det: .22, o1width: .9,
+    f1type: 'formant', f1vowel: .15, f1res: .2, f1mix: .8, f2type: 'lp24', f2cut: 2400, e1a: .08, e1d: .6, e1s: .9, e1r: .6, _dbl: 'f1vowel', _dblA: .25 },
+    ldVib(1, 14), LDR.sat(3, .2), LDR.eq(280, 2800, -3), LDR.ch(.4), LDR.rv(.35, 4, .04)),
+  // ----- progressive / Swedish house -----
+  // the anthem supersaw: 9 saws + an octave layer of 5 + a breath of noise, a pronounced attack, high-passed, glued, damped reverb
+  'Swede Anthem Lead': ldP({ level: .6, mono: true, glide: .02, lowMono: 250, o1table: 'Basic Shapes', o1pos: LD_F(10), o1voices: 9, o1uni: 'super', o1det: .42, o1width: .65, o1blend: .8,
+    o2table: 'Basic Shapes', o2pos: LD_F(10), o2oct: 1, o2vol: .32, o2voices: 5, o2uni: 'super', o2det: .35, o2width: .7, noise: .05, noiseTone: .4,
+    f1type: 'lp24', f1cut: 6500, f1res: .08, f1key: .2, e1a: .003, e1d: .45, e1s: .65, e1r: .3, e2a: .002, e2d: .3, e2s: .3, mods: [ldM('env2', 'f1cut', .08)] },
+    LDR.sat(3, .25), LDR.eq(350, 3000, -3, -2, 13000), LDR.comp(), LDR.dl(.1), LDR.rv(.22, 3, .025, .6)),
+  // the progressive pluck: a supersaw and its octave, a fast filter envelope, the 1/8-dotted delay doing the rhythm
+  'Swede Octave Pluck': ldP({ level: .6, mono: false, o1table: 'Basic Shapes', o1pos: LD_F(10), o1voices: 5, o1uni: 'super', o1det: .3, o1width: .8,
+    o2table: 'Basic Shapes', o2pos: LD_F(10), o2oct: 1, o2vol: .4, o2voices: 3, o2det: .25, f1type: 'lp24', f1cut: 900, f1res: .25, f1key: .4,
+    e1a: .005, e1d: .38, e1s: 0, e1r: .3, e2a: .001, e2d: .22, e2s: 0, mods: [ldM('env2', 'f1cut', .45), ldM('vel', 'f1cut', .06)] },
+    LDR.eq(300, 3000, -3), LDR.ch(.2), LDR.dl(.22, '1/8D', .32), LDR.rv(.2, 2.6, .02)),
+  // ----- afro house -----
+  // a breathy flute: sine-triangle + breath noise, a small scoop, delayed vibrato, a 3/16 echo
+  'Afro Pluck Flute': ldP({ level: .6, mono: true, glide: .05, o1table: 'Basic Shapes', o1pos: .2, o1vol: .8, o1rand: 0, o2table: 'Basic Shapes', o2pos: 0, o2oct: 1, o2vol: .08, o2rand: 0,
+    noise: .12, noiseTone: .2, f1type: 'lp12', f1cut: 3200, f1key: .5, e1a: .025, e1d: .35, e1s: .75, e1r: .2, e2a: .001, e2d: .06, e2s: 0,
+    l2pts: LD_SINE, l2rate: 'hz', l2hz: 3, l2mode: 'free', mods: [ldM('env2', 'pitch', -.03), ldM('lfo2', 'noise', .05, true)], _dbl: 'noise', _dblA: .08 },
+    ldVib(1, 15, 5, .25, .3), LDR.eq(350, 3000, -2, -2, 11000), LDR.dl(.2, '3/16', .3, 5000), LDR.rv(.26, 2.6, .03)),
+  // a bell pluck: a sine FM'd at 3:1 (+19), the index falls fast (a marimba/bell attack), the 3/16 echo
+  'Afro Bell Pluck': ldP({ level: .6, mono: false, o1table: 'Basic Shapes', o1pos: 0, o1warp: 'fm', o1wsrc: 'other', o1wamt: .3, o1rand: 0,
+    o2table: 'Basic Shapes', o2pos: 0, o2oct: 1, o2semi: 7, o2vol: .06, o2rand: 0, f1type: 'lp12', f1cut: 7000, f1key: .2,
+    e1a: .002, e1d: .55, e1s: 0, e1r: .35, e2a: .001, e2d: .25, e2s: 0, mods: [ldM('env2', 'o1wamt', .35), ldM('vel', 'o1wamt', .1)], _dblA: .25 },
+    LDR.eq(300, 3200, -2.5), LDR.dl(.22, '3/16', .32), LDR.rv(.2, 2.4, .02)),
+  // a glass pluck for the rollers: the harmonics climb with the envelope, the octave sine under it
+  'Glass Hook Pluck': ldP({ level: .6, mono: false, o1table: 'Harmonic Climb', o1pos: .2, o1rand: 0, o2table: 'Basic Shapes', o2pos: 0, o2oct: 1, o2vol: .12, o2rand: 0,
+    f1type: 'lp24', f1cut: 3000, f1key: .3, e1a: .003, e1d: .5, e1s: .05, e1r: .35, e2a: .004, e2d: .22, e2s: 0, mods: [ldM('env2', 'o1pos', .3), ldM('vel', 'o1pos', .1)] },
+    LDR.eq(300, 2800, -4), LDR.dl(.24), LDR.rv(.22, 2.4, .02)),
+};
+// the palette's tags of each (role, character); the coordinator's catalogue picks a LEAD by these (section 3x reads them, below)
+const LD_TAGS = {
+  'Liquid Fifth Saw': ['lead', 'soul', 'clean', 'bright', 'wide', 'modern'], 'Silk Glide Lead': ['lead', 'soul', 'clean', 'modern'],
+  'Glass FM Lead': ['lead', 'bright', 'clean', 'modern'], 'Liquid Sine Whistle': ['lead', 'soul', 'clean'],
+  'Rave Hoover Pro': ['lead', 'rave', 'wide', 'modern', 'gritty'], 'Dark Hoover Lead': ['lead', 'rave', 'dark', 'wide', 'modern'],
+  'Fifth Anthem Lead': ['lead', 'rave', 'bright', 'wide', 'modern'], 'Saw Fifth Stack': ['lead', 'bright', 'wide', 'modern'],
+  'Rave Stab Lead': ['lead', 'rave', 'gritty', 'modern'], 'Jump Porta Lead': ['lead', 'rave', 'gritty', 'modern'],
+  'Neuro Screech': ['lead', 'dark', 'gritty', 'modern'], 'Sync Siren Lead': ['lead', 'dark', 'gritty', 'modern'], 'Neuro Talk Lead': ['lead', 'gritty', 'vocal', 'modern'],
+  'Riddim Formant Lead': ['lead', 'gritty', 'vocal', 'dark', 'modern'], 'Laser Dive Lead': ['lead', 'gritty', 'bright', 'modern'],
+  'Future Bend Lead': ['lead', 'bright', 'wide', 'modern'], 'Wonky Vox Lead': ['lead', 'vocal', 'bright', 'modern'],
+  'Emotive Vox Lead': ['lead', 'vocal', 'soul', 'modern'], 'Lofi Choir Lead': ['lead', 'vocal', 'soul', 'vintage'],
+  'Swede Anthem Lead': ['lead', 'house', 'bright', 'wide', 'modern'], 'Swede Octave Pluck': ['pluck', 'house', 'bright', 'wide'],
+  'Afro Pluck Flute': ['lead', 'house', 'ethnic', 'soul', 'clean'], 'Afro Bell Pluck': ['pluck', 'house', 'ethnic', 'clean'],
+  'Glass Hook Pluck': ['pluck', 'bright', 'clean', 'modern'],
+};
+// level fitted to -18 LUFS on the audition phrase (review3/wave5/leads/test/lead.mjs fit): [level, xOut dB]
+const LD_FIT = {"Liquid Fifth Saw": [0.808, 0], "Silk Glide Lead": [0.899, 0], "Glass FM Lead": [1, 1.56], "Liquid Sine Whistle": [0.964, 0], "Rave Hoover Pro": [1, 1.25], "Dark Hoover Lead": [0.221, 0], "Fifth Anthem Lead": [0.139, 0], "Saw Fifth Stack": [0.903, 0], "Rave Stab Lead": [0.728, 0], "Jump Porta Lead": [0.61, 0], "Neuro Screech": [0.981, 0], "Sync Siren Lead": [0.974, 0], "Neuro Talk Lead": [1, 4.84], "Riddim Formant Lead": [0.514, 0], "Laser Dive Lead": [0.851, 0], "Future Bend Lead": [0.915, 0], "Wonky Vox Lead": [0.853, 0], "Emotive Vox Lead": [1, 2.98], "Lofi Choir Lead": [0.724, 0], "Swede Anthem Lead": [0.383, 0], "Swede Octave Pluck": [1, 2.89], "Afro Pluck Flute": [1, 1.29], "Afro Bell Pluck": [1, 4.83], "Glass Hook Pluck": [1, 3.01]};
+Object.entries(LD_PRESETS).forEach(([n, p]) => {
+  if (ldHas(LD_FIT, n)) { p.level = LD_FIT[n][0]; p.xOut = LD_FIT[n][1]; }
+  if (typeof SYNTH_PRESETS === 'object' && !ldHas(SYNTH_PRESETS, n)) SYNTH_PRESETS[n] = p;
+});
+const LD_NAMES = Object.keys(LD_PRESETS);
+// the track settings the house writer reads per lead preset (section 3g2: HOUSE_TRACK): the rack has its own delay and reverb
+try {
+  if (typeof HOUSE_TRACK === 'object' && HOUSE_TRACK) Object.entries({
+    'Swede Anthem Lead': { mix: { sendA: .08, sendB: .05 }, fx: { chorus: 0, sc: .3, scHold: .01, scRel: .13 } },
+    'Swede Octave Pluck': { mix: { sendA: .1, sendB: .06 }, fx: { chorus: 0, sc: .3, scHold: .01, scRel: .13 } },
+    'Afro Bell Pluck': { mix: { sendA: .12, sendB: .1 }, fx: { chorus: 0, sc: .1, scHold: .01, scRel: .08 } },
+    'Afro Pluck Flute': { mix: { sendA: .2, sendB: .12 }, fx: { chorus: 0, sc: .1, scHold: .01, scRel: .08 } },
+  }).forEach(([n, x]) => { if (!ldHas(HOUSE_TRACK, n)) HOUSE_TRACK[n] = x; });
+} catch (e) { /* no house section */ }
+
+// ---------- the palette (section 3x): role and character tags of the new leads, their CPU ----------
+// palCatalog builds its catalogue from the names; a c24 preset takes its LD_TAGS instead (role 'lead' or 'pluck' first). Other
+// sections can register more the same way: LEAD_PALETTE_TAGS[name] = [role, ...tags] (read by this wrapper, guarded).
+const LEAD_PALETTE_TAGS = Object.assign(typeof window === 'object' && window.LEAD_PALETTE_TAGS ? window.LEAD_PALETTE_TAGS : {}, LD_TAGS);
+if (typeof window === 'object') window.LEAD_PALETTE_TAGS = LEAD_PALETTE_TAGS;
+// measured render cost (ms of offline render per second of audio, the palette's cpu.mjs method; review3/wave5/leads/test/cpu.mjs,
+// scaled by the median ratio of five reference presets to the palette's own table, 1.10)
+const LD_CPU = {"Liquid Fifth Saw": 786, "Silk Glide Lead": 550, "Glass FM Lead": 377, "Liquid Sine Whistle": 283, "Rave Hoover Pro": 1052, "Dark Hoover Lead": 1341, "Fifth Anthem Lead": 937, "Saw Fifth Stack": 752, "Rave Stab Lead": 1161, "Jump Porta Lead": 548, "Neuro Screech": 996, "Sync Siren Lead": 762, "Neuro Talk Lead": 805, "Riddim Formant Lead": 653, "Laser Dive Lead": 442, "Future Bend Lead": 684, "Wonky Vox Lead": 527, "Emotive Vox Lead": 753, "Lofi Choir Lead": 681, "Swede Anthem Lead": 972, "Swede Octave Pluck": 1277, "Afro Pluck Flute": 253, "Afro Bell Pluck": 543, "Glass Hook Pluck": 998};
+if (typeof PAL_CPU_MS === 'object' && PAL_CPU_MS) Object.entries(LD_CPU).forEach(([n, v]) => { if (!ldHas(PAL_CPU_MS, n)) PAL_CPU_MS[n] = v; });
+if (typeof palCatalog === 'function') {
+  const ldCat0 = palCatalog;
+  palCatalog = function () { // eslint-disable-line no-func-assign
+    const c = ldCat0();
+    if (c && Array.isArray(c.presets) && !c.__ld) {
+      c.presets.forEach(e => { const t = ldHas(LEAD_PALETTE_TAGS, e.name) ? LEAD_PALETTE_TAGS[e.name] : null; if (!Array.isArray(t) || !t.length) return;
+        e.role = t[0]; e.tags = [...new Set(t.slice(1))]; if (typeof PAL_REG === 'object' && PAL_REG[e.role]) e.reg = PAL_REG[e.role]; });
+      c.__ld = 1;
+    }
+    return c;
+  };
+}
+
+// ---------- the style map (data only: no preset is renamed, the old first choice stays second) ----------
+const LD_MAP = {
+  festival: ['Rave Hoover Pro', 'Fifth Anthem Lead'], darkrave: ['Dark Hoover Lead', 'Rave Hoover Pro'], neurofunk: ['Neuro Screech', 'Neuro Talk Lead'],
+  techroller: ['Glass Hook Pluck', 'Glass FM Lead'], brostep: ['Laser Dive Lead', 'Riddim Formant Lead'], liquid: ['Liquid Fifth Saw', 'Silk Glide Lead'],
+  jungle: ['Glass FM Lead', 'Glass Hook Pluck'], jumpup: ['Rave Stab Lead', 'Jump Porta Lead'], futurebass: ['Future Bend Lead', 'Wonky Vox Lead'],
+  halfdnb: ['Sync Siren Lead', 'Neuro Screech'], swedish: ['Swede Anthem Lead'], swedeprog: ['Swede Octave Pluck'], afrohouse: ['Afro Bell Pluck'],
+  afrodeep: ['Afro Pluck Flute'], riddim145: ['Riddim Formant Lead'], neuro174: ['Neuro Screech'], mcjump175: ['Rave Hoover Pro', 'Jump Porta Lead'],
+  raveclash174: ['Fifth Anthem Lead', 'Rave Hoover Pro'], liquid174: ['Liquid Fifth Saw', 'Liquid Sine Whistle'], jungle172: ['Glass Hook Pluck'],
+  emotive130: ['Emotive Vox Lead'],
+};
+// the profile variants that name their own leads (section 3w): their new first choice
+const LD_VAR_MAP = { raveclash174: { pop: ['Emotive Vox Lead'] }, liquid174: { dancefloor: ['Fifth Anthem Lead'], future: ['Future Bend Lead'] }, neuro174: { 0: ['Silk Glide Lead'], 2: ['Neuro Screech'] } };
+const ldFront = (list, add) => { const l = Array.isArray(list) ? list.filter(n => !add.includes(n)) : []; return add.filter(n => typeof SYNTH_PRESETS === 'object' && ldHas(SYNTH_PRESETS, n)).concat(l); };
+if (typeof GEN_STYLES === 'object' && GEN_STYLES) Object.entries(LD_MAP).forEach(([id, add]) => {
+  const st = GEN_STYLES[id]; if (st && st.presets && typeof st.presets === 'object') st.presets.lead = ldFront(st.presets.lead, add);
+  try { if (typeof PF === 'object' && PF && ldHas(PF, id) && PF[id].presets) PF[id].presets.lead = ldFront(PF[id].presets.lead, add); } catch (e) { /* no profiles */ }
+});
+try {
+  if (typeof PF_VAR_PRESETS === 'object' && PF_VAR_PRESETS) Object.entries(LD_VAR_MAP).forEach(([id, vs]) => {
+    const vp = PF_VAR_PRESETS[id]; if (!vp) return;
+    Object.entries(vs).forEach(([k, add]) => { const x = vp[k]; if (x && typeof x === 'object' && Array.isArray(x.lead)) x.lead = ldFront(x.lead, add); });
+  });
+} catch (e) { /* no profiles */ }
+
+// ---------- the lead writer ----------
+// kind of each style: the motif bank, the rests for the bass, the expression of the long notes
+const LD_KIND = { festival: 'rave', darkrave: 'rave', neurofunk: 'neuro', techroller: 'neuro', brostep: 'dub', liquid: 'liquid', jungle: 'neuro', jumpup: 'rave',
+  futurebass: 'future', halfdnb: 'neuro', riddim145: 'dub', neuro174: 'neuro', mcjump175: 'rave', raveclash174: 'rave', liquid174: 'liquid', jungle172: 'neuro', emotive130: 'future' };
+// 2-bar cells: [start (16ths), length, degree (scale steps from the anchor), role: S structural (a chord tone), p passing, A anticipation]
+const LD_CELLS = {
+  liquid: [
+    [[0, 6, 0, 'S'], [6, 2, 1, 'p'], [8, 3, 2, 'S'], [11, 3, 1, 'p'], [14, 2, 0, 'p'], [16, 8, -1, 'S'], [24, 3, -2, 'S'], [27, 5, 0, 'p']],
+    [[2, 2, -1, 'p'], [6, 2, 0, 'p'], [8, 6, 2, 'S'], [14, 2, 1, 'p'], [16, 6, 0, 'S'], [22, 2, -1, 'p'], [24, 8, 1, 'S']],
+    [[0, 3, 4, 'S'], [3, 3, 3, 'p'], [6, 2, 2, 'p'], [8, 6, 0, 'S'], [14, 2, 1, 'A'], [16, 10, 2, 'S'], [26, 2, 1, 'p'], [30, 2, 0, 'p']],
+    [[0, 8, 2, 'S'], [8, 2, 3, 'p'], [10, 2, 2, 'p'], [14, 2, 0, 'A'], [16, 6, 1, 'S'], [22, 2, 0, 'p'], [24, 8, -1, 'S']]],
+  rave: [
+    [[0, 3, 0, 'S'], [3, 3, 0, 'p'], [6, 2, 1, 'p'], [8, 2, 2, 'S'], [10, 3, 2, 'p'], [14, 2, 4, 'A'], [16, 3, 4, 'S'], [19, 3, 3, 'p'], [22, 2, 2, 'p'], [24, 6, 0, 'S']],
+    [[0, 2, 0, 'S'], [2, 2, 2, 'p'], [6, 2, 4, 'S'], [8, 6, 3, 'S'], [14, 2, 2, 'p'], [16, 3, 0, 'S'], [19, 3, 0, 'p'], [22, 2, -1, 'p'], [24, 4, 0, 'S']],
+    [[0, 6, 4, 'S'], [6, 2, 3, 'p'], [8, 3, 2, 'S'], [11, 3, 0, 'p'], [14, 2, 2, 'A'], [16, 8, 1, 'S'], [24, 6, 0, 'S']],
+    [[0, 3, 2, 'S'], [3, 3, 2, 'p'], [6, 2, 2, 'p'], [8, 3, 4, 'S'], [11, 3, 3, 'p'], [14, 2, 2, 'p'], [16, 3, 0, 'S'], [19, 3, 1, 'p'], [22, 2, 0, 'p'], [24, 6, -1, 'S']]],
+  neuro: [
+    [[0, 2, 0, 'S'], [3, 1, 1, 'p'], [6, 2, 0, 'p'], [8, 4, -1, 'S'], [16, 2, 0, 'S'], [18, 1, 2, 'p'], [22, 2, 1, 'p'], [24, 3, 0, 'S']],
+    [[0, 3, 2, 'S'], [6, 2, 1, 'p'], [8, 2, 0, 'S'], [10, 2, -1, 'p'], [16, 6, 0, 'S'], [24, 2, 1, 'S'], [26, 2, 0, 'p']],
+    [[2, 2, 0, 'p'], [6, 2, 1, 'p'], [8, 6, 2, 'S'], [16, 3, 0, 'S'], [19, 3, -1, 'p'], [24, 4, 0, 'S']]],
+  future: [
+    [[0, 3, 0, 'S'], [3, 3, 1, 'p'], [6, 2, 2, 'S'], [12, 4 / 3, 1, 'p'], [40 / 3, 4 / 3, 2, 'p'], [44 / 3, 4 / 3, 3, 'A'], [16, 6, 4, 'S'], [22, 2, 3, 'p'], [26, 6, 2, 'S']],
+    [[2, 2, -1, 'p'], [4, 4, 0, 'S'], [10, 2, 1, 'p'], [12, 2, 2, 'S'], [14, 2, 1, 'p'], [16, 6, 0, 'S'], [22, 2, 1, 'p'], [26, 6, 2, 'S']],
+    [[0, 6, 2, 'S'], [6, 2, 1, 'p'], [12, 3, 0, 'S'], [15, 1, 1, 'p'], [16, 3, 2, 'S'], [19, 3, 4, 'S'], [26, 6, 3, 'S']]],
+  dub: [
+    [[0, 2, 0, 'S'], [2, 2, 0, 'p'], [6, 1, 1, 'p'], [7, 1, 2, 'p'], [12, 4, 0, 'S'], [16, 2, 4, 'S'], [18, 2, 3, 'p'], [28, 4, 0, 'S']],
+    [[0, 4, 2, 'S'], [4, 2, 1, 'p'], [10, 2, 0, 'S'], [12, 4, -1, 'S'], [16, 2, 0, 'S'], [22, 2, 1, 'p'], [26, 6, 0, 'S']]],
+};
+const LD_HEAVY = { rave: 1, neuro: 1, dub: 1 };
+// the chord timeline of an 8-bar clip (the song's progression, as every lane of a generated song)
+function ldTimeline(P) {
+  const id = genProgId(P), pr = GEN_PROGS[id], chords = genProgChords(P, id, 'triad');
+  return genTimeline(pr, chords, 128);
+}
+// the notes of one 8-bar LEAD clip. o: { kind, form ('A' | 'A2' | 'B' | 'END'), cell, reg, avoid (Set of steps), rng, chop, dive }
+function ldWrite(P, tl, o) {
+  const key = genKey(P), sc = genScaleId(P), melSc = SCALES[genMelScale(sc)] || SCALES.minor, rng = o.rng;
+  const [lo, hi] = o.reg, mel = genScaleNotes(key, sc, lo - 14, hi + 14);
+  const segAt = s => tl.segs.find(g => s >= g.s && s < g.s + g.l) || tl.segs[tl.segs.length - 1];
+  const inSc = pc => melSc.includes(ldMod(pc - key, 12));
+  const tonesOf = ch => { const t = ch.pcs.filter(inSc); return t.length ? t : [ch.root]; };
+  const idxNear = p => { let i = 0; mel.forEach((x, j) => { if (Math.abs(x - p) < Math.abs(mel[i] - p)) i = j; }); return i; };
+  const nearTone = (p, pcs, prev) => { let best = null, bd = 1e9; for (let q = lo - 2; q <= hi + 2; q++) if (pcs.includes(ldMod(q, 12)) && inSc(ldMod(q, 12))) { const d = Math.abs(q - p) + (prev != null ? .3 * Math.max(0, Math.abs(q - prev) - 4) : 0); if (d < bd) { bd = d; best = q; } } return best == null ? p : best; };
+  // the anchor: the 3rd (or the 5th) of the first chord, in the middle of the register
+  const ch0 = segAt(0).ch, third = ldMod(ch0.root + ch0.t3, 12), mid = Math.round((lo + hi) / 2) - 2;
+  const cell = o.cell, heavy = !!LD_HEAVY[o.kind], notes = [];
+  // the anchor inside the register: the cell's lowest and highest degree (and the climax 3 steps up) stay inside lo..hi
+  const dMin = Math.min(...cell.map(x => x[2])), dMax = Math.max(...cell.map(x => x[2])) + 3, loI = mel.findIndex(x => x >= lo + 1), hiI = mel.length - 1 - [...mel].reverse().findIndex(x => x <= hi - 1);
+  let anchor = idxNear(nearTone(mid, inSc(third) ? [third] : tonesOf(ch0)));
+  if (loI - dMin <= hiI - dMax) anchor = ldCl(anchor, loI - dMin, hiI - dMax);
+  // one statement of the cell at step at: shift (scale steps), end: 'open' | 'close' | '', upto: only the first notes, drop: a passing note left out (the 3rd pass)
+  const say = (at, { shift = 0, end = '', upto = 99, vel = 100, drop = -1, long = 0, from = 0, k = 1 } = {}) => {
+    const r = cell.slice(from, upto), out = [];
+    r.forEach(([st, len, dg, role], j) => {
+      if (j + from === drop) return;
+      let s = at + genQt(st * k); if (s >= 128) return;
+      if (k > 1 && role === 'p' && s % 4 === 0) s += 2; // stretched, a passing note stays off the beat
+      out.push({ s, l: Math.max(1 / 3, genQt(len * k)), p: mel[ldCl(anchor + dg + shift, 0, mel.length - 1)], role, at: role === 'A' ? Math.min(127, s + 2 * k) : s });
+    });
+    if (!out.length) return out;
+    // structural notes on chord tones; passing notes a scale step from the note before
+    out.forEach(x => { x.raw = x.p; });
+    out.forEach((x, i) => {
+      if (x.role === 'p') return; const pcs = tonesOf(segAt(x.at).ch), pv = i ? out[i - 1] : null;
+      x.p = nearTone(x.raw, pcs, pv ? pv.p : null);
+      if (pv && x.raw !== pv.raw && x.p === pv.p) { const dir = Math.sign(x.raw - pv.raw); for (let q = pv.p + dir; Math.abs(q - pv.p) <= 7; q += dir) if (pcs.includes(ldMod(q, 12)) && inSc(ldMod(q, 12))) { x.p = q; break; } } // the contour moves: a new chord tone the way the line goes
+    });
+    out.forEach((x, i) => { if (x.role === 'p' && i) { const a = out[i - 1].p, dir = Math.sign(x.raw - out[i - 1].raw); if (Math.abs(x.p - a) > 4 || (dir && Math.sign(x.p - a) !== dir)) x.p = dir ? mel[ldCl(idxNear(a) + dir, 0, mel.length - 1)] : a; } });
+    if (end) { const x = out[out.length - 1], ch = segAt(x.at).ch, pcs = tonesOf(ch), open = pcs.filter(pc => pc !== ch.root); x.p = nearTone(x.p, end === 'close' || !open.length ? [ch.root] : open, out.length > 1 ? out[out.length - 2].p : null); x.role = 'S'; }
+    if (long) { const x = out[out.length - 1]; x.l = Math.max(x.l, Math.min(long, 128 - x.s)); }
+    // the whole statement inside the register (an octave move keeps the contour)
+    const exc = d => out.reduce((a, x) => a + Math.max(0, lo - 2 - (x.p + d), x.p + d - hi - 2), 0), sh = [0, -12, 12].reduce((a, d) => (exc(d) < exc(a) ? d : a), 0); // the octave that leaves the least outside
+    out.forEach((x, i) => { // a note still outside: the octave nearest the note before it, a little outside allowed (no leap of a 7th)
+      x.p += sh; if (x.p >= lo && x.p <= hi) return;
+      const pv = i ? out[i - 1].p : Math.round((lo + hi) / 2), c = [-24, -12, 0, 12, 24].map(d => x.p + d).filter(q => q >= lo - 2 && q <= hi + 2).sort((a, b) => Math.abs(a - pv) - Math.abs(b - pv));
+      if (c.length) x.p = c[0]; while (x.p > hi + 2) x.p -= 12; while (x.p < lo - 2) x.p += 12;
+    });
+    out.forEach((x, i) => {
+      let { s, l } = x;
+      if (o.avoid && o.avoid.has(s) && s % 16 !== 0) { if (l > 1 && !o.avoid.has(s + 1)) { s += 1; l -= 1; } else return; } // the snare's 16th stays free
+      const v = vel + (x.role === 'p' ? -12 : 0) + (s % 16 === 0 ? 6 : 0) + rng.int(5) - 2;
+      notes.push({ s: genQt(s), p: x.p, l: Math.max(1 / 3, genQt(Math.min(l, 128 - s))), v: ldCl(Math.round(v), 30, 127), role: x.role });
+    });
+    return out;
+  };
+  const f = o.form, sh = f === 'A2' ? 2 : 0;
+  // a diatonic sequence: a later statement moves with the chord root (bar 5 against bar 1, bar 7 against bar 3), so the motif keeps
+  // its shape over a progression longer than 4 bars
+  const degOf = pc => { const iv = ldMod(pc - key, 12); let best = 0, bd = 99; melSc.forEach((x, j) => { const d = Math.abs(x - iv); if (d < bd) { bd = d; best = j; } }); return best; };
+  const seq = (a, b) => { const n = melSc.length, d0 = ldMod(degOf(segAt(b).ch.root) - degOf(segAt(a).ch.root), n), d = d0 > n / 2 ? d0 - n : d0; return Math.abs(d) <= 2 ? d : 0; }; // a 4th or more: the chord tones carry it
+  const q3 = seq(0, 64), q4 = seq(32, 96);
+  if (f === 'FRAG') { for (let b = 0; b < 8; b += 4) say(b * 16, { upto: 3, end: 'open', vel: 86 }); } // intro / outro: the head of the motif every 4 bars
+  else if (f === 'AUG') { say(0, { k: 2, vel: 90, end: 'open' }); say(64, { k: 2, vel: 88, end: 'close', long: 24 }); } // breakdown: twice as slow, exposed
+  else if (f === 'BUILD') { // the head every 2 bars, then every bar, then 8ths climbing through the chord; the throw note held into the gap
+    const head = Math.min(3, cell.length);
+    for (let b = 0; b < 4; b += 2) say(b * 16, { upto: head, vel: 82 + 4 * b });
+    for (let b = 4; b < 6; b++) say(b * 16, { upto: head, vel: 94, k: .5 });
+    for (let b = 6; b < 7; b++) for (let q = 0; q < 16; q += 2) { const s = b * 16 + q; if (o.avoid && o.avoid.has(s)) continue; const p = nearTone(mel[ldCl(anchor + (q >> 1), 0, mel.length - 1)], tonesOf(segAt(s).ch)); notes.push({ s, p: genFold(p, lo, hi), l: 2, v: 96 + q, role: 'S' }); }
+    const lp = notes.length ? notes[notes.length - 1].p : mel[anchor]; notes.push({ s: o.avoid && o.avoid.has(116) ? 112 : 116, p: lp, l: 8, v: 106, role: 'S' });
+    for (let k = notes.length - 1; k >= 0; k--) { if (notes[k].s >= 124) notes.splice(k, 1); else notes[k].l = Math.min(notes[k].l, 124 - notes[k].s); }
+  } else if (heavy) { // call (2 bars), the answer's head (bar 3), the bass alone (bar 4); the call again, the closed answer with a held end (bars 7-8)
+    say(0, { shift: sh, end: 'open', vel: 104 });
+    say(32, { shift: sh, upto: 3, end: '', vel: 94 });
+    say(64, { shift: sh + q3, end: 'open', vel: 106, drop: f === 'B' ? 2 : -1 });
+    say(96, { shift: (f === 'END' ? 0 : sh) + q4, end: 'close', vel: 100, long: f === 'END' ? 28 : 0, upto: f === 'END' ? 99 : cell.length - 1 });
+  } else { // A A' A A'': call, open answer, the call again, the closed answer
+    say(0, { shift: sh, vel: 98 });
+    say(32, { shift: sh, end: 'open', vel: 96 });
+    say(64, { shift: (f === 'A2' ? sh + 1 : sh) + q3, vel: 104, drop: f === 'B' ? cell.findIndex(x => x[3] === 'p') : -1 }); // the call again (drop B: its rhythm changes on the 3rd pass)
+    say(96, { shift: q4, end: 'close', vel: 100, long: f === 'END' ? 30 : 8 });
+  }
+  notes.sort((a, b) => a.s - b.s || a.p - b.p);
+  for (let k = 0; k + 1 < notes.length; k++) if (notes[k].s + notes[k].l > notes[k + 1].s) notes[k].l = Math.max(1 / 3, notes[k + 1].s - notes[k].s); // one line (mono legato only where written)
+  // the long notes move: liquid and emotive glide by step, future bass tails bend down, a hoover phrase ends with a dive
+  notes.forEach((n, k) => {
+    const nx = notes[k + 1], gap = nx ? nx.s - (n.s + n.l) : 99;
+    if ((o.kind === 'liquid' || o.kind === 'future') && nx && n.l >= 4 && gap < .01 && Math.abs(nx.p - n.p) <= 3 && nx.p !== n.p) n.g = Math.min(1.5, n.l / 4);
+    if (o.kind === 'future' && n.l >= 6 && (!nx || gap >= 2)) n.b = -1;
+  });
+  const lastN = notes[notes.length - 1];
+  if (lastN && f === 'END' && o.dive && lastN.l >= 8) lastN.b = o.kind === 'neuro' ? -5 : -12;
+  if (o.chop) return ldChop(notes);
+  return notes.map(({ role, ...n }) => n);
+}
+// vocal-chop treatment (future bass, the 80s-bass pairing): a long note becomes three cuts, a middle one a 1/16-triplet stutter
+function ldChop(notes) {
+  const out = [];
+  notes.forEach(({ role, ...n }) => {
+    if (n.l >= 6) { out.push(Object.assign({}, n, { l: 1, b: undefined, g: undefined }), Object.assign({}, n, { s: n.s + 1.5, l: 1, v: n.v - 12, b: undefined, g: undefined }), Object.assign({}, n, { s: n.s + 3, l: Math.min(n.l - 3, 3), v: n.v - 6, b: -1, g: undefined })); }
+    else if (n.l >= 3) { out.push(Object.assign({}, n, { l: 2 / 3, g: undefined }), Object.assign({}, n, { s: n.s + 2 / 3, l: 2 / 3, v: n.v - 14, g: undefined }), Object.assign({}, n, { s: n.s + 4 / 3, l: n.l - 4 / 3, v: n.v - 6, g: undefined })); }
+    else out.push(n);
+  });
+  return out.map(n => { const m = { s: genQt(n.s), p: n.p, l: Math.max(1 / 3, genQt(n.l)), v: ldCl(Math.round(n.v), 30, 127) }; if (Number.isFinite(n.b) && n.b) m.b = n.b; if (Number.isFinite(n.g) && n.g > 0) m.g = n.g; return m; });
+}
+
+// ---------- the bass options (owner's tutorials, research5/user_tutorials) ----------
+// liquid: 'fifth' (the drop bassline doubled at the 5th: +19 inside the patch, or +7 notes on a poly bass) or 'stabs' (the long
+// notes of drop B broken into short fifth stabs); jump-up: 'quarter' (four quarters on each chord root, made funky); dancefloor:
+// '80s' (steady 8ths on the bar's root, the off-beats up an octave or to the neighbour). The sub stays on its own lane, on the roots.
+const LD_BASS = {
+  liquid: [['fifth', .45], ['stabs', .2], ['none', .35]], liquid174: [['fifth', .5], ['none', .5]], festival: [['80s', .5], ['none', .5]],
+  jumpup: [['quarter', .6], ['none', .4]], mcjump175: [['quarter', .5], ['none', .5]],
+};
+const LD_BASS_VAR = { liquid174: { dancefloor: [['80s', .65], ['none', .35]] }, raveclash174: { pop: [['80s', .6], ['none', .4]] } };
+const LD_BASS_OPTS = ['none', 'fifth', 'stabs', 'quarter', '80s'];
+const LD_DROP_ROWS = [2, 4, 9, 12];
+const ldInKey = (P, p) => (SCALES[genScaleId(P)] || SCALES.minor).includes(ldMod(p - genKey(P), 12));
+const ldPresetOr = (...names) => names.find(n => typeof SYNTH_PRESETS === 'object' && ldHas(SYNTH_PRESETS, n)) || null;
+const ldW = (rng, list) => { const tot = list.reduce((a, x) => a + x[1], 0); let r = rng() * tot; for (const [x, w] of list) { r -= w; if (r <= 0) return x; } return list[list.length - 1][0]; };
+function ldSetClip(P, t, s, notes) {
+  const tr = P.tracks[t], c = tr && tr.clips[s]; if (!c) return;
+  c.notes = dedupe(genGrid(notes.filter(n => [n.s, n.p, n.l, n.v].every(Number.isFinite) && n.s >= 0 && n.s < c.bars * 16).map(n => Object.assign({}, n, { p: ldCl(Math.round(n.p), 0, 127), l: Math.max(1 / 3, Math.min(n.l, c.bars * 16 - n.s)) }))));
+  const g = P.gen && P.gen.marks, m = g && g[t + ':' + s]; if (m) m.sig = genSig(c.notes);
+}
+const ldBassLo = (P, t) => { const ns = LD_DROP_ROWS.flatMap(s => (P.tracks[t].clips[s] ? P.tracks[t].clips[s].notes : [])); const mn = ns.length ? Math.min(...ns.map(n => n.p)) : 40; return ldCl(mn, 36, 43); };
+// the BASS lane's own figure lanes (cut, vowel, talk, volume: drawn for the old notes by section 3o) leave with a new line
+const ldDropBassLanes = tr => { if (Array.isArray(tr.autoArr)) { tr.autoArr = tr.autoArr.filter(l => l && !['cut', 'vowel', 'talk', 'vol', 'pos', 'mac1'].includes(l.target)); if (!tr.autoArr.length) delete tr.autoArr; } };
+// the jump-up quarter-note line: one bar = four quarters (R root, . a pause, U an early step up to the next root, e two 8ths
+// stepping down), phrases of 4 bars A B A C (C: the ending swapped), the second phrase changes a note or two
+function ldQuarter(P, tl, rng, lo) {
+  const key = genKey(P), mel = genScaleNotes(key, genScaleId(P), lo - 12, lo + 24), segAt = s => tl.segs.find(g => s >= g.s && s < g.s + g.l) || tl.segs[0];
+  const rootAt = s => genRootIn(segAt(s).ch.root, lo), stepDn = p => { const l = mel.filter(x => x < p); return l.length ? l[l.length - 1] : p; }, stepUp = p => { const l = mel.filter(x => x > p); return l.length ? l[0] : p; };
+  const BARS = ['RRRR', 'RR.R', 'R.RR', 'RReR', 'RRRU', 'R.eR', 'RRe.', 'RR.U'], pick = () => BARS[rng.int(BARS.length)];
+  const A = pick(), B = pick(), C = pick().replace(/R$/, 'U'), out = [];
+  for (let b = 0; b < 8; b++) {
+    let pat = [A, B, A, C][b % 4];
+    if (b >= 4 && b % 4 === 1) pat = pat.replace(/\./, 'R').replace(/^RR/, 'R.'); // the second phrase varies
+    const o = b * 16, r = rootAt(o), nr = rootAt(o + 16 < 128 ? o + 16 : 0);
+    const qs = [...pat].map((t, q) => [t, o + q * 4]);
+    if (b % 4 === 3 && qs[2][0] === 'R' && qs[3][0] !== '.') { const x = qs[2][0]; qs[2][0] = qs[3][0]; qs[3][0] = x; } // the swapped ending
+    qs.forEach(([t, s]) => {
+      if (t === 'R') out.push({ s, p: r, l: 3, v: s % 16 === 0 ? 112 : 100 });
+      else if (t === 'U') out.push({ s, p: nr !== r ? nr : stepUp(r), l: 3, v: 104, g: .5 });
+      else if (t === 'e') { out.push({ s, p: r, l: 1.5, v: 100 }); out.push({ s: s + 2, p: stepDn(r), l: 1.5, v: 92, g: .4 }); }
+    });
+  }
+  return out;
+}
+// the 80s 8th-note line: 8ths on the bar's root, the off-beats up an octave (O) or to the neighbour scale note (N); bar 4 walks up
+function ld80s(P, tl, rng, lo) {
+  const key = genKey(P), mel = genScaleNotes(key, genScaleId(P), lo - 12, lo + 24), segAt = s => tl.segs.find(g => s >= g.s && s < g.s + g.l) || tl.segs[0];
+  const rootAt = s => genRootIn(segAt(s).ch.root, lo), up = p => { const l = mel.filter(x => x > p); return l.length ? l[0] : p + 2; };
+  const OFF = ['OOOO', 'ONOR', 'RORO', 'OROO', 'NONO'], a = OFF[rng.int(OFF.length)], b2 = OFF[rng.int(OFF.length)], out = [];
+  for (let b = 0; b < 8; b++) {
+    const o = b * 16, r = rootAt(o), nr = rootAt(o + 16 < 128 ? o + 16 : 0), off = b % 2 ? b2 : a;
+    for (let k = 0; k < 8; k++) {
+      const s = o + 2 * k; let p = r;
+      if (k % 2) { const t = off[k >> 1]; p = t === 'O' ? r + 12 : t === 'N' ? up(r) : r; }
+      if (b % 4 === 3 && k >= 4) { const steps = mel.filter(x => x > Math.min(r, nr) - 1 && x <= Math.max(r, nr) + 12); p = nr >= r ? (steps[k - 4] ?? r) : (steps[steps.length - 1 - (k - 4)] ?? r); } // the 4th bar walks to the next root
+      out.push({ s, p, l: 1.5, v: k % 2 ? 90 : 108 });
+    }
+  }
+  return out;
+}
+// the long notes of a bass clip broken into short stabs (3-3-2-ish), the first accented
+function ldStabs(notes) {
+  const out = [];
+  notes.forEach(n => {
+    if (n.l < 6) { out.push(n); return; }
+    [0, 3, 6, 10, 13].filter(d => d < n.l - .5).forEach((d, k) => out.push({ s: n.s + d, p: n.p, l: Math.min(1.5, n.l - d), v: k ? 96 : 110 }));
+  });
+  return out;
+}
+function ldBass(P, id, rng, opt, tl, info) {
+  const t = 2, tr = P.tracks[t]; if (!tr || tr.type !== 'synth' || !tr.synth) return 'none';
+  const palB = !!(P.gen && P.gen.pal && P.gen.pal.s === 'bank'); // the palette chose the bass (and its CPU budget): keep it
+  const rows = LD_DROP_ROWS.filter(s => tr.clips[s] && tr.clips[s].notes.length); if (!rows.length) return 'none';
+  const lo = ldBassLo(P, t);
+  if (opt === 'quarter') {
+    const n = ldPresetOr('Jump Quarter Fifth', 'Jump Wob Mid'); if (n && !palB) tr.synth = makeSynth(n);
+    rows.forEach((s, k) => ldSetClip(P, t, s, ldQuarter(P, tl, genRng((info.h ^ (0x51 + k * 977)) >>> 0), lo)));
+    ldDropBassLanes(tr);
+  } else if (opt === '80s') {
+    const n = ldPresetOr('Dancefloor 80s Bass'); if (n && !palB) tr.synth = makeSynth(n);
+    const a = ld80s(P, tl, genRng((info.h ^ 0x80) >>> 0), lo), b = ld80s(P, tl, genRng((info.h ^ 0x81) >>> 0), lo);
+    rows.forEach(s => ldSetClip(P, t, s, s === 4 || s === 12 ? b : a));
+    ldDropBassLanes(tr);
+  } else if (opt === 'fifth') {
+    const n = ldPresetOr('Liquid Fifth Saw Bass');
+    if (n && !palB) tr.synth = makeSynth(n);
+    else if (!tr.synth.mono) rows.forEach(s => ldSetClip(P, t, s, tr.clips[s].notes.concat(tr.clips[s].notes.filter(x => ldInKey(P, x.p + 7)).map(x => Object.assign({}, x, { p: x.p + 7, v: Math.max(30, x.v - 22) })))));
+    else { // a mono bass: a Tidal Pro saw bass with its second oscillator a 12th up (+19), the old lane's track FX kept
+      const s0 = tr.synth.engine === 'wtpro' ? clone(tr.synth) : palB ? tr.synth : makeSynth(ldPresetOr('PRO Velvet Reese') || tr.synth.preset); // the palette's non-wavetable bass stays as it is
+      if (s0.engine === 'wtpro') { Object.assign(s0, { o2table: s0.o1table, o2pos: s0.o1pos, o2oct: 1, o2semi: 7, o2fine: 0, o2vol: .4, o2voices: 1 }); tr.synth = s0; }
+    }
+  } else if (opt === 'stabs') {
+    const n = ldPresetOr('Fifth Stab Bass'); if (n && !palB) tr.synth = makeSynth(n);
+    [4, 12].filter(s => rows.includes(s)).forEach(s => ldSetClip(P, t, s, ldStabs(tr.clips[s].notes)));
+  }
+  if (opt !== 'none' && typeof pfMac2Route === 'function' && Array.isArray(tr.autoArr) && tr.autoArr.some(l => l && l.target === 'mac2')) { try { pfMac2Route(tr); } catch (e) { /* the route is optional */ } }
+  // one sub, on the roots: the SUB lane's drop notes keep the chord root (the 5th lives in the mid bass)
+  const sub = P.tracks[3];
+  if (opt !== 'none' && sub && sub.type === 'synth') LD_DROP_ROWS.forEach(s => { const c = sub.clips[s]; if (!c) return; const segAt = x => tl.segs.find(g => x >= g.s && x < g.s + g.l) || tl.segs[0];
+    ldSetClip(P, 3, s, c.notes.map(n => { const r = segAt(n.s).ch.root; return ldMod(n.p - r, 12) === 0 ? n : Object.assign({}, n, { p: genRootIn(r, Math.max(24, n.p - 6)) }); })); });
+  return opt;
+}
+
+// ---------- the LEAD lane's automation: the filter over every phrase and the builds, delay throws, DOUBLE in the later drops ----------
+function ldLeadAuto(P, plan, info) {
+  if (typeof autoArrSet !== 'function' || typeof autoImpl !== 'function' || typeof autoDefault !== 'function') return [];
+  const tr = P.tracks[6]; if (!tr || tr.type !== 'synth') return [];
+  const has = id => Array.isArray(tr.autoArr) && tr.autoArr.some(l => l && l.target === id), plays = (b0, n) => (tr.arr || []).some(e => e.start < b0 + n && e.start + e.len > b0);
+  const done = [], secs = Array.isArray(plan) ? plan : [];
+  const drop = s => /drop|switch|groove/.test(s), build = s => /build/.test(s);
+  if (autoImpl(tr, 'cut') && !has('cut')) {
+    const d = autoDefault(tr, 'cut'), pts = [[0, d, 2]];
+    secs.forEach(([sec, a, n]) => {
+      if (build(sec) && plays(a, n)) { pts.push([a * 16, ldCl(d - .3, .05, 1), 0], [(a + n) * 16 - 1, ldCl(d + .04, .05, 1), 2], [(a + n) * 16, d, 2]); return; }
+      if (!drop(sec)) return;
+      for (let b = a; b < a + n; b += 8) if (plays(b, 8)) pts.push([b * 16, ldCl(d - .1, .05, 1), 0], [(b + 8) * 16 - 1, ldCl(d + .03, .05, 1), 2], [(b + 8) * 16, d, 2]);
+    });
+    if (pts.length > 1) { autoArrSet(tr, 'cut', ldPts(pts)); done.push('cut'); }
+  }
+  if (autoImpl(tr, 'sendB') && !has('sendB')) {
+    const d = autoDefault(tr, 'sendB'), hi = ldCl(Math.max(.42, d + .3), 0, 1), pts = [[0, d, 2]];
+    secs.forEach(([sec, a, n]) => { if (!(drop(sec) || /breakdown|bdown/.test(sec))) return; for (let b = a + 8; b <= a + n; b += 8) if (plays(b - 1, 1)) pts.push([b * 16 - 4, hi, 2], [b * 16 + 2, d, 2]); });
+    if (pts.length > 1) { autoArrSet(tr, 'sendB', ldPts(pts)); done.push('sendB'); }
+  }
+  if (info.ld && autoImpl(tr, 'mac1') && !has('mac1')) { // the DOUBLE layer: off in the first drop, up in the later ones
+    const pts = [[0, 0, 2]]; let k = 0;
+    secs.forEach(([sec, a, n]) => { if (!drop(sec)) return; pts.push([a * 16, k ? (k > 1 ? 1 : .7) : 0, 2], [(a + n) * 16, 0, 2]); k++; });
+    if (k > 1) { autoArrSet(tr, 'mac1', ldPts(pts)); done.push('mac1'); }
+  }
+  return done;
+}
+// points sorted, one per step (the later one wins), inside the arrangement
+const ldPts = pts => { const m = new Map(); pts.filter(q => q.every(Number.isFinite) && q[0] >= 0).forEach(q => m.set(Math.round(q[0]), [Math.round(q[0]), ldCl(q[1], 0, 1), q[2] | 0])); return [...m.values()].sort((a, b) => a[0] - b[0]); };
+
+// ---------- one generated song through the writer ----------
+// LEAD rows and their forms (section 3g's rows; 6 = the profiles' VERSE, 0 = a profile's lead intro)
+const LD_ROWS = { 2: 'A', 9: 'A2', 10: 'END', 4: 'B', 12: 'A2', 13: 'END', 3: 'AUG', 11: 'A', 8: 'FRAG', 5: 'FRAG', 1: 'BUILD', 6: 'FRAG', 0: 'A' };
+const LD_ROW_VEL = { 3: .78, 11: .82, 8: .85, 5: .8, 6: .85, 0: .88 };
+const ldHash = str => { let h = 2166136261 >>> 0; for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619) >>> 0; return h; };
+function ldSong(P, id, plan, o) {
+  const kind = LD_KIND[id], st = GEN_STYLES[id]; if (!kind || !st || !P || !Array.isArray(P.tracks) || !P.gen) return null;
+  const T = 6, tr = P.tracks[T]; if (!tr || tr.type !== 'synth' || !tr.synth) return null;
+  if (['orch', 'world'].includes(tr.synth.engine)) return null; // a lane the cinematic / world sections own
+  const B = P.tracks[2], sig = JSON.stringify([P.name, P.key, P.scale, P.bpm, P.gen.prog, P.gen.hook, B && B.clips[2] ? B.clips[2].notes.slice(0, 24) : 0]);
+  const h = ldHash(sig), rng = genRng(h), tl = ldTimeline(P), info = { h, kind, ld: LD_NAMES.includes(tr.synth.preset), bass: 'none', rows: [] };
+  const variant = P.gen.prof && P.gen.prof.v ? String(P.gen.prof.v) : '';
+  // the bass option first (the 80s line pairs with a vocal-chop lead)
+  const bl = (LD_BASS_VAR[id] && LD_BASS_VAR[id][variant]) || LD_BASS[id];
+  let opt = LD_BASS_OPTS.includes(o.bassOpt) ? o.bassOpt : bl ? ldW(genRng((h ^ 0xba55) >>> 0), bl) : 'none';
+  info.bass = ldBass(P, id, rng, opt, tl, info);
+  const cells = LD_CELLS[kind], cell = cells[genRng((h ^ 0xce11) >>> 0).int(cells.length)];
+  const reg = kind === 'future' ? [72, 86] : [72, 88], chop = !!st.chopLead || (info.bass === '80s' && /vox|vocal|choir|chop/i.test(tr.synth.preset || ''));
+  const poly = !tr.synth.mono && !info.ld, dbl = kind === 'rave' ? 7 : 12;
+  Object.entries(LD_ROWS).forEach(([row, form]) => {
+    const s = +row, c = tr.clips[s]; if (!c || !c.notes || !c.notes.length || c.bars !== 8) return;
+    const avoid = genGroove(P, s, T, 128).snare;
+    let notes = ldWrite(P, tl, { kind, form, cell, reg, avoid, rng: genRng((h ^ (s * 0x9e37)) >>> 0), chop: chop && (s === 2 || s === 4 || s === 9 || s === 12), dive: kind === 'rave' || kind === 'dub' || kind === 'neuro' });
+    if (LD_ROW_VEL[s]) notes = notes.map(n => Object.assign({}, n, { v: ldCl(Math.round(n.v * LD_ROW_VEL[s]), 20, 127) }));
+    if (poly && (s === 4 || s === 12 || s === 13)) notes = notes.concat(notes.filter(n => n.l >= 2 && ldInKey(P, n.p + dbl)).map(n => Object.assign({}, n, { p: n.p + dbl > reg[1] + 2 ? n.p + dbl - 12 : n.p + dbl, v: Math.max(24, n.v - 20), b: undefined, g: undefined })));
+    ldSetClip(P, T, s, notes); info.rows.push(s);
+  });
+  info.auto = ldLeadAuto(P, plan, info);
+  LD.last = info;
+  return info;
+}
+
+// ---------- the hooks ----------
+if (typeof genSong === 'function') {
+  const ldGen0 = genSong;
+  genSong = function (id, o = {}) { // eslint-disable-line no-func-assign
+    o = o && typeof o === 'object' ? o : {};
+    const want = o.leads === true || (o.leads !== false && LD.req && LD.on);
+    if (!want || !ldHas(LD_KIND, id)) return ldGen0(id, o);
+    const out = {}, p = ldGen0(id, Object.assign({}, o, { out }));
+    if (o.out && typeof o.out === 'object') Object.assign(o.out, out);
+    if (!p) return p;
+    try { const info = ldSong(p, id, out.plan, o); if (o.out && typeof o.out === 'object') o.out.leads = info; } catch (e) { console.error('[dnb808] leads', e); }
+    return typeof normalizeProject === 'function' ? normalizeProject(p) : p;
+  };
+}
+if (typeof libSong === 'function') { // the loop library's songs keep the plain path (their renders are cached)
+  const ldLib0 = libSong;
+  libSong = function (...a) { // eslint-disable-line no-func-assign
+    const prev = LD.req; LD.req = false;
+    try { return ldLib0.apply(this, a); } finally { LD.req = prev; }
+  };
+}
+if (typeof genSongGo === 'function') {
+  const ldGo0 = genSongGo;
+  genSongGo = function (id, groove) { // eslint-disable-line no-func-assign
+    const prev = LD.req; LD.req = true;
+    try { return ldGo0(id, groove); } finally { LD.req = prev; }
+  };
+}
+// the GENERATE SONG dialog: LEADS Pro writer / Classic (kept in this browser: dnb808.leads)
+if (typeof genSongOpen === 'function') {
+  const ldOpen0 = genSongOpen;
+  genSongOpen = function (...a) { // eslint-disable-line no-func-assign
+    const r = ldOpen0.apply(this, a);
+    try {
+      const ov = typeof $ === 'function' ? $('#gensong-dialog') : null, all = ov ? ov.querySelectorAll('label.gs-groove') : [], anchor = all.length ? all[all.length - 1] : null;
+      if (anchor && !ov.querySelector('#gs-leads')) {
+        const lb = document.createElement('label'); lb.className = 'gs-groove gs-leads';
+        lb.dataset.info = 'LEADS: Pro writer = the lead of the drops is a motif in phrases (call and answer, rests where the bass answers, the long notes bend and glide), the lead filter opens over every phrase and the delay throws at its end, and the bass may take the 5th, quarter-note or 8th-note line of the style. Classic = the generator as before';
+        lb.innerHTML = `Leads <select id="gs-leads"><option value="pro"${LD.on ? ' selected' : ''}>Pro writer</option><option value="classic"${LD.on ? '' : ' selected'}>Classic</option></select>`;
+        lb.querySelector('select').addEventListener('change', e => { LD.on = e.target.value !== 'classic'; try { localStorage.setItem('dnb808.leads', LD.on ? 'pro' : 'classic'); } catch (er) { /* private */ } });
+        anchor.after(lb);
+      }
+    } catch (e) { /* the dialog is optional */ }
+    return r;
+  };
+}
 
 // ===================== 9. MIDI IMPORT =====================
 // Reads a Standard MIDI File (format 0 or 1, PPQ timing) and turns it into a new set:
