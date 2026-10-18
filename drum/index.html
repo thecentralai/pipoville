@@ -23465,6 +23465,872 @@ if (typeof normalizeProject === 'function') {
 }
 palVoxFetch();
 
+// ===================== 3x. CLUB MASTERING AND PRO BASS DESIGN (wave 5) =====================
+// MASTERING. Seven genre presets for the mastering chain (section 3d), named "... PRO" (DnB 174, jump-up / rave 174,
+// dubstep / riddim 140-150, UK bass 140, liquid 174, house 120-128, cinematic). They add three stages to the chain, kept in
+// P.master.pro.x: a gentle TONAL EQ (sub-sonic cut, low shelf, mud bell, air shelf), a DYNAMIC 2-5 kHz band (a bell that cuts
+// only while the harsh band is over its threshold) and a GLUE compressor whose detector is high-passed (the kick and the sub do
+// not make it pump). Chain order: input and M/S tone (mono lows), tonal EQ, dynamic band, multiband, glue, PUSH, 4x soft
+// clipper, true-peak limiter (-1 dBTP). AUTO MASTER renders the drop and a breakdown offline, sets the multiband, dynamic band
+// and glue thresholds from what it measures, then PUSH and the clipper so the drop reaches the preset's loudness with the
+// limiter and the clipper inside their budgets (no pumping, no audible clipping), checks the true peak, PLR, crest and the
+// breakdown, and applies it all as one undo step. GENERATE SONG picks the style's PRO preset. The meters add SHORT MAX and PSR.
+// BASS. Two options inside the Tidal Pro / Spectra rack slots (no new slot, so every fxOrder stays as it is): the distortion
+// can SPLIT (the lows under the split pass clean and in phase, only the highs are driven: a multiband distortion of the
+// resampling chains), and the chorus can split too and has a HAAS mode (a mid/side echo widening: the mono sum is the dry
+// sound, so it is mono-safe). Ten PRO bass presets use them (pre-distortion chorus, split drive, OTT, formant / comb moves,
+// a phase-locked sub).
+// Hooks (wrappers and data, nothing else edited): MChain (a subclass: without p.x it is the old chain, sample for sample),
+// masterURL / masterLoad (the worklet module with the new chain), masterProFix (keeps a valid x), masterUsePreset,
+// masteringDevices, masterFrame, genSongGo; MASTER_PRESETS / MASTER_IDS (+7); WTP_MAKE.dist / chorus, wtpFxRows,
+// SYNTH_FIELDS (wtpro, spectra: the new fields have no default, so an old set's JSON stays as it was), SYNTH_PRESETS (+10).
+
+const m23Has = (o, k) => o != null && typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
+const m23Cl = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// ---------- DSP (plain classes: they run in the worklet and on the page, like section 3d) ----------
+// TONAL EQ: fixed slots (sub-sonic high-pass 24 dB/oct = two sections, low shelf, bell, high shelf), RBJ coefficients
+class MEqX {
+  static co(type, f, g, q, sr) {
+    const A = Math.pow(10, g / 40), w = 2 * Math.PI * f / sr, cs = Math.cos(w), sn = Math.sin(w);
+    let b0, b1, b2, a0, a1, a2;
+    if (type === 'pk') { const al = sn / (2 * q); b0 = 1 + al * A; b1 = -2 * cs; b2 = 1 - al * A; a0 = 1 + al / A; a1 = -2 * cs; a2 = 1 - al / A; }
+    else {
+      const al = sn / 2 * Math.SQRT2, r = 2 * Math.sqrt(A) * al;
+      if (type === 'ls') { b0 = A * ((A + 1) - (A - 1) * cs + r); b1 = 2 * A * ((A - 1) - (A + 1) * cs); b2 = A * ((A + 1) - (A - 1) * cs - r); a0 = (A + 1) + (A - 1) * cs + r; a1 = -2 * ((A - 1) + (A + 1) * cs); a2 = (A + 1) + (A - 1) * cs - r; }
+      else { b0 = A * ((A + 1) + (A - 1) * cs + r); b1 = -2 * A * ((A - 1) + (A + 1) * cs); b2 = A * ((A + 1) + (A - 1) * cs - r); a0 = (A + 1) - (A - 1) * cs + r; a1 = 2 * ((A - 1) - (A + 1) * cs); a2 = (A + 1) - (A - 1) * cs - r; }
+    }
+    return new Float64Array([b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0]);
+  }
+  constructor(sr) { this.sr = sr; this.z = new Float64Array(20); this.c = [null, null, null, null, null]; this.k = ['', '', '', '', '']; }
+  set(x) {
+    const sr = this.sr, top = sr * .45, on = !!x.eq;
+    const want = [
+      on && x.hp >= 10 ? ['highpass', Math.min(x.hp, 200)] : null, on && x.hp >= 10 ? ['highpass', Math.min(x.hp, 200)] : null,
+      on && Math.abs(x.lsG) > .01 ? ['ls', Math.min(x.lsF, top), x.lsG, .7071] : null,
+      on && Math.abs(x.mG) > .01 ? ['pk', Math.min(x.mF, top), x.mG, x.mQ] : null,
+      on && Math.abs(x.hsG) > .01 ? ['hs', Math.min(x.hsF, top), x.hsG, .7071] : null];
+    for (let s = 0; s < 5; s++) {
+      const w = want[s], k = w ? w.join(',') : '';
+      if (k === this.k[s]) continue;
+      if (!this.c[s]) for (let ch = 0; ch < 2; ch++) { this.z[ch * 10 + 2 * s] = 0; this.z[ch * 10 + 2 * s + 1] = 0; } // a slot that comes in starts clean
+      this.c[s] = !w ? null : w[0] === 'highpass' ? MDsp.bq('highpass', w[1], Math.SQRT1_2, sr) : MEqX.co(w[0], w[1], w[2], w[3], sr);
+      this.k[s] = k;
+    }
+  }
+  reset() { this.z.fill(0); }
+  process(L, R, n) {
+    for (let s = 0; s < 5; s++) { const c = this.c[s]; if (!c) continue; MDsp.run(c, this.z, 2 * s, L, n); MDsp.run(c, this.z, 10 + 2 * s, R, n); }
+  }
+}
+// DYNAMIC 2-5 kHz: x - k * BP(x) is a bell of depth (1 - k) at the centre (the band-pass has 0 dB and 0 degrees there), so a
+// moving k is a dynamic bell cut with no phase trick. k follows the band's RMS over the threshold (ratio, soft knee, RANGE max)
+class MDynX {
+  constructor(sr) { this.sr = sr; this.z = new Float64Array(4); this.ms = 0; this.env = 0; this.gr = 0; this.on = false; this.c = [0, 0, 0, 0]; }
+  set(x) {
+    const sr = this.sr, on = !!x.dyn;
+    if (on && !this.on) this.reset();
+    this.on = on;
+    const f = Math.min(x.dF, sr * .4), w = 2 * Math.PI * f / sr, al = Math.sin(w) / (2 * Math.max(.3, x.dQ)), a0 = 1 + al;
+    this.c = [al / a0, -al / a0, -2 * Math.cos(w) / a0, (1 - al) / a0]; // b0, b2, a1, a2 (b1 = 0)
+    const tc = s => Math.exp(-1 / (Math.max(.0001, s) * sr));
+    this.thr = x.dThr; this.sl = 1 - 1 / Math.max(1, x.dRat); this.rng = Math.max(0, x.dRng); this.W = 6;
+    this.aA = tc(x.dAtt / 1000); this.aR = tc(x.dRel / 1000); this.kr = 1 - tc(.004);
+    this.msLo = Math.pow(10, (this.thr - this.W / 2) / 10);
+  }
+  reset() { this.z.fill(0); this.ms = 0; this.env = 0; }
+  process(L, R, n) {
+    const c = this.c, b0 = c[0], b2 = c[1], a1 = c[2], a2 = c[3], z = this.z, thr = this.thr, sl = this.sl, rng = this.rng, W = this.W, aA = this.aA, aR = this.aR, kr = this.kr, msLo = this.msLo;
+    let l1 = z[0], l2 = z[1], r1 = z[2], r2 = z[3], ms = this.ms, env = this.env, top = this.gr;
+    for (let i = 0; i < n; i++) {
+      const xl = L[i], xr = R[i];
+      const yl = b0 * xl + l1; l1 = -a1 * yl + l2; l2 = b2 * xl - a2 * yl;
+      const yr = b0 * xr + r1; r1 = -a1 * yr + r2; r2 = b2 * xr - a2 * yr;
+      const e = yl * yl > yr * yr ? yl * yl : yr * yr;
+      ms += (e - ms) * kr;
+      let gr = 0;
+      if (ms > msLo) { const d = 4.342944819032518 * Math.log(ms) - thr; gr = 2 * d > W ? d * sl : sl * (d + W / 2) * (d + W / 2) / (2 * W); if (gr > rng) gr = rng; }
+      env = gr > env ? gr + (env - gr) * aA : gr + (env - gr) * aR;
+      if (env > 1e-4) { const k = 1 - Math.exp(-env * .11512925464970229); L[i] = xl - k * yl; R[i] = xr - k * yr; }
+      if (env > top) top = env;
+    }
+    const fz = v => (v < 1e-25 && v > -1e-25 ? 0 : v);
+    z[0] = fz(l1); z[1] = fz(l2); z[2] = fz(r1); z[3] = fz(r2); this.ms = ms < 1e-30 ? 0 : ms; this.env = env < 1e-9 ? 0 : env; this.gr = top;
+  }
+}
+// GLUE: a gentle stereo-linked bus compressor (soft knee 6 dB), its detector high-passed (SC HPF: the kick and the sub do not
+// pump the mix), MIX for parallel glue. acc / cnt: the average gain reduction (AUTO MASTER reads it)
+class MGlueX {
+  constructor(sr) { this.sr = sr; this.z = new Float64Array(4); this.ms = 0; this.env = 0; this.gr = 0; this.on = false; this.acc = 0; this.cnt = 0; this.c = MDsp.bq('highpass', 100, Math.SQRT1_2, sr); this.hp = 100; }
+  set(x) {
+    const sr = this.sr, on = !!x.glue;
+    if (on && !this.on) this.reset();
+    this.on = on;
+    const hp = m23ClampHz(x.gHp, sr); if (hp !== this.hp) { this.hp = hp; this.c = MDsp.bq('highpass', hp, Math.SQRT1_2, sr); }
+    const tc = s => Math.exp(-1 / (Math.max(.0001, s) * sr));
+    this.thr = x.gThr; this.sl = 1 - 1 / Math.max(1, x.gRat); this.W = 6; this.mix = Math.max(0, Math.min(1, x.gMix));
+    this.aA = tc(x.gAtt / 1000); this.aR = tc(x.gRel / 1000); this.kr = 1 - tc(.01);
+    this.msLo = Math.pow(10, (this.thr - this.W / 2) / 10);
+  }
+  reset() { this.z.fill(0); this.ms = 0; this.env = 0; }
+  process(L, R, n) {
+    const c = this.c, b0 = c[0], b1 = c[1], b2 = c[2], a1 = c[3], a2 = c[4], z = this.z, thr = this.thr, sl = this.sl, W = this.W, aA = this.aA, aR = this.aR, kr = this.kr, msLo = this.msLo, mix = this.mix;
+    let l1 = z[0], l2 = z[1], r1 = z[2], r2 = z[3], ms = this.ms, env = this.env, top = this.gr, acc = 0;
+    for (let i = 0; i < n; i++) {
+      const xl = L[i], xr = R[i];
+      const yl = b0 * xl + l1; l1 = b1 * xl - a1 * yl + l2; l2 = b2 * xl - a2 * yl;
+      const yr = b0 * xr + r1; r1 = b1 * xr - a1 * yr + r2; r2 = b2 * xr - a2 * yr;
+      const e = yl * yl > yr * yr ? yl * yl : yr * yr;
+      ms += (e - ms) * kr;
+      let gr = 0;
+      if (ms > msLo) { const d = 4.342944819032518 * Math.log(ms) - thr; gr = 2 * d > W ? d * sl : sl * (d + W / 2) * (d + W / 2) / (2 * W); }
+      env = gr > env ? gr + (env - gr) * aA : gr + (env - gr) * aR;
+      if (env > 1e-4) { const g = 1 - mix + mix * Math.exp(-env * .11512925464970229); L[i] = xl * g; R[i] = xr * g; }
+      if (env > top) top = env;
+      acc += env;
+    }
+    const fz = v => (v < 1e-25 && v > -1e-25 ? 0 : v);
+    z[0] = fz(l1); z[1] = fz(l2); z[2] = fz(r1); z[3] = fz(r2); this.ms = ms < 1e-30 ? 0 : ms; this.env = env < 1e-9 ? 0 : env; this.gr = top;
+    this.acc += acc; this.cnt += n;
+  }
+}
+function m23ClampHz(v, sr) { return Math.max(20, Math.min(sr * .2, +v || 100)); }
+
+// The chain with the three stages. Without p.x (every set made before, and the four old presets) it is the chain of section
+// 3d: the base class's own code runs, sample for sample.
+const MChainBase = MChain;
+MChain = class MChain extends MChainBase { // eslint-disable-line no-class-assign
+  set(p) {
+    super.set(p);
+    const x = p && p.x;
+    this.xon = !!(x && typeof x === 'object' && x.on);
+    if (!this.xon) return;
+    if (!this.eqx) { this.eqx = new MEqX(this.sr); this.dynx = new MDynX(this.sr); this.glx = new MGlueX(this.sr); }
+    this.eqx.set(x); this.dynx.set(x); this.glx.set(x);
+  }
+  reset() { super.reset(); if (this.eqx) { this.eqx.reset(); this.dynx.reset(); this.glx.reset(); } }
+  process(L, R, n) {
+    if (!this.xon) return super.process(L, R, n);
+    const wl = this.wl, wr = this.wr;
+    for (let i = 0; i < n; i++) {
+      const a = L[i], b = R[i];
+      wl[i] = a === a ? (a > 64 ? 64 : a < -64 ? -64 : a) : 0; wr[i] = b === b ? (b > 64 ? 64 : b < -64 ? -64 : b) : 0;
+    }
+    this.tone.process(wl, wr, n);
+    this.eqx.process(wl, wr, n);
+    if (this.dynx.on) this.dynx.process(wl, wr, n);
+    if (this.mb.on) this.mb.process(wl, wr, n);
+    if (this.glx.on) this.glx.process(wl, wr, n);
+    let d = this.dr;
+    const ds = (this.drT - d) / n;
+    if (ds !== 0 || d !== 1) { for (let i = 0; i < n; i++) { d += ds; wl[i] *= d; wr[i] *= d; } }
+    this.dr = this.drT;
+    this.clip.process(wl, wr, n); this.lim.process(wl, wr, n);
+    for (let i = 0; i < n; i++) { L[i] = wl[i]; R[i] = wr[i]; }
+  }
+  meters() {
+    const m = super.meters();
+    if (this.eqx) { m.dyn = Math.round(this.dynx.gr * 10) / 10; m.glue = Math.round(this.glx.gr * 10) / 10; this.dynx.gr = 0; this.glx.gr = 0; }
+    return m;
+  }
+};
+// the worklet module: section 3d's classes, its chain renamed as the base, the new stages and chain, its processors
+const MASTER_SRC_X = [MDsp, MTone, MBand, MClip, MLim].map(k => k.toString()).join('\n') + '\n' + MChainBase.toString().replace(/^class MChain\b/, 'class MChainBase') + '\n' +
+  [MEqX, MDynX, MGlueX].map(k => k.toString()).join('\n') + '\n' + m23ClampHz.toString() + '\n' + MChain.toString() + '\n' + MMeter.toString() + MASTER_PROC;
+try { if (typeof URL !== 'undefined' && URL.createObjectURL && typeof Blob !== 'undefined') masterURL = URL.createObjectURL(new Blob([MASTER_SRC_X], { type: 'application/javascript' })); } catch (e) { /* getMasterURL makes the old module: the old chain plays */ }
+// section 3d's loader, with the new module in its data: fallback too (a page opened from file://)
+masterLoad = async function (E) { // eslint-disable-line no-func-assign
+  E.mOk = false; E.mPost = false;
+  const q = masterPro(E.p), on = !!(q && q.on);
+  const c = E.ctx;
+  if (E.offline && on && !masterLiveOk(c)) return;
+  if (E.offline && (!on || !MASTER_OFFLINE_WORKLET)) { E.mPost = on; return; }
+  if (!c.audioWorklet || typeof AudioWorkletNode === 'undefined') return;
+  try {
+    try { await c.audioWorklet.addModule(getMasterURL()); }
+    catch (e) { await c.audioWorklet.addModule('data:application/javascript;charset=utf-8,' + encodeURIComponent(MASTER_SRC_X)); }
+    E.mOk = true;
+  } catch (e) { console.warn('[dnb808] mastering worklet unavailable, the classic master plays', e); }
+};
+
+// ---------- settings: P.master.pro.x ----------
+// eq: hp (Hz, 0 = off), low shelf lsF / lsG, bell mF / mG / mQ, high shelf hsF / hsG. dyn: dF, dQ, dThr (dBFS RMS of the
+// band), dRat, dRng (most it cuts), dAtt / dRel (ms). glue: gThr, gRat, gAtt / gRel (ms), gHp (detector high-pass), gMix.
+// AUTO MASTER's budgets (no sound): aGlue (average glue reduction), aLim (average limiter reduction), aPump (the swing of the
+// limiter's reduction: 95th minus 10th percentile), aClip (the clipper's average reduction), aPeak (its largest, on one hit).
+const M23_XDEF = { on: true, eq: true, hp: 0, lsF: 80, lsG: 0, mF: 300, mG: 0, mQ: 1, hsF: 10000, hsG: 0,
+  dyn: true, dF: 3300, dQ: 1, dThr: -30, dRat: 3, dRng: 4, dAtt: 3, dRel: 80,
+  glue: true, gThr: -14, gRat: 2, gAtt: 20, gRel: 100, gHp: 100, gMix: 1, aGlue: 1.5, aLim: 3, aPump: 2, aClip: 1.8, aPeak: 9 };
+const M23_XNUM = { hp: [0, 60], lsF: [30, 300], lsG: [-6, 6], mF: [100, 2000], mG: [-6, 6], mQ: [.3, 4], hsF: [3000, 18000], hsG: [-6, 6],
+  dF: [1500, 8000], dQ: [.3, 4], dThr: [-60, 0], dRat: [1, 10], dRng: [0, 12], dAtt: [.5, 50], dRel: [10, 500],
+  gThr: [-40, 0], gRat: [1, 6], gAtt: [1, 100], gRel: [20, 1000], gHp: [20, 300], gMix: [0, 1], aGlue: [0, 6], aLim: [.5, 8], aPump: [.3, 6], aClip: [.1, 6], aPeak: [1, 20] };
+const M23_XBOOL = ['on', 'eq', 'dyn', 'glue'];
+// every field checked and clamped; a broken x is dropped (the chain without the three stages)
+function m23XFix(x) {
+  if (!x || typeof x !== 'object' || Array.isArray(x)) return null;
+  const o = {};
+  M23_XBOOL.forEach(k => { o[k] = typeof x[k] === 'boolean' ? x[k] : M23_XDEF[k]; });
+  Object.entries(M23_XNUM).forEach(([k, [a, b]]) => { const v = x[k]; o[k] = typeof v === 'number' && Number.isFinite(v) ? m23Cl(v, a, b) : M23_XDEF[k]; });
+  if (o.hp < 10) o.hp = 0;
+  return o;
+}
+const m23ProFix0 = masterProFix;
+masterProFix = function (q) { // eslint-disable-line no-func-assign
+  const out = m23ProFix0(q);
+  let x = null;
+  try { x = q && typeof q === 'object' && !Array.isArray(q) && m23Has(q, 'x') ? m23XFix(q.x) : null; } catch (e) { x = null; }
+  if (x) out.x = x;
+  return out;
+};
+
+// ---------- the PRO presets (research5/t6_mix.md 9.3 and I-9; the drop target is the loudness of the measured drop bars) ----------
+// The low band attacks late (40 ms) so the kick's hit passes; the low end is mono under 120 Hz; the clipper (4x, soft knee)
+// shaves the biggest hits a little over the ceiling and the limiter brings the rest to -1 dBTP. With a -1 dBTP ceiling the PLR
+// of a drop is -1 minus its loudness, so the targets keep it at 4.5 dB or more. AUTO MASTER fits the thresholds to the set.
+const m23Set = (o, x) => Object.assign({ gain: 0, drive: 4, mono: 120, tilt: 0, width: 1.1, mb: true, xlo: 120, xhi: 2500,
+  bands: [mBand(-17, 1.6, 40, 220, 0), mBand(-19, 1.5, 20, 160, 0), mBand(-26, 1.8, 8, 100, 0)],
+  clip: true, clipThr: -.25, knee: .45, ceil: -1, look: 1.5, rel: 60, auto: true, target: -6, scope: 'drop' }, o, { x: Object.assign({}, M23_XDEF, x) });
+const M23_PRESETS = {
+  dnbpro: { name: 'DnB club 174 PRO', fam: 'dnb', info: 'Dancefloor / neuro DnB: the drop at about -6 LUFS, -1 dBTP. Mono under 120 Hz, a soft cut at 320 Hz, air at 11 kHz, the 2-5 kHz harshness held down, 1.5 dB of glue. AUTO MASTER fits it',
+    set: m23Set({ drive: 5, tilt: .2, width: 1.12, clipThr: -.25, target: -6 }, { hp: 22, lsF: 70, lsG: .5, mF: 320, mG: -1, mQ: .9, hsF: 11000, hsG: 1, aGlue: 1.5, aLim: 3, aPump: 2, aClip: 1.8, aPeak: 9 }) },
+  jumppro: { name: 'Jump-up / rave 174 PRO', fam: 'jump', info: 'Jump-up and rave clash: loud and forward, the drop at about -5.5 LUFS, -1 dBTP. More clipper on the hits, the mid bass kept bright, the sub mono',
+    set: m23Set({ drive: 6, tilt: .3, width: 1.15, clipThr: -.25, knee: .4, target: -5.5 }, { hp: 22, lsF: 65, lsG: .5, mF: 300, mG: -1, mQ: .9, hsF: 11000, hsG: 1, dRng: 4.5, aGlue: 1.5, aLim: 3, aPump: 2, aClip: 2.2, aPeak: 10 }) },
+  riddimpro: { name: 'Dubstep / riddim 140-150 PRO', fam: 'riddim', info: 'Heavy halftime and riddim: the drop at about -5.5 LUFS, -1 dBTP, the sub mono under 120 Hz, a firm hold on the 2-5 kHz screech',
+    set: m23Set({ drive: 6, tilt: .1, width: 1.1, clipThr: -.25, knee: .4, look: 2, rel: 70, target: -5.5 }, { hp: 22, lsF: 60, lsG: .5, mF: 350, mG: -1, mQ: .9, hsF: 12000, hsG: .5, dF: 3000, dRng: 5, aGlue: 1.5, aLim: 3, aPump: 2, aClip: 2.2, aPeak: 10 }) },
+  ukbasspro: { name: 'UK bass 140 PRO', fam: 'ukbass', info: 'Deep UK dubstep, skank and garage-leaning bass: the drop at about -7 LUFS, -1 dBTP, more room for the sub and the drums',
+    set: m23Set({ drive: 4, tilt: .1, width: 1.1, clipThr: -.25, look: 2, rel: 80, knee: .55, target: -7 }, { hp: 20, lsF: 60, lsG: .5, mF: 300, mG: -.8, mQ: .9, hsF: 11000, hsG: .8, aGlue: 1.2, aLim: 2.5, aPump: 1.8, aClip: 1.5, aPeak: 9 }) },
+  liquidpro: { name: 'Liquid 174 PRO', fam: 'liquid', info: 'Liquid and melodic DnB: the drop at about -7.5 LUFS, -1 dBTP, a softer clipper and a lighter glue, a little more air',
+    set: m23Set({ drive: 3, tilt: .2, width: 1.12, clipThr: -.25, knee: .7, look: 2.5, rel: 90, target: -7.5 }, { hp: 20, lsF: 70, lsG: .4, mF: 300, mG: -.8, mQ: .9, hsF: 12000, hsG: 1.5, dRng: 3, aGlue: 1, aLim: 2.5, aPump: 1.5, aClip: 1.2, aPeak: 8.5 }) },
+  housepro: { name: 'House 120-128 PRO', fam: 'house', info: 'House, afro and progressive house: the groove at about -7.5 LUFS, -1 dBTP, longer look-ahead so the kick stays round',
+    set: m23Set({ drive: 3, tilt: .1, width: 1.1, clipThr: -.25, knee: .6, look: 2.5, rel: 100, target: -7.5 }, { hp: 20, lsF: 60, lsG: .3, mF: 280, mG: -.7, mQ: .9, hsF: 12000, hsG: 1, aGlue: 1.2, aLim: 2.5, aPump: 1.5, aClip: 1.2, aPeak: 8 }) },
+  cinepro: { name: 'Cinematic PRO', fam: 'cine', info: 'Trailer and orchestral: the climax at about -10 LUFS, -1 dBTP, a soft clip only on the biggest hits, wide',
+    set: m23Set({ drive: 2, tilt: 0, width: 1.15, mono: 100, clipThr: .25, knee: 1, look: 3, rel: 120, target: -10 }, { hp: 18, lsF: 60, lsG: 0, mF: 300, mG: -.5, mQ: .9, hsF: 12000, hsG: .5, dRng: 3, aGlue: 1, aLim: 2, aPump: 2, aClip: .6, aPeak: 9 }) },
+};
+Object.entries(M23_PRESETS).forEach(([id, d]) => { if (!m23Has(MASTER_PRESETS, id)) MASTER_PRESETS[id] = d; });
+MASTER_IDS.splice(Math.max(0, MASTER_IDS.indexOf('custom')), 0, ...Object.keys(M23_PRESETS).filter(id => !MASTER_IDS.includes(id)));
+const M23_FAM_PRESET = { dnb: 'dnbpro', jump: 'jumppro', riddim: 'riddimpro', ukbass: 'ukbasspro', liquid: 'liquidpro', house: 'housepro', cine: 'cinepro' };
+// an old preset leaves no PRO stage behind (it sounds as it always did); a PRO preset brings its own
+const m23UsePreset0 = masterUsePreset;
+masterUsePreset = function (id) { // eslint-disable-line no-func-assign
+  const q = P.master.pro || (P.master.pro = masterProFix());
+  M23.last = null;
+  if (!M23_PRESETS[id]) { if (MASTER_PRESETS[id]) delete q.x; return m23UsePreset0(id); }
+  const j = MASTER_JOB.job; if (j) { j.why = 'changed'; j.ac.abort(); } // a running LEARN or AUTO MASTER measured the old preset
+  delete q.x; Object.assign(q, clone(M23_PRESETS[id].set), { on: true, preset: id });
+  q.x.gRel = Math.round(m23Cl(.6 * 30 / (+P.bpm || 174) * 1000, 60, 250)); // the glue's release: 0.6 of an 8th note
+  if (E) E.applyMaster();
+  renderDetail();
+  flash(`${M23_PRESETS[id].name}: ${M23_PRESETS[id].info}`);
+};
+
+// ---------- the genre family of a GENERATE SONG style (or of a set) ----------
+function m23FamOfStyle(id, st) {
+  st = st || {};
+  const bpm = +st.bpm || 174, s = String(id) + ' ' + String(st.name || ''), g = String(st.genre || ''), m = String(st.master || '');
+  if (bpm < 133) {
+    if (/house|afro|swed|prog/i.test(s + ' ' + g) || g === 'afro' || g === 'swedish' || st.world === 'afrohouse') return 'house';
+    if (st.cine || /cine|trailer|orch/i.test(s)) return 'cine';
+    return 'ukbass';
+  }
+  if (bpm < 160) {
+    if (st.cine && !/dub/i.test(s)) return 'cine';
+    if (/riddim|brostep|tearout/i.test(s)) return 'riddim';
+    return 'ukbass';
+  }
+  if (g === 'liquid' || m === 'liquid' || /liquid/i.test(s)) return 'liquid';
+  if (g === 'jumpup' || /jump|rave|clash|festival/i.test(s)) return 'jump';
+  return 'dnb';
+}
+function m23FamOfSet(p) {
+  const id = p && p.gen && p.gen.style;
+  if (id && typeof GEN_STYLES === 'object' && m23Has(GEN_STYLES, id)) return m23FamOfStyle(id, GEN_STYLES[id]);
+  const bpm = +(p && p.bpm) || 174;
+  return bpm < 133 ? 'house' : bpm < 160 ? 'ukbass' : 'dnb';
+}
+// the family's PRO preset on a set (its loudness target, the glue release on its tempo); the job of GENERATE SONG
+function m23ApplyFamily(p, fam) {
+  const id = M23_FAM_PRESET[fam] || 'dnbpro', d = M23_PRESETS[id];
+  const q = masterProFix(Object.assign(clone(d.set), { on: true, preset: id }));
+  q.x.gRel = Math.round(m23Cl(.6 * 30 / (+p.bpm || 174) * 1000, 60, 250));
+  p.master.pro = q;
+  return id;
+}
+if (typeof genSongGo === 'function') {
+  const m23Go0 = genSongGo;
+  genSongGo = function (id, groove) { // eslint-disable-line no-func-assign
+    const before = P, r = m23Go0(id, groove);
+    try {
+      if (P !== before && P && P.gen && P.gen.style === id && typeof GEN_STYLES === 'object' && GEN_STYLES[id]) { // the new set (genSongGo made its undo step)
+        const pid = m23ApplyFamily(P, m23FamOfStyle(id, GEN_STYLES[id])); M23.last = null;
+        if (E) E.applyMaster();
+        save();
+        flash(`Mastering: ${MASTER_PRESETS[pid].name}. Press AUTO MASTER (MASTER, DEVICE) to fit it to this song`);
+      }
+    } catch (e) { console.error('[dnb808] PRO master preset', e); }
+    return r;
+  };
+}
+
+// ---------- AUTO MASTER ----------
+const M23 = { last: null, cache: new Map(), smax: -99, playing: false };
+const M23_BARS = 8; // bars measured in the drop and in the breakdown (plus up to 2 bars before each, so everything has settled)
+// activity of each bar from the arrangement: drums and basses count 3, the other lanes 1 (muted lanes 0)
+function m23BarScore(p) {
+  const song = masterSongBars(p); if (!song) return null;
+  const n = song.b, sc = new Float64Array(n);
+  p.tracks.forEach(tr => {
+    if (tr.mix && tr.mix.mute) return;
+    const nm = String(tr.name || ''), w = /DRUM|BREAK|KICK|PERC|TOPS/i.test(nm) || tr.type === 'drum' ? 3 : /SUB|BASS|REESE|MID|WOB/i.test(nm) ? 3 : 1;
+    (tr.arr || []).forEach(e => { const c = tr.clips[e.slot]; if (!c || (Array.isArray(c.notes) && !c.notes.length)) return; for (let b = Math.max(0, e.start); b < Math.min(n, e.start + e.len); b++) sc[b] += w; });
+  });
+  return sc;
+}
+// The drop (the busiest 8 bars; a generated song's own drop section when it has one) and a breakdown (the quietest 8 bars that
+// still play, after the drop and before the outro, else anywhere but the intro)
+function m23Regions(p) {
+  const sc = m23BarScore(p); if (!sc) return null;
+  const n = sc.length, L = Math.min(M23_BARS, n), win = a => { let s = 0; for (let b = a; b < a + L; b++) s += sc[b]; return s; };
+  let drop = null;
+  const secs = p.gen && p.gen.prof && Array.isArray(p.gen.prof.sections) ? p.gen.prof.sections : null;
+  if (secs) {
+    const ds = secs.filter(x => Array.isArray(x) && (/DROP|CHORUS|MAIN|HOOK/i.test(String(x[0])) || (Array.isArray(x[4]) && x[4].includes('drop'))) && x[2] >= 4);
+    if (ds.length) { const best = ds.reduce((a, b) => (+b[3] > +a[3] ? b : a)); drop = { a: best[1] | 0, b: Math.min(n, (best[1] | 0) + L) }; }
+  }
+  if (!drop) { let ba = 0, bs = -1; for (let a = 0; a + L <= n; a += 4) { const s = win(a); if (s > bs) { bs = s; ba = a; } } drop = { a: ba, b: ba + L }; }
+  const dS = win(Math.min(drop.a, n - L));
+  let bd = null, bs = 1e9;
+  if (secs) { // the song's own breakdown section
+    const b = secs.find(x => Array.isArray(x) && x[2] >= 4 && ((Array.isArray(x[4]) && x[4].includes('breakdown')) || /BREAK|BDOWN/i.test(String(x[0]))));
+    if (b && win(Math.min(b[1] | 0, n - L)) > 0) return { drop, bd: { a: b[1] | 0, b: Math.min(n, (b[1] | 0) + L) } };
+  }
+  const tryWin = a => { if (a < 0 || a + L > n) return; const s = win(a); if (s > 0 && s < dS * .8 && s < bs) { bs = s; bd = { a, b: a + L }; } };
+  for (let a = drop.b; a + L <= n - 8; a += 4) tryWin(a);
+  if (!bd) for (let a = 8; a + L <= n; a += 4) if (a + L <= drop.a || a >= drop.b) tryWin(a);
+  return { drop, bd };
+}
+// the chain over a pre-render (bars of part), with the numbers AUTO MASTER checks
+async function m23Measure(part, q, drive, signal) {
+  const sr = part.sr, ch = new MChain(sr, Object.assign({}, q, { drive })), m = new MMeter(sr), n = part.L.length;
+  const L = new Float32Array(128), R = new Float32Array(128), k0 = Math.floor(part.i0 / 128) * 128;
+  let last = null, on = false, t = performance.now(), nb = 0, smax = -99, limS = 0, limN = 0, limTop = 0, clipTop = 0, clipS = 0, pk = 0, ss = 0, cnt = 0, glueS = 0, glueN = 0;
+  const lims = [];
+  for (let k = part.from || 0; k < n && k < part.i1; k += 128) {
+    L.fill(0); R.fill(0); L.set(part.L.subarray(k, k + 128)); R.set(part.R.subarray(k, k + 128));
+    if (ch.glx) { ch.glx.acc = 0; ch.glx.cnt = 0; }
+    ch.clip.gr = 1;
+    ch.process(L, R, 128);
+    if (!on && k >= k0) { m.reset(); on = true; }
+    const r = m.feed(L, R, 128);
+    if (on) {
+      if (r) { last = r; if (++nb >= 30 && r.s > smax) smax = r.s; }
+      const g = -20 * Math.log10(Math.max(1e-9, ch.lim.gl)); limS += g; limN++; lims.push(g); if (g > limTop) limTop = g;
+      const cg = 20 * Math.log10(ch.clip.gr); if (cg > clipTop) clipTop = cg; clipS += cg;
+      if (ch.glx && ch.glx.on && ch.glx.cnt) { glueS += ch.glx.acc / ch.glx.cnt; glueN++; }
+      for (let i = 0; i < 128; i++) { const a = Math.abs(L[i]), b = Math.abs(R[i]); if (a > pk) pk = a; if (b > pk) pk = b; ss += L[i] * L[i] + R[i] * R[i]; }
+      cnt += 256;
+    }
+    if (performance.now() - t > MASTER_SLICE) { await masterWait(); if (signal && signal.aborted) throw new Error('cancelled'); t = performance.now(); }
+  }
+  lims.sort((a, b) => a - b);
+  const db = v => (v > 1e-9 ? 20 * Math.log10(v) : -99), rms = Math.sqrt(ss / Math.max(1, cnt));
+  return { I: last && last.i, tp: last && last.tp, smax: smax > -90 ? smax : last && last.s, limAvg: limN ? limS / limN : 0, limP95: lims.length ? lims[Math.floor(lims.length * .95)] : 0, limTop,
+    limSwing: lims.length ? lims[Math.floor(lims.length * .95)] - lims[Math.floor(lims.length * .1)] : 0, clipMax: clipTop, clipAvg: limN ? clipS / limN : 0, glueAvg: glueN ? glueS / glueN : 0, peak: db(pk), crest: db(pk) - db(rms) };
+}
+// a copy of the bars of a pre-render through the stages before the glue (tone, tonal EQ, dynamic band, multiband)
+function m23Stages(part, q, upto) {
+  const sr = part.sr, n = Math.min(part.L.length, part.i1), from = part.from || 0, Lc = new Float32Array(n - from), Rc = new Float32Array(n - from);
+  const tone = new MTone(sr), eq = new MEqX(sr), dyn = new MDynX(sr), mb = new MBand(sr); tone.set(q); tone.reset(); eq.set(q.x); dyn.set(q.x); mb.set(q); mb.reset();
+  const L = new Float64Array(128), R = new Float64Array(128);
+  for (let k = from; k < n; k += 128) {
+    const m = Math.min(128, n - k);
+    L.fill(0); R.fill(0); for (let i = 0; i < m; i++) { L[i] = part.L[k + i]; R[i] = part.R[k + i]; }
+    tone.process(L, R, 128); eq.process(L, R, 128);
+    if (upto > 1 && dyn.on) dyn.process(L, R, 128);
+    if (upto > 2 && mb.on) mb.process(L, R, 128);
+    for (let i = 0; i < m; i++) { Lc[k - from + i] = L[i]; Rc[k - from + i] = R[i]; }
+  }
+  return { L: Lc, R: Rc, off: Math.max(0, part.i0 - from) }; // off: where the measured bars start in the copy
+}
+// RMS level (dB) of a filtered copy, every 32 samples, with a detector window (s): the sorted list of the measured bars
+function m23Levels(x, off, filt, win, sr) {
+  const kr = 1 - Math.exp(-1 / (win * sr)), lv = [];
+  let ms = 0;
+  const zl = new Float64Array(8), zr = new Float64Array(8), bl = new Float64Array(128), br = new Float64Array(128);
+  for (let k = 0; k < x.L.length; k += 128) {
+    const m = Math.min(128, x.L.length - k);
+    bl.fill(0); br.fill(0); for (let i = 0; i < m; i++) { bl[i] = x.L[k + i]; br[i] = x.R[k + i]; }
+    filt.forEach((c, j) => { MDsp.run(c, zl, 2 * j, bl, 128); MDsp.run(c, zr, 2 * j, br, 128); });
+    for (let i = 0; i < m; i++) { const e = Math.max(bl[i] * bl[i], br[i] * br[i]); ms += (e - ms) * kr; if (k + i >= off && (k + i) % 32 === 0) lv.push(ms > 1e-12 ? 10 * Math.log10(ms) : -120); }
+  }
+  return lv.sort((a, b) => a - b);
+}
+const m23Pct = (s, p) => (s.length ? s[Math.min(s.length - 1, Math.max(0, Math.floor(s.length * p)))] : -120);
+// The thresholds from the drop: the multiband bands over their median (the louder half gets 1-2 dB), the dynamic band on the top
+// 10 % of its level (never under the tonal balance: 14 dB under the full band), the glue so it averages its budget
+function m23Calibrate(part, q, bpm) {
+  const sr = part.sr, Q = Math.SQRT1_2, x0 = m23Stages(part, q, 1);
+  const bp = (() => { const f = Math.min(q.x.dF, sr * .4), w = 2 * Math.PI * f / sr, al = Math.sin(w) / (2 * q.x.dQ), a0 = 1 + al; return new Float64Array([al / a0, 0, -al / a0, -2 * Math.cos(w) / a0, (1 - al) / a0]); })();
+  const full = m23Levels(x0, x0.off, [], .3, sr), band = m23Levels(x0, x0.off, [bp], .004, sr);
+  const fullMed = m23Pct(full, .5), out = clone(q);
+  out.x.dThr = Math.round(m23Cl(Math.max(m23Pct(band, .9) - 1, fullMed - 14), -60, 0) * 10) / 10;
+  const lo = MDsp.bq('lowpass', q.xlo, Q, sr), hlo = MDsp.bq('highpass', q.xlo, Q, sr), lhi = MDsp.bq('lowpass', q.xhi, Q, sr), hhi = MDsp.bq('highpass', q.xhi, Q, sr);
+  const x1 = m23Stages(part, out, 2);
+  const lev = [m23Levels(x1, x1.off, [lo, lo], .012, sr), m23Levels(x1, x1.off, [hlo, hlo, lhi, lhi], .005, sr), m23Levels(x1, x1.off, [hhi, hhi], .002, sr)];
+  [2, 1, 0].forEach((o, b) => { out.bands[b].thr = Math.round(m23Cl(m23Pct(lev[b], .5) + o, -60, 0) * 10) / 10; });
+  const x2 = m23Stages(part, out, 3), gl = m23Levels(x2, x2.off, [MDsp.bq('highpass', q.x.gHp, Q, sr)], .01, sr);
+  const sl = 1 - 1 / out.x.gRat, W = 6, gr = (lv, thr) => { const d = lv - thr; return 2 * d > W ? d * sl : 2 * d > -W ? sl * (d + W / 2) * (d + W / 2) / (2 * W) : 0; };
+  const mean = thr => { let s = 0; for (let i = 0; i < gl.length; i += 4) s += gr(gl[i], thr); return s / Math.max(1, Math.ceil(gl.length / 4)); };
+  let a = -40, b = 0; for (let k = 0; k < 24; k++) { const m = (a + b) / 2; if (mean(m) > out.x.aGlue) a = m; else b = m; }
+  out.x.gThr = Math.round(m23Cl((a + b) / 2, -40, 0) * 10) / 10;
+  out.x.gRel = Math.round(m23Cl(.6 * 30 / (bpm || 174) * 1000, 60, 250));
+  return { q: out, full: fullMed, band: m23Pct(band, .9) };
+}
+// PUSH for the target loudness (a secant search, as LEARN), from d0
+async function m23Push(part, q, T, d0, signal, all) {
+  const tries = [], at = async d => { const r = await m23Measure(part, q, d, signal); r.d = d; tries.push(r); all.push(r); return r; };
+  let r0 = await at(d0);
+  if (r0.I == null) throw new Error('nothing plays in the drop');
+  let r1 = r0;
+  if (Math.abs(T - r0.I) >= .05) r1 = await at(m23Cl(d0 + (T - r0.I) / .7, -6, 18));
+  for (let k = 0; k < 5 && Math.abs(T - r1.I) >= .05; k++) {
+    const sl = Math.abs(r1.d - r0.d) > 1e-3 && (r1.I - r0.I) / (r1.d - r0.d) > .05 ? (r1.I - r0.I) / (r1.d - r0.d) : .7;
+    const d2 = m23Cl(r1.d + (T - r1.I) / sl, -6, 18);
+    if (Math.abs(d2 - r1.d) < .01) break;
+    r0 = r1; r1 = await at(d2);
+  }
+  return tries.filter(r => r.I != null).reduce((x, y) => (Math.abs(y.I - T) < Math.abs(x.I - T) ? y : x));
+}
+// the pre-render of bars a..b, kept while the set does not change (a second AUTO MASTER or another preset reuses it)
+async function m23Pre(src, a, b, job, f0, f1) {
+  const key = masterKey(src) + '|' + a + '|' + b;
+  if (M23.cache.has(key)) return M23.cache.get(key);
+  const pre = await masterPreRender(src, a, b, 44100, (k, n) => { job.frac = f0 + (f1 - f0) * k / n; m23JobUi(); }, job.ac.signal);
+  if (job.ac.signal.aborted) throw new Error('cancelled');
+  if (M23.cache.size > 3) M23.cache.clear();
+  M23.cache.set(key, pre);
+  return pre;
+}
+const m23Part = (pre, a, b, bpm) => { const bar = 240 / bpm * pre.sr; const part = Object.assign({}, pre, { i0: Math.round(pre.i0 + (a - pre.a) * bar), i1: Math.round(pre.i0 + (b - pre.a) * bar) }); part.from = Math.max(0, Math.round(part.i0 - 2 * bar)); return part; };
+async function m23AutoMaster() {
+  if (MASTER_JOB.job) { MASTER_JOB.job.ac.abort(); return; }
+  const src = typeof savedSet === 'function' ? savedSet() : P;
+  const reg = m23Regions(src);
+  if (!reg) return flash('The arrangement is empty: paint clips in Arrange first');
+  const q0 = masterPro(P), had = q0 && q0.on && q0.x && MASTER_PRESETS[q0.preset] ? q0.preset : q0 && q0.on && q0.x ? 'custom' : null;
+  const pid = had || M23_FAM_PRESET[m23FamOfSet(src)];
+  const base = had ? masterProFix(q0) : masterProFix(Object.assign(clone(M23_PRESETS[pid].set), { on: true, preset: pid }));
+  const job = MASTER_JOB.job = { ac: new AbortController(), frac: 0, label: 'RENDER', P, pro: q0, sig: q0 ? masterSig(q0) : '', preset: q0 && q0.preset, target: q0 && q0.target, scope: q0 && q0.scope, auto: true, why: '' };
+  m23JobUi();
+  try {
+    const bpm = src.bpm, pd = await m23Pre(src, reg.drop.a, reg.drop.b, job, 0, reg.bd ? .4 : .75);
+    const pb = reg.bd ? await m23Pre(src, reg.bd.a, reg.bd.b, job, .4, .75) : null;
+    job.label = 'MEASURE'; job.frac = .76; m23JobUi(); await masterWait();
+    const dropP = m23Part(pd, reg.drop.a, reg.drop.b, bpm), cal = m23Calibrate(dropP, base, bpm);
+    let q = cal.q;
+    const T = q.target, x = q.x, tries = [], warn = [];
+    // PUSH for the target, then the checks. The limiter sits a little under the clipper (it takes the clipped peaks to -1 dBTP
+    // and the inter-sample overs): its gain may not swing (pumping: aPump, the 95th minus the 10th percentile of its reduction) nor
+    // sit too low (aLim). Pumping: the clipper takes more of the peaks. The clipper may not work all the time (aClip, its average
+    // over the drop) nor crush a hit (aPeak): then this mix cannot be that loud cleanly, and the target comes down (at most 1 LU)
+    let best = null, tgt = T, cut = 0;
+    for (let pass = 0; pass < 7; pass++) {
+      best = await m23Push(dropP, q, tgt, best ? best.d : q.drive, job.ac.signal, tries);
+      job.frac = Math.min(.97, .8 + .03 * (pass + 1)); m23JobUi();
+      const pump = best.limSwing > x.aPump + .05 || best.limAvg > x.aLim + .05, crack = best.clipAvg > x.aClip + .05 || best.clipMax > x.aPeak + .05;
+      if (pump && !crack && q.clipThr > q.ceil - .49) { q = Object.assign(clone(q), { clipThr: Math.round(Math.max(q.ceil - .5, q.clipThr - .5) * 100) / 100 }); continue; }
+      if (!pump && !crack) break;
+      // only one big hit is crushed (the clipper is calm on average, the limiter steady): the limiter takes more of that hit
+      if (crack && !pump && best.clipAvg <= x.aClip + .05 && q.clipThr < q.ceil + 2.49 && best.limSwing < x.aPump - .5) { q = Object.assign(clone(q), { clipThr: Math.round(Math.min(q.ceil + 2.5, q.clipThr + 1) * 100) / 100 }); continue; }
+      if (cut < 1) { cut += .5; tgt = T - cut; continue; }
+      break;
+    }
+    const why = () => `the limiter ${best.limAvg.toFixed(1)} dB on average (swing ${best.limSwing.toFixed(1)}), the clipper ${best.clipAvg.toFixed(1)} dB on average and ${best.clipMax.toFixed(1)} dB on the biggest hit`;
+    if (cut) warn.push(`the target came down by ${cut} LU: louder, this mix would pump or crackle (${why()})`);
+    else if (best.limSwing > x.aPump + .05 || best.limAvg > x.aLim + .05 || best.clipAvg > x.aClip + .05 || best.clipMax > x.aPeak + .05) warn.push(`over the budgets: ${why()}`);
+    if (best.I < tgt - 1) warn.push(`the drop reaches only ${best.I.toFixed(1)} LUFS (target ${tgt}): PUSH is at its +${best.d.toFixed(0)} dB limit, raise the faders or the master GAIN`);
+    q.drive = Math.round(best.d * 100) / 100;
+    const rep = { preset: pid, name: MASTER_PRESETS[pid] ? MASTER_PRESETS[pid].name : 'Custom', drop: [reg.drop.a, reg.drop.b], I: best.I, smax: best.smax, tp: best.tp, plr: best.tp - best.I, psr: best.tp - best.smax,
+      crest: best.crest, peak: best.peak, lim: best.limAvg, limP95: best.limP95, swing: best.limSwing, clip: best.clipMax, clipAvg: best.clipAvg, glue: best.glueAvg, target: T, drive: q.drive, clipThr: q.clipThr, tries: tries.length, warn };
+    if (pb) {
+      const bdP = m23Part(pb, reg.bd.a, reg.bd.b, bpm), rb = await m23Measure(bdP, q, q.drive, job.ac.signal);
+      Object.assign(rep, { bd: [reg.bd.a, reg.bd.b], bI: rb.I, bTp: rb.tp, bLim: rb.limAvg, diff: rb.I != null ? best.I - rb.I : null });
+      if (rb.I != null && best.I - rb.I < 3) warn.push(`the breakdown is only ${(best.I - rb.I).toFixed(1)} LU under the drop`);
+    }
+    if (rep.plr < 4) warn.push(`PLR ${rep.plr.toFixed(1)} dB: over-limited, try a lower target`);
+    if (rep.tp > q.ceil + .05) warn.push(`true peak ${rep.tp.toFixed(1)} dBTP`);
+    const cur = masterPro(P);
+    if (P !== job.P || cur !== job.pro || (cur && masterSig(cur) !== job.sig)) { job.why = 'changed'; throw new Error('cancelled'); }
+    pushUndo();
+    const o = P.master.pro || (P.master.pro = masterProFix());
+    Object.keys(o).forEach(k => { delete o[k]; }); Object.assign(o, masterProFix(Object.assign(q, { on: true, preset: had === 'custom' ? 'custom' : pid })));
+    if (E) E.applyMaster();
+    save();
+    M23.last = rep; MASTER_JOB.last = { a: reg.drop.a, b: reg.drop.b, scope: 'drop', drive: q.drive, I: best.I, tp: best.tp, T, tries: tries.map(r => [r.d, r.I, r.tp]) };
+    MASTER_JOB.job = null;
+    if (UI.detail === 'device' && UI.sel.t < 0) renderDetail(); else m23JobUi();
+    flash(m23RepText(rep) + '. CTRL+Z goes back');
+    return rep;
+  } catch (err) {
+    if (MASTER_JOB.job === job) MASTER_JOB.job = null;
+    m23JobUi();
+    flash(err.message !== 'cancelled' ? 'AUTO MASTER failed: ' + err.message : job.why ? 'AUTO MASTER stopped: the set or its mastering changed while it ran, nothing applied' : 'AUTO MASTER cancelled');
+    return null;
+  }
+}
+const m23F = (v, d = 1) => (v == null || !Number.isFinite(v) ? '--' : v.toFixed(d));
+function m23RepText(r) {
+  const bd = r.bd ? `; breakdown (bars ${r.bd[0] + 1}-${r.bd[1]}) ${m23F(r.bI)} LUFS, ${m23F(r.diff)} LU under` : '';
+  return `AUTO MASTER, ${r.name}: the drop (bars ${r.drop[0] + 1}-${r.drop[1]}) at ${m23F(r.I)} LUFS (target ${r.target}, short-term max ${m23F(r.smax)}), ${m23F(r.tp)} dBTP, PLR ${m23F(r.plr)} dB${bd}. ` +
+    `PUSH ${r.drive > 0 ? '+' : ''}${m23F(r.drive)} dB, limiter ${m23F(r.lim)} dB on average (swing ${m23F(r.swing)}), clipper ${m23F(r.clipAvg)} dB on average and ${m23F(r.clip)} dB at most, glue ${m23F(r.glue)} dB` + (r.warn.length ? '. Note: ' + r.warn.join('; ') : '');
+}
+function m23JobUi() {
+  const b = $('#m23-auto'), j = MASTER_JOB.job;
+  if (b) { b.textContent = j && j.auto ? `${j.label} ${Math.round(j.frac * 100)}%` : 'AUTO MASTER'; b.classList.toggle('hot', !!(j && j.auto)); }
+  if (typeof masterJobUi === 'function' && !(j && j.auto)) masterJobUi();
+}
+
+// ---------- the master's device view: AUTO MASTER, the report, SHORT MAX and PSR, the three PRO stages ----------
+const m23Dev0 = masteringDevices;
+masteringDevices = function () { // eslint-disable-line no-func-assign
+  const els = m23Dev0();
+  try {
+    const q = P.master.pro, ok = !E || E.mOk, col = '#ff6a3d', main = els[0];
+    const lw = main.querySelector('.ms-learn');
+    if (lw) {
+      const b = el('button', 'btn', 'AUTO MASTER'); b.id = 'm23-auto'; b.disabled = !ok;
+      b.dataset.info = 'Renders the drop and a breakdown offline, sets the multiband, the 2-5 kHz band and the glue from what it hears, then PUSH and the clipper so the drop reaches the preset\'s loudness without pumping or audible clipping, at -1 dBTP. One undo step. Without a PRO preset it picks the one of this song\'s style. Press again to cancel';
+      b.onclick = m23AutoMaster;
+      lw.insertBefore(b, lw.children[1] || null);
+      const lb = main.querySelector('#ms-learn'); if (lb && MASTER_JOB.job && MASTER_JOB.job.auto) { lb.textContent = 'LEARN'; lb.classList.remove('hot'); }
+      const r = M23.last; if (r) { const t = el('div', 'k-lbl m23-rep', esc(`Drop ${m23F(r.I)} LUFS, max ${m23F(r.smax)}, ${m23F(r.tp)} dBTP, PLR ${m23F(r.plr)}${r.bd ? `, breakdown ${m23F(r.diff)} LU under` : ''}`)); t.dataset.info = m23RepText(r); lw.append(t); }
+      m23JobUi();
+    }
+    const rd = main.querySelector('.ms-rd');
+    if (rd) {
+      rd.insertAdjacentHTML('beforeend', '<div class="k-lbl">S MAX</div><span data-mm="smax">--</span><div class="k-lbl">PSR</div><span data-mm="psr">--</span>');
+      rd.dataset.info += '. S MAX = the loudest short-term since PLAY (the drop), PSR = true peak minus S MAX';
+      rd.addEventListener('click', () => { M23.smax = -99; });
+    }
+    const off = !q.on || !ok, x = q.x, ap = () => { if (q.on && q.preset !== 'custom') { q.preset = 'custom'; const s = $('#ms-preset'); if (s) s.value = 'custom'; } if (E) E.applyMaster(); };
+    const K = (key, o) => bindKnob(x, key, Object.assign({ color: col, def: M23_XDEF[key] }, o), ap);
+    const mk = (title, info, hint, stage) => {
+      const d = device(title, col, null, info); d.el.dataset.m23 = stage;
+      if (off || !x || !x[stage]) d.el.classList.add('ms-off');
+      if (off || !x) { d.el.classList.add('ms-fold'); const h = el('div', 'ms-hint', esc(off ? (ok ? hint + '. Pick a preset to use it' : 'Not available in this browser') : hint + '. Pick a PRO preset, or turn it on')); h.dataset.info = info; d.body.append(h); }
+      const t = toggleCtl('ON', !!(x && x[stage]), v => {
+        if (!q.x) { q.x = clone(M23_XDEF); M23_XBOOL.forEach(k => { if (k !== 'on') q.x[k] = false; }); }
+        q.x[stage] = v; q.x.on = q.x.eq || q.x.dyn || q.x.glue; ap(); renderDetail();
+      }, `${title} on or off`);
+      if (!off) d.el.firstChild.append(t);
+      return d;
+    };
+    const eq = mk('TONAL EQ', 'Gentle tonal EQ before the dynamics: a sub-sonic low cut, a low shelf, a bell for the mud, a high shelf for the air', 'Low cut, shelves, mud bell', 'eq');
+    const dy = mk('DYNAMIC 2-5K', 'A bell that cuts the 2-5 kHz band only while it is over its threshold: snare cracks and screeching basses stop biting, the rest keeps its presence', 'Dynamic harshness control', 'dyn');
+    const gl = mk('GLUE', 'Bus glue: a gentle compressor whose detector is high-passed, so the kick and the sub do not pump the mix', 'Glue with a sidechain high-pass', 'glue');
+    if (!off && x) {
+      const dB = v => (v > 0 ? '+' : '') + v.toFixed(1) + 'dB';
+      if (x.eq) eq.body.append(kgroup('', [K('hp', { label: 'LOW CUT', min: 0, max: 60, fmt: v => (v < 10 ? 'OFF' : fHz(v)), info: 'Sub-sonic low cut, 24 dB/oct (OFF under 10 Hz)' }),
+        K('lsF', { label: 'LOW F', min: 30, max: 300, log: true, fmt: fHz, info: 'Low shelf frequency' }), K('lsG', { label: 'LOW', min: -6, max: 6, step: .1, bipolar: true, fmt: dB, info: 'Low shelf gain' }),
+        K('mF', { label: 'MUD F', min: 100, max: 2000, log: true, fmt: fHz, info: 'Bell frequency (the mud is around 250-400 Hz)' }), K('mG', { label: 'MUD', min: -6, max: 6, step: .1, bipolar: true, fmt: dB, info: 'Bell gain' }),
+        K('mQ', { label: 'Q', min: .3, max: 4, log: true, fmt: v => v.toFixed(1), info: 'Bell width' }),
+        K('hsF', { label: 'AIR F', min: 3000, max: 18000, log: true, fmt: fHz, info: 'High shelf frequency' }), K('hsG', { label: 'AIR', min: -6, max: 6, step: .1, bipolar: true, fmt: dB, info: 'High shelf gain' })]));
+      if (x.dyn) dy.body.append(kgroup('', [K('dF', { label: 'FREQ', min: 1500, max: 8000, log: true, fmt: fHz, info: 'Centre of the band' }), K('dQ', { label: 'Q', min: .3, max: 4, log: true, fmt: v => v.toFixed(1), info: 'Width (1 = about 2-5 kHz at 3.3 kHz)' }),
+        K('dThr', { label: 'THRESH', min: -60, max: 0, fmt: v => Math.round(v) + 'dB', info: 'Threshold (RMS dBFS of the band). AUTO MASTER sets it' }), K('dRat', { label: 'RATIO', min: 1, max: 10, log: true, fmt: v => v.toFixed(1) + ':1', info: 'Ratio' }),
+        K('dRng', { label: 'RANGE', min: 0, max: 12, step: .1, fmt: v => v.toFixed(1) + 'dB', info: 'The most it cuts' }), K('dAtt', { label: 'ATT', min: .5, max: 50, log: true, fmt: fMs, info: 'Attack' }),
+        K('dRel', { label: 'REL', min: 10, max: 500, log: true, fmt: fMs, info: 'Release' }), masterGr('GR', 'dyn', 'How much the band is cut')]));
+      if (x.glue) gl.body.append(kgroup('', [K('gThr', { label: 'THRESH', min: -40, max: 0, step: .1, fmt: v => v.toFixed(1) + 'dB', info: 'Threshold. AUTO MASTER sets it for the preset\'s glue (1-1.5 dB)' }),
+        K('gRat', { label: 'RATIO', min: 1, max: 6, log: true, fmt: v => v.toFixed(1) + ':1', info: 'Ratio (2:1 for glue)' }), K('gAtt', { label: 'ATT', min: 1, max: 100, log: true, fmt: fMs, info: 'Attack: 20-30 ms lets the hits through' }),
+        K('gRel', { label: 'REL', min: 20, max: 1000, log: true, fmt: fMs, info: 'Release (AUTO MASTER: 0.6 of an 8th note)' }), K('gHp', { label: 'SC HPF', min: 20, max: 300, log: true, fmt: fHz, info: 'High-pass on the detector: the kick and the sub do not pump the mix' }),
+        K('gMix', { label: 'MIX', min: 0, max: 1, fmt: fPct, info: 'Parallel glue: 100% = all compressed' }), masterGr('GR', 'glue', 'Gain reduction of the glue')]));
+    }
+    els.splice(2, 0, eq.el, dy.el); els.splice(4 + 1, 0, gl.el); // tone, EQ, dynamic band, multiband, glue, clipper, limiter
+  } catch (e) { console.error('[dnb808] PRO mastering view', e); }
+  return els;
+};
+const m23Frame0 = masterFrame;
+masterFrame = function () { // eslint-disable-line no-func-assign
+  m23Frame0();
+  try {
+    const r = MASTER_UI.root; if (!r || !r.isConnected || !E) return;
+    const box = r.parentNode; if (!box) return;
+    if (TR.playing && !M23.playing) M23.smax = -99;
+    M23.playing = TR.playing;
+    const g = E.mOn ? E.mGr : null, bar = (k, v) => { const i = box.querySelector(`[data-gr="${k}"]`), t = box.querySelector(`[data-grv="${k}"]`); if (i) i.style.width = Math.min(100, v / 12 * 100) + '%'; if (t) t.textContent = v.toFixed(1) + ' dB'; };
+    bar('dyn', g && g.dyn || 0); bar('glue', g && g.glue || 0);
+    if (E.mGr && E.mGr.dyn != null) E.mGr = Object.assign({}, E.mGr, { dyn: E.mGr.dyn * .85, glue: (E.mGr.glue || 0) * .85 });
+    const mm = E.mMeter; if (!mm) return;
+    if (TR.playing && mm.s > M23.smax) M23.smax = mm.s;
+    const set = (k, v) => { const s = box.querySelector(`[data-mm="${k}"]`); if (s) s.textContent = v; };
+    set('smax', M23.smax > -90 ? M23.smax.toFixed(1) : '--');
+    set('psr', M23.smax > -90 && mm.tp > -90 ? (mm.tp - M23.smax).toFixed(1) : '--');
+  } catch (e) { /* the view changed */ }
+};
+
+// ---------- BASS: SPLIT on the rack distortion, SPLIT and HAAS on the rack chorus (Tidal Pro and Spectra) ----------
+// xdSplit (Hz, 0 = off): a Linkwitz-Riley 24 dB/oct split. Under it the sound passes clean (xdLoG dB; -60 removes it: with the
+// EQ's low cut a 48 dB/oct low cut), delayed by the distortion's 4x latency so the two bands sum in phase; over it the distortion.
+// xcLow (Hz, 0 = off): the chorus (or the Haas) works over it only; the lows stay dry. xcMode 'haas': the side gets the mid,
+// delayed by DELAY ms (moved a little by RATE / DEPTH), at MIX: L = dry + s, R = dry - s, so the mono sum is exactly the dry sound.
+// The fields have no default (an old patch has none, so its JSON and its sound stay as they were); each one means OFF when missing.
+const M23_OSLAT = 37; // OS_LAT of section 3e's 4x path (samples), measured from FX_SRC (review3/wave5/master/test/oslat.mjs)
+function m23Split(E, kind, mkInner) {
+  const c = E.ctx, inp = c.createGain(), out = c.createGain(), lpA = c.createBiquadFilter(), lpB = c.createBiquadFilter(), hpA = c.createBiquadFilter(), hpB = c.createBiquadFilter(),
+    dl = c.createDelay(.05), lowG = c.createGain();
+  [lpA, lpB].forEach(f => { f.type = 'lowpass'; f.Q.value = -3.01; }); [hpA, hpB].forEach(f => { f.type = 'highpass'; f.Q.value = -3.01; });
+  lpA.connect(lpB); lpB.connect(dl); dl.connect(lowG); hpA.connect(hpB);
+  const st = { inner: null, mode: '', wired: null };
+  const innerFor = s => { const m = kind === 'chorus' && s.xcMode === 'haas' ? 'haas' : 'own'; if (m !== st.mode) { if (st.inner) { try { st.inner.out.disconnect(); } catch (e) { /* gone */ } st.inner.kill(); } st.inner = m === 'haas' ? m23Haas(E) : mkInner(); st.mode = m; st.wired = null; st.first = true; } return st.inner; };
+  const wire = (inner, split) => {
+    const key = split ? 'split' : 'flat'; if (st.wired === key) return;
+    try { inp.disconnect(); } catch (e) { /* none */ } try { inner.out.disconnect(); } catch (e) { /* none */ } try { lowG.disconnect(); } catch (e) { /* none */ } try { hpB.disconnect(); } catch (e) { /* none */ }
+    if (split) { inp.connect(lpA); inp.connect(hpA); hpB.connect(inner.in); lowG.connect(out); } else inp.connect(inner.in);
+    inner.out.connect(out); st.wired = key;
+  };
+  const o = { in: inp, out, get node() { return st.inner && st.inner.node; },
+    kill: () => { if (st.inner) st.inner.kill(); [inp, out, lpA, lpB, hpA, hpB, dl, lowG].forEach(nd => { try { nd.disconnect(); } catch (e) { /* gone */ } }); },
+    set: (s, first) => {
+      const inner = innerFor(s), f = +(kind === 'dist' ? s.xdSplit : s.xcLow) || 0, split = f >= 40, now = c.currentTime, fr = Math.min(f, c.sampleRate * .45), j = first || st.first;
+      wire(inner, split);
+      if (split) {
+        [lpA, lpB, hpA, hpB].forEach(n => wtpP(n.frequency, fr, now, j));
+        const lat = kind === 'dist' && inner.node && s.xdMode !== 'crush' ? M23_OSLAT / c.sampleRate : 0;
+        wtpP(dl.delayTime, lat, now, true);
+        const lg = kind === 'dist' && Number.isFinite(+s.xdLoG) ? m23Cl(+s.xdLoG, -60, 6) : 0;
+        wtpP(lowG.gain, lg <= -59.9 ? 0 : Math.pow(10, lg / 20), now, j);
+      }
+      inner.set(s, j); st.first = false;
+    } };
+  return o;
+}
+// HAAS width (mid/side, mono-safe): out = in + [s, -s], s = MIX x mid delayed by DELAY
+function m23Haas(E) {
+  const c = E.ctx, inp = c.createGain(), out = c.createGain(), mid = c.createGain(), dl = c.createDelay(.05), pos = c.createGain(), neg = c.createGain(), mg = c.createChannelMerger(2),
+    lfo = c.createOscillator(), lg = c.createGain();
+  mid.channelCount = 1; mid.channelCountMode = 'explicit'; mid.channelInterpretation = 'speakers'; // the stereo input mixed down to (L + R) / 2
+  inp.connect(out); inp.connect(mid); mid.connect(dl); dl.connect(pos); dl.connect(neg); pos.connect(mg, 0, 0); neg.connect(mg, 0, 1); mg.connect(out);
+  lfo.connect(lg); lg.connect(dl.delayTime); lfo.start();
+  return { in: inp, out, kill: () => { try { lfo.stop(); } catch (e) { /* stopped */ } [inp, out, mid, dl, pos, neg, mg, lfo, lg].forEach(nd => { try { nd.disconnect(); } catch (e) { /* gone */ } }); },
+    set: (s, first) => {
+      const now = c.currentTime, d = m23Cl(+s.xcDelay || 12, 1, 30) / 1000, w = m23Cl(+s.xcMix, 0, 1);
+      wtpP(dl.delayTime, d, now, first); wtpP(lfo.frequency, m23Cl(+s.xcRate || .4, .05, 5), now, first); wtpP(lg.gain, m23Cl(+s.xcDepth || 0, 0, 1) * Math.min(d * .1, .0008), now, first);
+      wtpP(pos.gain, w, now, first); wtpP(neg.gain, -w, now, first);
+    } };
+}
+if (typeof WTP_MAKE === 'object' && WTP_MAKE) {
+  const d0 = WTP_MAKE.dist, c0 = WTP_MAKE.chorus;
+  // a patch without the new fields gets the old stage itself (not even a gain node more)
+  WTP_MAKE.dist = (E, s) => (s && +s.xdSplit >= 40 ? m23Split(E, 'dist', () => d0(E, s)) : d0(E, s));
+  WTP_MAKE.chorus = (E, s) => (s && (+s.xcLow >= 40 || s.xcMode === 'haas') ? m23Split(E, 'chorus', () => c0(E, s)) : c0(E, s));
+}
+// the rack builds a stage once: a patch that turns SPLIT or HAAS on (or off) while it plays gets the stage built again
+if (typeof wtpRackApply === 'function') {
+  const m23Rack0 = wtpRackApply, fresh = (E, i, key) => {
+    const T = E.t && E.t[i], R = T && T[key], s = E.p.tracks[i] && E.p.tracks[i].synth; if (!R || !s) return;
+    const want = { dist: +s.xdSplit >= 40, chorus: +s.xcLow >= 40 || s.xcMode === 'haas' };
+    ['dist', 'chorus'].forEach(id => { const st = R.st[id]; if (!st) return; const isSplit = !!Object.getOwnPropertyDescriptor(st, 'node') && typeof Object.getOwnPropertyDescriptor(st, 'node').get === 'function';
+      if (isSplit !== want[id]) { try { st.out.disconnect(); } catch (e) { /* gone */ } st.kill(); R.st[id] = null; R.chain = R.chain.map(x => (x === st ? { in: null, out: null } : x)); } });
+  };
+  wtpRackApply = function (E, i) { fresh(E, i, 'wtp'); return m23Rack0(E, i); }; // eslint-disable-line no-func-assign
+  if (typeof spxRackApply === 'function') { const m23Spx0 = spxRackApply; spxRackApply = function (E, i) { fresh(E, i, 'spx'); return m23Spx0(E, i); }; } // eslint-disable-line no-func-assign
+}
+// loaded sets: the new fields checked (a missing one stays missing)
+[['wtpro'], ['spectra']].forEach(([eng]) => { const F = typeof SYNTH_FIELDS === 'object' && SYNTH_FIELDS[eng]; if (!F) return; Object.assign(F.num, { xdSplit: [0, 1000], xdLoG: [-60, 6], xcLow: [0, 1000] }); F.opt.xcMode = ['chorus', 'haas']; });
+// the rack page: SPLIT / LOW BAND on the distortion, MODE and SPLIT on the chorus
+if (typeof WTP_FX_INFO === 'object' && WTP_FX_INFO) {
+  WTP_FX_INFO.dist += '. SPLIT: only the highs are driven, the lows under it pass clean and in phase (a multiband distortion)';
+  WTP_FX_INFO.chorus += ' or Haas width (mono-safe). SPLIT: the lows under it stay dry';
+}
+if (typeof wtpFxRows === 'function') {
+  const m23Rows0 = wtpFxRows;
+  wtpFxRows = function (id, K, sel, s, ap) { // eslint-disable-line no-func-assign
+    const rows = m23Rows0(id, K, sel, s, ap);
+    try {
+      const KX = (key, o) => { const v = { [key]: Number.isFinite(+s[key]) ? +s[key] : o.def }; return bindKnob(v, key, o, () => { s[key] = v[key]; ap(); }); }; // an old patch gets the field only when the knob moves
+      if (id === 'dist') {
+        rows.push([KX('xdSplit', { label: 'SPLIT', min: 0, max: 1000, def: 0, fmt: v => (v < 40 ? 'OFF' : fHz(v)), info: 'Multiband distortion: only the sound over this frequency is driven, the lows pass clean and in phase (OFF under 40 Hz)' }),
+          KX('xdLoG', { label: 'LOW BAND', min: -60, max: 6, def: 0, fmt: v => (v <= -59.9 ? 'CUT' : (v > 0 ? '+' : '') + v.toFixed(1) + 'dB'), info: 'Level of the clean band under SPLIT. CUT = a mid bass with no lows (the sub is its own lane)' })]);
+      }
+      if (id === 'chorus') {
+        rows.unshift([sel('Mode', 'xcMode', [['chorus', 'Chorus'], ['haas', 'Haas width']], 'Chorus, or Haas width: a short echo on the side only, so the sound gets wide and its mono sum stays the dry sound'),
+          KX('xcLow', { label: 'SPLIT', min: 0, max: 1000, def: 0, fmt: v => (v < 40 ? 'OFF' : fHz(v)), info: 'The chorus (or the Haas) works over this frequency only: the lows stay dry (OFF under 40 Hz)' })]);
+      }
+    } catch (e) { console.error('[dnb808] rack split', e); }
+    return rows;
+  };
+}
+
+// ---------- PRO bass presets: the rave clash / jump-up / neuro / riddim basses as resampling-style chains ----------
+// Mid basses: no lows of their own (SPLIT with LOW BAND cut plus the EQ low cut: 48 dB/oct at 160-220 Hz, the sub is its own
+// lane), the drive only over the split, chorus BEFORE the drive on the highs (fatter, random), OTT, the 2-5 kHz bite cut, a
+// gentle top cut. Subs: one phase-locked voice (the start phase is the same on every note, so the sub and the kick add up the
+// same way each time), a sub-sonic cut, mono. Top bass: Haas width over 250 Hz (mono-safe). Level: -18 LUFS at the track input on
+// the 4-bar audition phrase, like the PRO presets of wave 3 (review3/wave5/master). The originals keep their names and sound.
+const M23_LFO_WOB = [[0, 1, 0], [.35, .55, -.3], [1, 0, 0]];
+const M23_BASS = {
+  'Jump Wob Mid PRO': { engine: 'wtpro', level: .211, mono: true, glide: .02, lowMono: 160, o1table: 'Growl', o1pos: .3, o1vol: .85, o1warp: 'fm', o1wsrc: 'other', o1wamt: .3, o1rand: 0,
+    o2table: 'Basic Shapes', o2pos: .66, o2oct: 1, o2semi: 7, o2voices: 6, o2det: .3, o2width: .75, o2vol: .55, f1type: 'ladder', f1cut: 1300, f1res: .3, f1drive: .25,
+    e1a: .002, e1d: .18, e1s: .6, e1r: .06, l1rate: '1/4', l1mode: 'retrig', l1pts: M23_LFO_WOB,
+    mods: [{ s: 'lfo1', d: 'f1cut', a: .6, b: false }, { s: 'lfo1', d: 'o1vol', a: .45, b: false }, { s: 'lfo1', d: 'o2vol', a: .45, b: false }, { s: 'mac1', d: 'f1drive', a: .4, b: false }],
+    fxOrder: ['chorus', 'dist', 'ott', 'eq', 'comp', 'phaser', 'delay', 'reverb'], xcOn: true, xcRate: .8, xcDepth: .5, xcDelay: 9, xcMix: .45, xcLow: 200,
+    xdOn: true, xdMode: 'tube', xdDrive: 11, xdMix: .7, xdSplit: 180, xdLoG: -60, xoOn: true, xoDepth: .25, xoTime: .5,
+    xeOn: true, xeLc: 160, xeMF: 2600, xeMG: 3, xeMQ: .9, xeM2F: 4500, xeM2G: -2.5, xeM2Q: 1.4, xeHc: 10000, xkOn: true, xkThr: -14, xkRatio: 4, xkAtt: .003, xkRel: .08,
+    xrOn: true, xrSize: 1.2, xrMix: .06, xrLc: 300 },
+  'Jump Wob Mid Hi PRO': { engine: 'wtpro', level: .137, mono: true, glide: .02, lowMono: 160, o1table: 'Growl', o1pos: .35, o1vol: .8, o1warp: 'fm', o1wsrc: 'other', o1wamt: .35, o1rand: 0,
+    o2table: 'Basic Shapes', o2pos: .66, o2oct: 2, o2semi: 7, o2voices: 6, o2det: .3, o2width: .75, o2vol: .55, f1type: 'ladder', f1cut: 1700, f1res: .3, f1drive: .3,
+    e1a: .002, e1d: .45, e1s: .7, e1r: .2, l1rate: '1/4', l1mode: 'retrig', l1pts: [[0, 1, 0], [.5, .6, -.3], [1, .1, 0]],
+    mods: [{ s: 'lfo1', d: 'f1cut', a: .55, b: false }, { s: 'lfo1', d: 'o1vol', a: .4, b: false }, { s: 'lfo1', d: 'o2vol', a: .4, b: false }, { s: 'mac1', d: 'f1drive', a: .4, b: false }],
+    fxOrder: ['chorus', 'dist', 'ott', 'eq', 'comp', 'phaser', 'delay', 'reverb'], xcOn: true, xcRate: .8, xcDepth: .5, xcDelay: 9, xcMix: .45, xcLow: 220,
+    xdOn: true, xdMode: 'tube', xdDrive: 11, xdMix: .7, xdSplit: 200, xdLoG: -60, xoOn: true, xoDepth: .25, xoTime: .5,
+    xeOn: true, xeLc: 180, xeMF: 2800, xeMG: 3, xeMQ: .9, xeM2F: 4800, xeM2G: -2.5, xeM2Q: 1.4, xeHc: 11000, xkOn: true, xkThr: -14, xkRatio: 4, xkAtt: .003, xkRel: .08,
+    xrOn: true, xrSize: 1.4, xrMix: .08, xrLc: 300 },
+  // the top bass: one voice, one LFO on many knobs, a hard drive over 220 Hz only, OTT, then Haas width and a short ping echo, both
+  // over 250-300 Hz (the low end stays where the sub is: mono)
+  'Top Bass Ping PRO': { engine: 'wtpro', level: .174, mono: true, glide: .02, lowMono: 200, o1table: 'Basic Shapes', o1pos: .5, o1vol: .85, o1rand: 0, f1type: 'lp24', f1cut: 900, f1res: .35, f1drive: .3,
+    e1a: .002, e1d: .2, e1s: .7, e1r: .06, l1rate: '1/8', l1mode: 'retrig', l1pts: [[0, 0, 0], [.6, 1, .3], [1, .4, 0]],
+    mods: [{ s: 'lfo1', d: 'f1cut', a: .6, b: false }, { s: 'lfo1', d: 'o1pos', a: .3, b: false }, { s: 'lfo1', d: 'f1drive', a: .4, b: false }],
+    fxOrder: ['dist', 'ott', 'eq', 'chorus', 'delay', 'comp', 'phaser', 'reverb'], xdOn: true, xdMode: 'hard', xdDrive: 16, xdMix: .9, xdSplit: 220, xdLoG: -60,
+    xoOn: true, xoDepth: .3, xoTime: .45, xeOn: true, xeLc: 200, xeMF: 3500, xeMG: -2, xeMQ: 1.2, xeHc: 12000,
+    xcOn: true, xcMode: 'haas', xcDelay: 14, xcMix: .5, xcRate: .3, xcDepth: .3, xcLow: 250, xyOn: true, xyTime: '1/32', xyFb: .2, xyMix: .3, xyPing: true, xyLc: 300 },
+  // the sub of the tutorial (sine + a nasal table on the same note, no fifth): both start on phase 0 on every note, a sub-sonic
+  // cut, LP 200 Hz, light tube drive with the dry kept, fully mono
+  'Nasal Sub PRO': { engine: 'wtpro', level: .774, mono: true, glide: .02, lowMono: 400, o1table: 'Basic Shapes', o1pos: 0, o1vol: .9, o1rand: 0, o1phase: 0, o2table: 'Hollow', o2pos: .4, o2vol: .3, o2rand: 0, o2phase: 0,
+    f1type: 'lp24', f1cut: 200, f1res: .1, e1a: .003, e1d: .2, e1s: 1, e1r: .07, fxOrder: ['dist', 'eq', 'comp', 'ott', 'chorus', 'phaser', 'delay', 'reverb'],
+    xdOn: true, xdMode: 'tube', xdDrive: 4, xdMix: .25, xeOn: true, xeLc: 28, xeHc: 2000 },
+  // a pure phase-locked sub with a whisper of its 2nd harmonic (it reads on small speakers), for any mid bass
+  'Phase Lock Sub PRO': { engine: 'wtpro', level: 1, xOut: 1.13, mono: true, glide: .015, lowMono: 400, o1table: 'Basic Shapes', o1pos: 0, o1vol: .9, o1rand: 0, o1phase: .25,
+    f1type: 'lp12', f1cut: 150, f1res: 0, e1a: .004, e1d: .2, e1s: 1, e1r: .06, fxOrder: ['dist', 'eq', 'comp', 'ott', 'chorus', 'phaser', 'delay', 'reverb'],
+    xdOn: true, xdMode: 'tube', xdDrive: 3, xdMix: .15, xeOn: true, xeLc: 28, xeHc: 1200 },
+  // the reese step layer: two saw stacks 30 cents apart, a ladder that breathes over a half note, chorus before the drive, split drive
+  'Rave Reese Step PRO': { engine: 'wtpro', level: .641, mono: true, glide: .03, lowMono: 150, o1table: 'Basic Shapes', o1pos: WTP_F(10), o1fine: -15, o1voices: 4, o1det: .3, o1width: .5, o1rand: 0,
+    o2table: 'Basic Shapes', o2pos: WTP_F(10), o2fine: 15, o2vol: .7, o2voices: 3, o2det: .25, o2width: .5, o2rand: 0, f1type: 'ladder', f1cut: 950, f1res: .25, f1drive: .3,
+    e1a: .004, e1d: .3, e1s: .9, e1r: .12, l1pts: WTP_SLOW, l1rate: '1/2', mods: [wtpM('lfo1', 'f1cut', .2)],
+    fxOrder: ['chorus', 'dist', 'ott', 'eq', 'comp', 'phaser', 'delay', 'reverb'], xcOn: true, xcRate: .5, xcDepth: .6, xcDelay: 11, xcMix: .4, xcLow: 200,
+    xdOn: true, xdMode: 'tube', xdDrive: 9, xdMix: .6, xdSplit: 180, xdLoG: -60, xoOn: true, xoDepth: .25, xoTime: .55,
+    xeOn: true, xeLc: 150, xeMF: 3200, xeMG: -2.5, xeMQ: 1.3, xeM2F: 700, xeM2G: 1.5, xeM2Q: .8, xeHc: 10000 },
+  // neuro: a growl table and a formant filter moved by the talk LFO (the vowel and the table together), split drive, OTT, two cuts
+  'Neuro Formant PRO': { engine: 'wtpro', level: .587, mono: true, glide: .02, lowMono: 150, o1table: 'Neuro Growl', o1pos: .3, o1voices: 2, o1det: .12, o1width: .5, o1rand: 0,
+    o2table: 'Formant Saw', o2pos: .4, o2vol: .35, o2rand: 0, f1type: 'formant', f1vowel: .25, f1res: .4, f1mix: .85, f2type: 'lp24', f2cut: 3000, f2res: .15,
+    e1a: .003, e1d: .3, e1s: .9, e1r: .07, e2a: .001, e2d: .15, e2s: 0, l1pts: WTP_TALK, l1rate: '1/8',
+    mods: [wtpM('lfo1', 'f1vowel', .6), wtpM('lfo1', 'o1pos', .4), wtpM('env2', 'f2cut', .15)],
+    fxOrder: ['dist', 'ott', 'eq', 'comp', 'chorus', 'phaser', 'delay', 'reverb'], xdOn: true, xdMode: 'tube', xdDrive: 12, xdMix: .55, xdSplit: 200, xdLoG: -60,
+    xoOn: true, xoDepth: .4, xoTime: .5, xeOn: true, xeLc: 120, xeMF: 3200, xeMG: -3, xeMQ: 1.4, xeM2F: 5500, xeM2G: -2.5, xeM2Q: 1.3, xeHc: 11000 },
+  // riddim: a square through a comb whose tuning sweeps on 1/8T (the metallic "talk"), a hard drive over 150 Hz, heavy OTT
+  'Riddim Comb PRO': { engine: 'wtpro', level: 1, xOut: 1.5, mono: true, glide: .01, lowMono: 150, o1table: 'Basic Shapes', o1pos: 1, o1voices: 2, o1det: .1, o1width: .4, o1rand: 0,
+    f1type: 'comb+', f1cut: 600, f1res: .6, f1mix: .65, f2type: 'lp24', f2cut: 2400, f2res: .2, e1a: .002, e1d: .25, e1s: .85, e1r: .05,
+    l1pts: WTP_SLOW, l1rate: '1/8T', mods: [wtpM('lfo1', 'f1cut', .35), wtpM('lfo1', 'f2cut', .2)],
+    fxOrder: ['dist', 'ott', 'eq', 'comp', 'chorus', 'phaser', 'delay', 'reverb'], xdOn: true, xdMode: 'hard', xdDrive: 14, xdMix: .6, xdSplit: 150, xdLoG: -60,
+    xoOn: true, xoDepth: .45, xoTime: .4, xeOn: true, xeLc: 110, xeMF: 3000, xeMG: -3, xeMQ: 1.4, xeHc: 10500 },
+  // a resampled growl: FM from the sub into a growl table, its position and the FM moved by a drawn 1/8 LFO, chorus before a split
+  // drive, OTT, a compressor to hold it in place
+  'Growl Resample PRO': { engine: 'wtpro', level: .357, mono: true, glide: .02, lowMono: 150, o1table: 'Growl', o1pos: .25, o1warp: 'fm', o1wsrc: 'sub', o1wamt: .3, o1voices: 2, o1det: .1, o1width: .5, o1rand: 0,
+    sub: .35, subTo: 'f1', f1type: 'ladder', f1cut: 1600, f1res: .3, f1drive: .3, e1a: .003, e1d: .3, e1s: .85, e1r: .07,
+    l1pts: WTP_TALK, l1rate: '1/8', mods: [wtpM('lfo1', 'o1pos', .45), wtpM('lfo1', 'o1wamt', .3), wtpM('lfo1', 'f1cut', .25)],
+    fxOrder: ['chorus', 'dist', 'ott', 'eq', 'comp', 'phaser', 'delay', 'reverb'], xcOn: true, xcRate: .6, xcDepth: .5, xcDelay: 8, xcMix: .28, xcLow: 200,
+    xdOn: true, xdMode: 'tube', xdDrive: 13, xdMix: .65, xdSplit: 190, xdLoG: -60, xoOn: true, xoDepth: .5, xoTime: .45,
+    xeOn: true, xeLc: 150, xeMF: 3200, xeMG: -3, xeMQ: 1.4, xeM2F: 5000, xeM2G: -2, xeHc: 10500, xkOn: true, xkThr: -16, xkRatio: 3, xkAtt: .004, xkRel: .1 },
+  // UK 140 wobble: a saw stack under a resonant low-pass swept at 1/8 by a smooth LFO, split drive, light OTT
+  'UK Wobble PRO': { engine: 'wtpro', level: .796, mono: true, glide: .02, lowMono: 150, o1table: 'Basic Shapes', o1pos: WTP_F(10), o1voices: 3, o1det: .25, o1width: .6, o1rand: 0,
+    o2table: 'Silk Square', o2pos: .5, o2vol: .35, o2rand: 0, f1type: 'lp24', f1cut: 420, f1res: .42, f1key: .2, e1a: .003, e1d: .35, e1s: .85, e1r: .08,
+    l1pts: WTP_SLOW, l1rate: '1/8', mods: [wtpM('lfo1', 'f1cut', .5)],
+    fxOrder: ['dist', 'ott', 'eq', 'comp', 'chorus', 'phaser', 'delay', 'reverb'], xdOn: true, xdMode: 'tube', xdDrive: 10, xdMix: .5, xdSplit: 160, xdLoG: -60,
+    xoOn: true, xoDepth: .3, xoTime: .5, xeOn: true, xeLc: 120, xeMF: 3200, xeMG: -3.5, xeMQ: 1.4, xeHc: 11000 },
+};
+// the role of each (the audition phrase it is measured on) and the original it revises (the GENERATE SONG option and the tests)
+const M23_BASS_ROLE = { 'Jump Wob Mid PRO': 'bass', 'Jump Wob Mid Hi PRO': 'bass', 'Top Bass Ping PRO': 'bass', 'Nasal Sub PRO': 'sub', 'Phase Lock Sub PRO': 'sub', 'Rave Reese Step PRO': 'bass',
+  'Neuro Formant PRO': 'bass', 'Riddim Comb PRO': 'bass', 'Growl Resample PRO': 'bass', 'UK Wobble PRO': 'bass' };
+const M23_PRO_OF = { 'Jump Wob Mid': 'Jump Wob Mid PRO', 'Jump Wob Mid Hi': 'Jump Wob Mid Hi PRO', 'Top Bass Ping': 'Top Bass Ping PRO', 'Nasal Sub': 'Nasal Sub PRO', 'Rave Reese Step': 'Rave Reese Step PRO' };
+if (typeof SYNTH_PRESETS === 'object' && SYNTH_PRESETS) Object.entries(M23_BASS).forEach(([n, v]) => { if (!m23Has(SYNTH_PRESETS, n)) SYNTH_PRESETS[n] = v; });
+// The PRO version of each bass lane that has one, at the original's loudness (the originals are not all at -18 LUFS: the trim in dB
+// keeps the song's balance). For the demos and for a style that wants them; a set never changes by itself.
+const M23_PRO_TRIM = { 'Jump Wob Mid': .7, 'Jump Wob Mid Hi': 3.4, 'Top Bass Ping': -.3, 'Nasal Sub': -9.9, 'Rave Reese Step': 9.2 };
+function m23ProBass(p) {
+  let n = 0;
+  (p && Array.isArray(p.tracks) ? p.tracks : []).forEach(tr => {
+    const pro = tr.synth && m23Has(M23_PRO_OF, tr.synth.preset) ? M23_PRO_OF[tr.synth.preset] : null;
+    if (!pro || !m23Has(SYNTH_PRESETS, pro)) return;
+    const s = makeSynth(pro); s.xOut = Math.round(m23Cl((s.xOut || 0) + (M23_PRO_TRIM[tr.synth.preset] || 0), -24, 24) * 100) / 100; tr.synth = s; n++;
+  });
+  return n;
+}
+
+// ---------- PRO bass presets, second batch: the owner's tutorials (research5/user_tutorials: fifth_sound_design_notes,
+// jumpup_quarter_bass_notes, commercial_80s_bass_notes), technique only, generic names. These carry their own clean sub (the
+// sub oscillator goes round the filters, the SPLIT keeps it out of the drive and the chorus) unless noted. One-shot envelopes are
+// LFOs in ONCE mode (a drawn decay over a quarter note). Level: -18 LUFS on the audition phrase, like the first batch.
+const M23_ONCE_Q = [[0, 1, 0], [1, 0, -.45]], M23_PICK = [[0, 1, 0], [.35, .25, -.6], [1, 0, 0]]; // a quarter-note decay; a convex "pick" (falls fast, then slow)
+const M23_BASS2 = {
+  // fifth: two saws, root and +19 (the fifth an octave up), an LFO on the filter: the liquid wobble
+  'Liquid Fifth Saw Bass': { engine: 'wtpro', level: .464, mono: true, glide: .03, lowMono: 150, o1table: 'Basic Shapes', o1pos: WTP_F(10), o1voices: 2, o1det: .1, o1width: .4, o1rand: 0,
+    o2table: 'Basic Shapes', o2pos: WTP_F(10), o2oct: 1, o2semi: 7, o2vol: .45, o2rand: 0, sub: .45, subTo: 'dry', subOct: 0, f1type: 'lp24', f1cut: 520, f1res: .3, f1key: .2,
+    e1a: .004, e1d: .3, e1s: .9, e1r: .1, l1pts: WTP_SLOW, l1rate: '1/8', mods: [wtpM('lfo1', 'f1cut', .5)],
+    fxOrder: ['chorus', 'dist', 'eq', 'comp', 'ott', 'phaser', 'delay', 'reverb'], xcOn: true, xcRate: .5, xcDepth: .4, xcDelay: 10, xcMix: .25, xcLow: 200,
+    xdOn: true, xdMode: 'tube', xdDrive: 6, xdMix: .3, xdSplit: 150, xdLoG: 0, xeOn: true, xeLc: 25, xeMF: 3200, xeMG: -2.5, xeMQ: 1.3, xeHc: 11000 },
+  // fifth: a sine root and a sine +19 whose LEVEL alone moves (the liquid sine wobble)
+  'Liquid Sine Fifth Wob': { engine: 'wtpro', level: .853, mono: true, glide: .03, lowMono: 200, o1table: 'Basic Shapes', o1pos: 0, o1vol: .85, o1rand: 0, o1phase: 0,
+    o2table: 'Basic Shapes', o2pos: 0, o2oct: 1, o2semi: 7, o2vol: .5, o2rand: 0, f1type: 'lp12', f1cut: 2500, f1res: 0, e1a: .004, e1d: .3, e1s: .95, e1r: .1,
+    l1pts: WTP_SLOW, l1rate: '1/8', mods: [wtpM('lfo1', 'o2vol', .5)], fxOrder: ['dist', 'eq', 'comp', 'ott', 'chorus', 'phaser', 'delay', 'reverb'],
+    xdOn: true, xdMode: 'tube', xdDrive: 4, xdMix: .2, xeOn: true, xeLc: 25 },
+  // fifth stab: saw + saw +19 through a low-pass that a SHORT envelope opens (its decay sets how stabby), short notes
+  'Fifth Stab Bass': { engine: 'wtpro', level: .759, mono: true, glide: .01, lowMono: 150, o1table: 'Basic Shapes', o1pos: WTP_F(10), o1voices: 2, o1det: .08, o1width: .4, o1rand: 0,
+    o2table: 'Basic Shapes', o2pos: WTP_F(10), o2oct: 1, o2semi: 7, o2vol: .4, o2rand: 0, sub: .35, subTo: 'dry', subOct: 0, f1type: 'lp24', f1cut: 280, f1res: .35,
+    e1a: .002, e1d: .25, e1s: .3, e1r: .08, e2a: .001, e2d: .14, e2s: 0, e2r: .1, mods: [wtpM('env2', 'f1cut', .55)],
+    fxOrder: ['dist', 'eq', 'comp', 'ott', 'chorus', 'phaser', 'delay', 'reverb'], xdOn: true, xdMode: 'tube', xdDrive: 8, xdMix: .4, xdSplit: 150, xdLoG: 0,
+    xeOn: true, xeLc: 25, xeMF: 3200, xeMG: -2, xeMQ: 1.3, xeHc: 11000 },
+  // the same idea with sines: the deep house stab bass
+  'Deep Fifth Stab': { engine: 'wtpro', level: 1, xOut: 6.57, mono: true, glide: .01, lowMono: 200, o1table: 'Basic Shapes', o1pos: .12, o1vol: .85, o1rand: 0, o1phase: 0,
+    o2table: 'Basic Shapes', o2pos: .08, o2oct: 1, o2semi: 7, o2vol: .4, o2rand: 0, f1type: 'lp12', f1cut: 420, f1res: .15, e1a: .003, e1d: .35, e1s: .2, e1r: .1,
+    e2a: .001, e2d: .2, e2s: 0, e2r: .1, mods: [wtpM('env2', 'f1cut', .45)], fxOrder: ['dist', 'eq', 'comp', 'ott', 'chorus', 'phaser', 'delay', 'reverb'],
+    xcOn: true, xcRate: .4, xcDepth: .3, xcDelay: 12, xcMix: .2, xcLow: 250, xeOn: true, xeLc: 25 },
+  // jump-up fifth: osc A a saw an octave up, osc B +7, a filter envelope, hard drive over 200 Hz; the sub plays the root
+  'Jump Fifth Saw': { engine: 'wtpro', level: .289, mono: true, glide: .03, lowMono: 160, o1table: 'Basic Shapes', o1pos: WTP_F(10), o1oct: 1, o1voices: 2, o1det: .1, o1width: .4, o1rand: 0,
+    o2table: 'Basic Shapes', o2pos: WTP_F(10), o2semi: 7, o2vol: .5, o2rand: 0, sub: .55, subTo: 'dry', subOct: 0, f1type: 'ladder', f1cut: 900, f1res: .3, f1drive: .3,
+    e1a: .002, e1d: .3, e1s: .8, e1r: .07, e2a: .001, e2d: .2, e2s: .1, mods: [wtpM('env2', 'f1cut', .45)],
+    fxOrder: ['dist', 'ott', 'eq', 'comp', 'chorus', 'phaser', 'delay', 'reverb'], xdOn: true, xdMode: 'tube', xdDrive: 13, xdMix: .7, xdSplit: 200, xdLoG: 0,
+    xoOn: true, xoDepth: .25, xoTime: .5, xeOn: true, xeLc: 25, xeMF: 3200, xeMG: -2.5, xeMQ: 1.3, xeHc: 11000 },
+  // the classic quarter-note jump-up fifth: osc A (triangle-ish, position up) alone through a 12 dB low-pass, osc B +31 unfiltered,
+  // a one-shot quarter-note envelope on A's cutoff, A's position and the filter drive; distortion, THEN chorus; +2 dB at 4 kHz
+  'Jump Quarter Fifth': { engine: 'wtpro', level: .195, mono: true, glide: .05, lowMono: 150, o1table: 'Basic Shapes', o1pos: .42, o1vol: .85, o1rand: 0, o1to: 'f1',
+    o2table: 'Hollow', o2pos: .35, o2oct: 2, o2semi: 7, o2vol: .3, o2rand: 0, o2to: 'dry', sub: .5, subTo: 'dry', subOct: 0, f1type: 'lp12', f1cut: 650, f1res: .25, f1drive: .2,
+    e1a: .002, e1d: .3, e1s: .85, e1r: .06, l1pts: M23_ONCE_Q, l1rate: '1/4', l1mode: 'once',
+    mods: [wtpM('lfo1', 'f1cut', .4), wtpM('lfo1', 'o1pos', .15), wtpM('lfo1', 'f1drive', .7)],
+    fxOrder: ['dist', 'chorus', 'eq', 'comp', 'ott', 'phaser', 'delay', 'reverb'], xdOn: true, xdMode: 'tube', xdDrive: 16, xdMix: .75, xdSplit: 110, xdLoG: 0,
+    xcOn: true, xcRate: .6, xcDepth: .4, xcDelay: 10, xcMix: .2, xcLow: 150, xeOn: true, xeLc: 25, xeMF: 600, xeMG: -1.5, xeMQ: .9, xeM2F: 4000, xeM2G: 2, xeM2Q: 1, xeHc: 12000 },
+  // the darker variant: less position, a lower cutoff, a softer osc B, the top rolled off
+  'Jump Quarter Dark': { engine: 'wtpro', level: .228, mono: true, glide: .05, lowMono: 150, o1table: 'Basic Shapes', o1pos: .3, o1vol: .85, o1rand: 0, o1to: 'f1',
+    o2table: 'Silk Square', o2pos: .3, o2oct: 2, o2semi: 7, o2vol: .22, o2rand: 0, o2to: 'dry', sub: .55, subTo: 'dry', subOct: 0, f1type: 'lp12', f1cut: 420, f1res: .25, f1drive: .2,
+    e1a: .002, e1d: .3, e1s: .85, e1r: .06, l1pts: M23_ONCE_Q, l1rate: '1/4', l1mode: 'once',
+    mods: [wtpM('lfo1', 'f1cut', .35), wtpM('lfo1', 'o1pos', .12), wtpM('lfo1', 'f1drive', .6)],
+    fxOrder: ['dist', 'chorus', 'eq', 'comp', 'ott', 'phaser', 'delay', 'reverb'], xdOn: true, xdMode: 'tube', xdDrive: 14, xdMix: .7, xdSplit: 110, xdLoG: 0,
+    xcOn: true, xcRate: .5, xcDepth: .4, xcDelay: 11, xcMix: .18, xcLow: 150, xeOn: true, xeLc: 25, xeMF: 3000, xeMG: -2, xeMQ: 1.2, xeHc: 7500 },
+  // 90s jump-up: a square through a low-pass with a short envelope, a sine sub, a little tube
+  'Oldskool Square Bass': { engine: 'wtpro', level: .841, mono: true, glide: .02, lowMono: 150, o1table: 'Basic Shapes', o1pos: 1, o1vol: .8, o1rand: 0,
+    sub: .4, subTo: 'dry', subOct: 0, f1type: 'lp24', f1cut: 850, f1res: .15, e1a: .002, e1d: .3, e1s: .8, e1r: .06, e2a: .001, e2d: .2, e2s: 0, mods: [wtpM('env2', 'f1cut', .3)],
+    fxOrder: ['dist', 'eq', 'comp', 'ott', 'chorus', 'phaser', 'delay', 'reverb'], xdOn: true, xdMode: 'tube', xdDrive: 6, xdMix: .3, xdSplit: 150, xdLoG: 0, xeOn: true, xeLc: 25, xeHc: 9000 },
+  // commercial 80s: one saw in wide tight unison, a ladder with a convex quarter-note "pick" envelope on the cutoff AND the drive,
+  // chorus, split drive, OTT pushing the mids, a mid lift; the sine sub straight through (the split keeps it clean)
+  'Dancefloor 80s Bass': { engine: 'wtpro', level: .31, mono: true, glide: .02, lowMono: 160, o1table: 'Basic Shapes', o1pos: WTP_F(10), o1voices: 12, o1det: .15, o1blend: .8, o1width: .6, o1rand: 0,
+    sub: .5, subTo: 'dry', subOct: 0, f1type: 'ladder', f1cut: 480, f1res: .45, f1drive: .2, e1a: .002, e1d: .4, e1s: .8, e1r: .08,
+    l1pts: M23_PICK, l1rate: '1/4', l1mode: 'once', mods: [wtpM('lfo1', 'f1cut', .55), wtpM('lfo1', 'f1drive', .5)],
+    fxOrder: ['chorus', 'dist', 'ott', 'eq', 'comp', 'phaser', 'delay', 'reverb'], xcOn: true, xcRate: .7, xcDepth: .4, xcDelay: 9, xcMix: .3, xcLow: 170,
+    xdOn: true, xdMode: 'tube', xdDrive: 10, xdMix: .6, xdSplit: 160, xdLoG: 0, xoOn: true, xoDepth: .35, xoTime: .45, xoUp: .7,
+    xeOn: true, xeLc: 25, xeMF: 1200, xeMG: 2, xeMQ: .8, xeM2F: 3300, xeM2G: -2, xeM2Q: 1.3, xeHc: 11000 },
+  // the same with an amp-style hard saturation on the highs only (over 300 Hz), stereo kept
+  'Dancefloor Amp Bass': { engine: 'wtpro', level: .302, mono: true, glide: .02, lowMono: 160, o1table: 'Basic Shapes', o1pos: WTP_F(10), o1voices: 12, o1det: .15, o1blend: .8, o1width: .7, o1rand: 0,
+    sub: .5, subTo: 'dry', subOct: 0, f1type: 'ladder', f1cut: 520, f1res: .45, f1drive: .25, e1a: .002, e1d: .4, e1s: .8, e1r: .08,
+    l1pts: M23_PICK, l1rate: '1/4', l1mode: 'once', mods: [wtpM('lfo1', 'f1cut', .55), wtpM('lfo1', 'f1drive', .5)],
+    fxOrder: ['chorus', 'dist', 'ott', 'eq', 'comp', 'phaser', 'delay', 'reverb'], xcOn: true, xcRate: .7, xcDepth: .4, xcDelay: 9, xcMix: .3, xcLow: 170,
+    xdOn: true, xdMode: 'hard', xdDrive: 15, xdTone: .2, xdMix: .55, xdSplit: 300, xdLoG: 0, xoOn: true, xoDepth: .35, xoTime: .45, xoUp: .7,
+    xeOn: true, xeLc: 25, xeMF: 1200, xeMG: 2, xeMQ: .8, xeM2F: 3300, xeM2G: -2.5, xeM2Q: 1.3, xeHc: 10000 },
+  // darker table: a tearing neuro frame instead of the saw, a lower ladder
+  'Dancefloor Dark Bass': { engine: 'wtpro', level: .292, mono: true, glide: .02, lowMono: 160, o1table: 'Neuro Tear', o1pos: .35, o1voices: 8, o1det: .12, o1blend: .8, o1width: .6, o1rand: 0,
+    sub: .5, subTo: 'dry', subOct: 0, f1type: 'ladder', f1cut: 380, f1res: .4, f1drive: .25, e1a: .002, e1d: .4, e1s: .8, e1r: .08,
+    l1pts: M23_PICK, l1rate: '1/4', l1mode: 'once', mods: [wtpM('lfo1', 'f1cut', .5), wtpM('lfo1', 'f1drive', .45)],
+    fxOrder: ['chorus', 'dist', 'ott', 'eq', 'comp', 'phaser', 'delay', 'reverb'], xcOn: true, xcRate: .6, xcDepth: .4, xcDelay: 10, xcMix: .25, xcLow: 170,
+    xdOn: true, xdMode: 'tube', xdDrive: 11, xdMix: .6, xdSplit: 160, xdLoG: 0, xoOn: true, xoDepth: .35, xoTime: .45,
+    xeOn: true, xeLc: 25, xeMF: 3000, xeMG: -2.5, xeMQ: 1.3, xeHc: 9000 },
+};
+Object.keys(M23_BASS2).forEach(n => { M23_BASS[n] = M23_BASS2[n]; M23_BASS_ROLE[n] = 'bass'; if (typeof SYNTH_PRESETS === 'object' && SYNTH_PRESETS && !m23Has(SYNTH_PRESETS, n)) SYNTH_PRESETS[n] = M23_BASS2[n]; });
+
 // ===================== 9. MIDI IMPORT =====================
 // Reads a Standard MIDI File (format 0 or 1, PPQ timing) and turns it into a new set:
 // one scene per section, one clip per lane per section, and the whole song laid out

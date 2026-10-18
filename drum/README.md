@@ -803,6 +803,20 @@ harmony families, sounds and growl feel, loops in the loop library and a song te
 - A white-noise burst on the first downbeat of each drop, echo throws only at transitions, and a drum reverb send that changes
   per section
 
+## Club mastering and PRO basses
+
+- Seven PRO master presets (DnB club 174, Jump-up / rave 174, Dubstep / riddim 140-150, UK bass 140, Liquid 174,
+  House 120-128, Cinematic) with a tonal EQ, a 2-5 kHz dynamic band against harshness, a glue compressor whose detector
+  ignores the kick and the sub, a soft clipper, a -1 dBTP limiter and mono lows. Drop targets from -5.5 to -10 LUFS
+- AUTO MASTER renders the drop and a breakdown and sets the chain to reach the target without pumping or crackle (one undo
+  step). It says when the mix is too quiet to reach the target. New meters: S MAX and PSR. GENERATE SONG picks the PRO
+  master of the style's family
+- Tidal Pro and Spectra racks: SPLIT on the distortion (only the sound above the split is driven, the lows stay clean and in
+  phase) and a HAAS mode on the chorus (wide, with a mono sum equal to the dry sound)
+- 21 PRO bass presets, level-matched and mono-safe, including presets built from the owner's tutorials: Liquid Fifth Saw
+  Bass, Liquid Sine Fifth Wob, Fifth Stab Bass, Deep Fifth Stab, Jump Fifth Saw, Jump Quarter Fifth, Jump Quarter Dark,
+  Oldskool Square Bass, Dancefloor 80s Bass, Dancefloor Amp Bass, Dancefloor Dark Bass
+
 ## Shortcuts
 
 | Key | Action |
