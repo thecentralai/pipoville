@@ -749,6 +749,19 @@ Silk Lead, Silk Pad, Smooth Growl, Smooth Hoover, Soft Pluck, Talking Bass, Velv
   mix, scenes INTRO / BUILD / DROP / BREAKDOWN / DROP 2 / OUTRO filled with library loops, a 64-bar arrangement and a filter
   build. One undo step. GENERATE then fills empty slots in the same style
 
+## World: African and Egyptian / Arabic
+
+- Engine World with plucked strings (oud with slides, kora, qanun with tremolo picking), winds (ney, mizmar), mallets
+  (balafon, mbira, kalimba, marimba), melodic drums (talking drum) and bells. Some instruments are synthesized, others use
+  VCSL samples (Versilian Studios, CC0) that load from orch/w1/ the first time they play
+- Kits of 16 pads: Darbuka Ensemble (doum, tek, ka, slaps, rolls), Riq & Frame, West African (djembe, dunun, kenkeni,
+  sangban, bell, shekere), Talking Drum & Bells
+- Maqam scales: Hijaz, Hijaz Kar, Bayati, Rast, Saba, Nahawand, Kurd, Sikah, plus African pentatonic and hexatonic modes.
+  QUARTER TONES plays the half-flat degrees of Bayati, Rast, Saba and Sikah; off, the nearest semitone plays
+- Rhythms: maqsum, baladi, saidi, malfuf, ayoub, chiftetelli, West African 12/8 feels, afrobeats and amapiano grooves
+- Styles in GENERATE SONG: Middle-eastern dubstep 140, Desert DnB 174, Afro DnB, Afro house world
+- 135 world loops in the loop library (percussion and melodic riffs at 120, 140 and 174 BPM)
+
 ## Shortcuts
 
 | Key | Action |

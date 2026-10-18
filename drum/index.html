@@ -20113,6 +20113,1297 @@ if (typeof genSongLayout === 'function') {
     return plan;
   };
 }
+// ===================== 3v. WORLD: AFRICAN AND EGYPTIAN / ARABIC INSTRUMENTS, RHYTHMS, MAQAMS, STYLES AND LOOPS (wave 5) =====================
+// Sampled (VCSL, CC0 1.0, through the Orchestra loader of section 3t): balafon (two mallets), kalimba, mbira dzaVadzimu, marimba,
+// cowbells; the VCSL world percussion the orchestra already ships (darbuka, frame drums, cajon, congas, bongos, shakers, tambourine).
+// Synthesized (engine 'world', below): oud (fretless, nasal), kora, ngoni, qanun (with tremolo picking), ney, mizmar, a buzzing
+// balafon, a talking drum and the amapiano log drum. The plucked models are Karplus-Strong strings with a body resonance,
+// rendered once per note into a small cache (deterministic: a seeded excitation), the winds and drums play in real time.
+// Drum voices (DRUM_FN): darbuka strokes and rolls, riq, tabla baladi, djembe, dunun family, shekere, bells, talking drum.
+// Five 16-pad kits, drum styles of the generator (maqsum, baladi, saidi, malfuf, ayoub, chiftetelli, kuku, djole 12/8,
+// afrobeats, amapiano, afro house), maqam scales with a 12-TET approximation and an optional quarter-tone mode (P.wmicro),
+// African pentatonic / hexatonic modes, four GENERATE SONG styles and the world loops of the loop library.
+// Hooks (all wrappers or data added here; no other section edited): orchUrl (w_* instruments load from orch/w1/),
+// Engine.prototype.classicNote / warmJobs / synthNote, normalizeProject (P.wmicro), synthDevice, genStyleSounds,
+// genSongClips, genSongLayout, libRecipes / libBuild (or libRegisterRecipes when section 3q has it), libSoundsHtml.
+// Data added: ORCH_PRESET_DEFS (+ SYNTH_FIELDS.orch.opt), SYNTH_PRESETS, ENGINE_BASE.world, SYNTH_FIELDS.world, ENGINES,
+// ENGINE_INIT, DRUM_VOICES, DRUM_FN, GEN_VOICE, KITS, SCALES, GEN_SCALES, MINOR_LIKE, GEN_DRUM, GEN_PROGS, GEN_STYLES,
+// LIB_SEEDS, SAMPLE_CREDITS. A set that uses none of it plays and saves exactly as before.
+
+const WORLD_VER = 'w1', WORLD_ROOT = 'orch/' + WORLD_VER + '/';
+const wHas = (o, k) => o != null && Object.prototype.hasOwnProperty.call(o, k);
+const wNum = (v, d, a, b) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(b, Math.max(a, v)) : d);
+const wMod = (a, n) => ((a % n) + n) % n;
+// a small seeded PRNG (mulberry32): the excitation of a string is the same on every render
+function wRng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+function wHash(s) { let h = 2166136261; for (let k = 0; k < s.length; k++) { h ^= s.charCodeAt(k); h = Math.imul(h, 16777619); } return h >>> 0; }
+
+// ---------- the sampled world instruments: inst.json + MP3 per zone in orch/w1/<id>/, loaded by the Orchestra loader ----------
+if (typeof orchUrl === 'function') {
+  const worldUrl0 = orchUrl;
+  orchUrl = function (path) { // eslint-disable-line no-func-assign
+    if (typeof path === 'string' && /^w_[a-z0-9_]{1,22}\//.test(path)) { try { const u = new URL(document.baseURI); if (!u.pathname.endsWith('/') && !/\.[a-z0-9]+$/i.test(u.pathname)) u.pathname += '/'; return new URL(WORLD_ROOT + path, u).href; } catch (e) { return WORLD_ROOT + path; } }
+    return worldUrl0(path);
+  };
+}
+// [preset, parts [inst, lo, hi, transpose, dB], attack, release]
+const WORLD_SMP = {
+  'Balafon': { parts: [['w_balafon', 0, 127, 0, 0]], a: .001, r: .9 },
+  'Balafon Hard Mallet': { parts: [['w_balafon_h', 0, 127, 0, 0]], a: .001, r: .8 },
+  'Kalimba': { parts: [['w_kalimba', 0, 127, 0, 0]], a: .001, r: 1.6 },
+  'Mbira': { parts: [['w_mbira', 0, 127, 0, 0]], a: .001, r: 1.8 },
+  'Marimba': { parts: [['w_marimba', 0, 127, 0, 0]], a: .001, r: 1.1 },
+  'Balafon + Marimba': { parts: [['w_balafon', 55, 127, 0, 0], ['w_marimba', 0, 127, 0, -4]], a: .001, r: .9 },
+  'Mbira + Kalimba': { parts: [['w_mbira', 0, 127, 0, 0], ['w_kalimba', 0, 127, 12, -6]], a: .001, r: 1.6 },
+};
+const WORLD_SMP_IDS = ['w_balafon', 'w_balafon_h', 'w_kalimba', 'w_mbira', 'w_marimba', 'w_bells'];
+if (typeof ORCH_PRESET_DEFS === 'object' && ORCH_PRESET_DEFS) {
+  Object.entries(WORLD_SMP).forEach(([n, d]) => {
+    if (wHas(ORCH_PRESET_DEFS, n)) return;
+    ORCH_PRESET_DEFS[n] = { cat: 'world', parts: d.parts, a: d.a, r: d.r };
+    if (typeof SYNTH_FIELDS === 'object' && SYNTH_FIELDS.orch && SYNTH_FIELDS.orch.opt && Array.isArray(SYNTH_FIELDS.orch.opt.orch) && !SYNTH_FIELDS.orch.opt.orch.includes(n)) SYNTH_FIELDS.orch.opt.orch.push(n);
+    if (!wHas(SYNTH_PRESETS, n)) SYNTH_PRESETS[n] = { engine: 'orch', orch: n, a: d.a, r: d.r, level: .8, tone: 0, vel: .7, width: .4 };
+  });
+  if (typeof ORCH_TRACK === 'object' && ORCH_TRACK && !ORCH_TRACK.world) ORCH_TRACK.world = { sendA: .24, sendB: .08 };
+  if (typeof ORCH_FALLBACK === 'object' && ORCH_FALLBACK && !ORCH_FALLBACK.world) ORCH_FALLBACK.world = 'Grand Piano';
+}
+
+// ---------- maqams and African modes ----------
+// 12-TET approximations (the piano roll, the generator and every engine use them). The quarter tones (half-flat 3rd of Bayati and
+// Rast, the half-flat 7th of Rast, Saba's 2nd, Sikah's neutral steps) are in WORLD_MICRO: cents per pitch class above the key,
+// played when the set's QUARTER TONES option is on (P.wmicro): exactly by the World engine, by a per-note bend elsewhere.
+const WORLD_SCALES = {
+  hijaz: [0, 1, 4, 5, 7, 8, 10], hijazkar: [0, 1, 4, 5, 7, 8, 11], bayati: [0, 1, 3, 5, 7, 8, 10], rast: [0, 2, 4, 5, 7, 9, 10],
+  saba: [0, 1, 3, 4, 7, 8, 10], nahawand: [0, 2, 3, 5, 7, 8, 11], kurd: [0, 1, 3, 5, 7, 8, 10], sikah: [0, 1, 3, 5, 7, 8, 10],
+  pentmaj: [0, 2, 4, 7, 9], hexmaj: [0, 2, 4, 5, 7, 9], bati: [0, 4, 5, 7, 11], ambassel: [0, 1, 5, 7, 8], anchihoye: [0, 1, 5, 6, 9],
+};
+const WORLD_MICRO = { bayati: { 1: 50 }, rast: { 4: -50, 10: 50 }, saba: { 1: 50 }, sikah: { 1: 50, 3: 50, 5: 50, 8: 50, 10: 50 } };
+const WORLD_SCALE_INFO = {
+  hijaz: ['HIJAZ', 'Maqam Hijaz', 'Maqam Hijaz: a minor 2nd then an augmented 2nd (1 - b2 - 3). The sound of the Middle East: oud riffs, ney calls, desert drops. Same notes as phrygian dominant'],
+  hijazkar: ['HIJAZ KAR', 'Maqam Hijaz Kar', 'Maqam Hijaz Kar (double harmonic): two Hijaz steps, on the root and on the 5th. Big, dramatic, the "snake charmer" sound'],
+  bayati: ['BAYATI', 'Maqam Bayati', 'Maqam Bayati: the 2nd is half-flat (between b2 and 2). With QUARTER TONES off it plays a b2 (12-TET). The everyday maqam of Egyptian song'],
+  rast: ['RAST', 'Maqam Rast', 'Maqam Rast: the "major" of Arabic music, with a half-flat 3rd and 7th. With QUARTER TONES off: a major scale with a b7 (mixolydian)'],
+  saba: ['SABA', 'Maqam Saba', 'Maqam Saba: half-flat 2nd and a flat 4th: the saddest maqam. 12-TET: 1 b2 b3 b4 5 b6 b7'],
+  nahawand: ['NAHAWAND', 'Maqam Nahawand', 'Maqam Nahawand: the Arabic minor, with the raised 7th going up (harmonic minor). Romantic, close to Western minor'],
+  kurd: ['KURD', 'Maqam Kurd', 'Maqam Kurd: minor with a b2 (like phrygian), no quarter tones. Dark grooves and dubstep riffs'],
+  sikah: ['SIKAH', 'Maqam Sikah', 'Maqam Sikah: built on a half-flat note, so most steps are neutral (3/4 tones). Only with QUARTER TONES on does it sound right; 12-TET plays phrygian'],
+  pentmaj: ['MAJOR PENT', 'Major pentatonic', 'Major pentatonic (Ethiopian tizita, Mande and highlife melodies, kora and balafon riffs): 5 notes, no half steps'],
+  hexmaj: ['HEXATONIC', 'West African hexatonic', 'Hexatonic major (no 7th): the six-note mode of many West African balafon and kora pieces'],
+  bati: ['BATI', 'Ethiopian bati', 'Bati (Ethiopian qenet): 1 3 4 5 7, bright with a leading tone'],
+  ambassel: ['AMBASSEL', 'Ethiopian ambassel', 'Ambassel (Ethiopian qenet): 1 b2 4 5 b6. Dark and modal, haunting krar and masenqo lines'],
+  anchihoye: ['ANCHIHOYE', 'Ethiopian anchihoye', 'Anchihoye (Ethiopian qenet): 1 b2 4 b5 6. Strange and tense, a favourite of Ethio-jazz'],
+};
+if (typeof SCALES === 'object' && SCALES) {
+  const chromatic = SCALES.chromatic; delete SCALES.chromatic;
+  Object.entries(WORLD_SCALES).forEach(([k, v]) => { if (!wHas(SCALES, k)) SCALES[k] = v; });
+  if (chromatic) SCALES.chromatic = chromatic;
+  if (typeof GEN_SCALES === 'object' && GEN_SCALES) Object.entries(WORLD_SCALE_INFO).forEach(([k, [label, name, desc]]) => { if (!wHas(GEN_SCALES, k)) GEN_SCALES[k] = { label, name, desc }; });
+  if (typeof MINOR_LIKE === 'object' && Array.isArray(MINOR_LIKE)) ['bayati', 'saba', 'nahawand', 'kurd', 'sikah', 'ambassel'].forEach(s => { if (!MINOR_LIKE.includes(s)) MINOR_LIKE.push(s); });
+}
+// the quarter-tone offset (cents) of midi in project p, 0 when off
+function worldMicro(p, midi) {
+  if (!p || p.wmicro !== true || !wHas(WORLD_MICRO, p.scale)) return 0;
+  const c = WORLD_MICRO[p.scale][wMod(Math.round(midi) - (p.key | 0), 12)];
+  return typeof c === 'number' ? c : 0;
+}
+
+// ---------- the World engine: plucked strings, winds, a buzzing balafon, talking drum, log drum ----------
+const WORLD_MODELS = [['oud', 'Oud'], ['kora', 'Kora'], ['ngoni', 'Ngoni'], ['qanun', 'Qanun'], ['ney', 'Ney'], ['mizmar', 'Mizmar'],
+  ['balafon', 'Balafon (buzz)'], ['talkdrum', 'Talking drum'], ['logdrum', 'Log drum']];
+const WORLD_BASE = { engine: 'world', preset: 'Oud', model: 'oud', level: .8, tone: 0, vel: .7, a: .002, r: .3, body: .6, bright: .5, scoop: 0, trem: 0,
+  vib: .3, breath: .35, buzz: .35, talk: 0, decay: .5, width: .35, lc: 20, glide: 0, mono: false };
+if (typeof ENGINE_BASE === 'object') ENGINE_BASE.world = WORLD_BASE;
+if (typeof SYNTH_FIELDS === 'object') SYNTH_FIELDS.world = {
+  num: { level: [0, 1.5], tone: [-1, 1], vel: [0, 1], a: [.001, 2], r: [.02, 4], body: [0, 1], bright: [0, 1], scoop: [0, 1], trem: [0, 1], vib: [0, 1],
+    breath: [0, 1], buzz: [0, 1], talk: [-12, 12], decay: [0, 1], width: [0, 1], lc: [20, 1000], glide: [0, .3] },
+  opt: { model: WORLD_MODELS.map(m => m[0]) }, bool: ['mono'] };
+// the plucked models: T60 (s) at 80 Hz and at 1 kHz, the loop filter's averaging weight, pick position, body modes [Hz, Q, dB], length
+const WORLD_PLUCK = {
+  oud: { t60: [3.4, 1.0], s: .5, pick: .13, body: [[105, 1.1, 5], [225, 1.4, 4], [410, 1.8, 2], [1250, 2.4, 5]], len: 2.6, click: .3, lp: .55 },
+  kora: { t60: [5.5, 1.8], s: .34, pick: .09, body: [[175, 1.4, 4], [380, 1.8, 2], [2600, 1.5, 3]], len: 3.8, click: .1, lp: .75 },
+  ngoni: { t60: [1.8, .65], s: .44, pick: .2, body: [[210, 1.5, 5], [690, 2, 3], [1800, 2, 4]], len: 1.9, click: .22, lp: .68 },
+  qanun: { t60: [3.8, 1.3], s: .3, pick: .1, body: [[300, 1.4, 3], [720, 2, 2], [2300, 1.8, 4]], len: 2.8, click: .2, lp: .82 },
+};
+const WORLD_LAYERS = [.4, .7, 1];
+const wLayerOf = vel => (vel < 56 ? 0 : vel < 100 ? 1 : 2);
+const WORLD_SR = 44100;
+// ---- JS DSP for the rendered notes
+function wPeak(x, f, q, db) { // RBJ peaking EQ, in place
+  const A = Math.pow(10, db / 40), w = 2 * Math.PI * Math.min(f, WORLD_SR * .45) / WORLD_SR, al = Math.sin(w) / (2 * q), cw = Math.cos(w);
+  const a0 = 1 + al / A, b0 = (1 + al * A) / a0, b1 = -2 * cw / a0, b2 = (1 - al * A) / a0, a1 = -2 * cw / a0, a2 = (1 - al / A) / a0;
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  for (let n = 0; n < x.length; n++) { const v = x[n], y = b0 * v + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2; x2 = x1; x1 = v; y2 = y1; y1 = y; x[n] = y; }
+}
+function wBiquad(x, type, f, q) { // RBJ band-pass / high-pass / low-pass, returns a new array
+  const w = 2 * Math.PI * Math.min(f, WORLD_SR * .45) / WORLD_SR, al = Math.sin(w) / (2 * q), cw = Math.cos(w), a0 = 1 + al;
+  let b0, b1, b2;
+  if (type === 'bp') { b0 = al; b1 = 0; b2 = -al; } else if (type === 'hp') { b0 = (1 + cw) / 2; b1 = -(1 + cw); b2 = (1 + cw) / 2; } else { b0 = (1 - cw) / 2; b1 = 1 - cw; b2 = (1 - cw) / 2; }
+  b0 /= a0; b1 /= a0; b2 /= a0; const a1 = -2 * cw / a0, a2 = (1 - al) / a0, out = new Float32Array(x.length);
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  for (let n = 0; n < x.length; n++) { const v = x[n], y = b0 * v + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2; x2 = x1; x1 = v; y2 = y1; y1 = y; out[n] = y; }
+  return out;
+}
+function wFinish(y, peak, fadeS) { // peak-normalize, 1 ms fade-in, cosine fade-out
+  let pk = 0; for (let n = 0; n < y.length; n++) { const a = Math.abs(y[n]); if (a > pk) pk = a; }
+  const g = pk > 1e-9 ? peak / pk : 0, fi = 44, fo = Math.min(y.length >> 1, Math.round(fadeS * WORLD_SR));
+  for (let n = 0; n < y.length; n++) y[n] *= g;
+  for (let n = 0; n < fi && n < y.length; n++) y[n] *= n / fi;
+  for (let n = 0; n < fo; n++) y[y.length - 1 - n] *= .5 - .5 * Math.cos(Math.PI * n / fo);
+  return y;
+}
+// Karplus-Strong: a string of frequency f, loss per period from T60, an all-pass for the fractional delay (exact tuning),
+// a seeded noise excitation through a one-pole low-pass (brightness, velocity) and a pick-position comb
+function wString(model, f, layer, rr, s, lenS) {
+  const M = WORLD_PLUCK[model], sr = WORLD_SR, n = Math.max(64, Math.round(lenS * sr)), y = new Float32Array(n), P = sr / f;
+  const br = wNum(s.bright, .5, 0, 1), lv = WORLD_LAYERS[layer];
+  const sw = clamp(M.s + .18 * (.5 - br), .05, .5); // the loop filter's weight (less = brighter, longer highs)
+  const N = Math.max(2, Math.floor(P - sw - .1)), d = P - sw - N, C = (1 - d) / (1 + d);
+  const k = clamp(Math.log2(Math.max(f, 1) / 80) / Math.log2(1000 / 80), 0, 1), dec = .55 + .9 * wNum(s.decay, .5, 0, 1);
+  const T60 = (M.t60[0] + (M.t60[1] - M.t60[0]) * k) * dec, g = Math.pow(10, -3 / (T60 * f));
+  const rng = wRng(wHash(model + '|' + Math.round(f * 100) + '|' + layer + '|' + rr)), exc = new Float32Array(N);
+  let lp = 0; const a = clamp(M.lp * (.35 + .65 * lv) * (.55 + .9 * br), .04, .98);
+  for (let i = 0; i < N; i++) { lp += a * ((rng() * 2 - 1) - lp); exc[i] = lp; }
+  const pk = Math.max(1, Math.round(M.pick * N)); for (let i = N - 1; i >= pk; i--) exc[i] -= exc[i - pk];
+  let mean = 0; for (let i = 0; i < N; i++) mean += exc[i]; mean /= N; for (let i = 0; i < N; i++) exc[i] -= mean;
+  let x1 = 0, y1 = 0;
+  for (let i = 0; i < n; i++) {
+    const v = i > N ? (1 - sw) * y[i - N] + sw * y[i - N - 1] : i === N ? (1 - sw) * y[0] : 0;
+    const ap = C * v + x1 - C * y1; x1 = v; y1 = ap;
+    y[i] = (i < N ? exc[i] : 0) + g * ap;
+  }
+  const bd = wNum(s.body, .6, 0, 1) * 1.6;
+  M.body.forEach(([bf, q, db]) => wPeak(y, bf, q, db * bd));
+  if (M.click > 0) { // the plectrum (risha) or the finger: a short bright noise burst over the attack
+    const m = Math.round(.012 * sr), cl = new Float32Array(m); for (let i = 0; i < m; i++) cl[i] = (rng() * 2 - 1) * Math.exp(-i / (.0025 * sr));
+    const h = wBiquad(cl, 'hp', 1800 + 2500 * br, .7); let e = 0; for (let i = 0; i < N && i < n; i++) e = Math.max(e, Math.abs(y[i]));
+    for (let i = 0; i < m && i < n; i++) y[i] += h[i] * M.click * lv * e;
+  }
+  return y;
+}
+function wPluck(model, midi, layer, rr, s) {
+  const f = mtof(midi), M = WORLD_PLUCK[model], len = M.len * (f < 220 ? 1 : Math.pow(220 / f, .3));
+  return wFinish(wString(model, f, layer, rr, s, len), .9, Math.min(.4, len * .25));
+}
+// qanun tremolo: plucks at `rate` Hz summed into a circular buffer of whole periods, so the loop has no seam
+function wTremolo(midi, layer, s, rate) {
+  const f = mtof(midi), per = Math.round(WORLD_SR / rate), K = Math.max(4, Math.round(rate * 1.2)), L = per * K, out = new Float32Array(L), rng = wRng(wHash('trem|' + midi + '|' + layer));
+  const pl = [0, 1].map(rr => wString('qanun', f, Math.max(0, layer - rr), rr + 3, s, Math.min(1.4, 2.4 * (f < 220 ? 1 : Math.pow(220 / f, .3)))));
+  for (let k = 0; k < K; k++) {
+    const p = pl[k % 2], amp = (k % 2 ? .74 : 1) * (.9 + .2 * rng()), o = k * per + Math.round((rng() - .5) * per * .08);
+    for (let i = 0; i < p.length; i++) out[wMod(o + i, L)] += p[i] * amp;
+  }
+  let pk = 0; for (let i = 0; i < L; i++) pk = Math.max(pk, Math.abs(out[i]));
+  for (let i = 0; i < L; i++) out[i] *= .8 / Math.max(1e-9, pk);
+  return out;
+}
+// balafon with buzzing resonators: three bar modes (tuned 1 : 4 : 10), a gourd resonance, and the mirliton buzz (the part of
+// the signal above a threshold rattles: a hard nonlinearity, band-passed)
+function wBalafonNote(midi, layer, rr, s) {
+  const f = mtof(midi), sr = WORLD_SR, lv = WORLD_LAYERS[layer], dec = .5 + wNum(s.decay, .5, 0, 1), n = Math.round(sr * Math.min(1.8, (f < 300 ? 1.5 : 1.1) * dec + .2));
+  const y = new Float32Array(n), rng = wRng(wHash('bal|' + midi + '|' + layer + '|' + rr)), br = wNum(s.bright, .5, 0, 1);
+  const modes = [[1, 1, .45 * dec * (f < 300 ? 1.3 : 1)], [3.98, .32 * (.4 + lv) * (.5 + br), .1], [9.6, .1 * lv * (.4 + br), .035]];
+  modes.forEach(([k, a, tau], j) => { const w = 2 * Math.PI * f * k / sr, ph = rng() * 6.28; if (f * k > sr * .45) return; for (let i = 0; i < n; i++) y[i] += a * Math.sin(w * i + ph) * Math.exp(-i / (tau * sr)); });
+  const m = Math.round(.006 * sr); for (let i = 0; i < m; i++) y[i] += (rng() * 2 - 1) * .5 * lv * (1 - i / m); // the mallet
+  const res = wBiquad(y, 'bp', f, 9); for (let i = 0; i < n; i++) y[i] += res[i] * 2.2; // the gourd under the bar
+  let pk = 0; for (let i = 0; i < n; i++) pk = Math.max(pk, Math.abs(y[i]));
+  const th = pk * (.5 - .3 * lv), bz = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const v = y[i], e = Math.abs(v) - th; bz[i] = e > 0 ? Math.sign(v) * e * (1 + .6 * Math.sin(i * 2 * Math.PI * 140 / sr)) : 0; }
+  const b2 = wBiquad(wBiquad(bz, 'bp', 2400, .7), 'hp', 700, .7), amt = wNum(s.buzz, .35, 0, 1) * 6;
+  for (let i = 0; i < n; i++) y[i] += b2[i] * amt;
+  wPeak(y, 900, 1.2, 2 * (wNum(s.body, .6, 0, 1) - .3));
+  return wFinish(y, .9, .15);
+}
+// the cache of rendered notes (mono AudioBuffers at 44.1 kHz, any context plays them): LRU under a quarter of the orchestra's cap
+const WORLD = { cache: new Map(), bytes: 0, cap: (typeof ORCH === 'object' && ORCH && ORCH.cap ? ORCH.cap : 192 * 1048576) / 4, peak: 0, renders: 0, ms: 0 };
+const wKeyOf = (model, midi, layer, rr, s, trem) => [model, midi, layer, rr, Math.round(wNum(s.bright, .5, 0, 1) * 20), Math.round(wNum(s.body, .6, 0, 1) * 20),
+  Math.round(wNum(s.decay, .5, 0, 1) * 20), model === 'balafon' ? Math.round(wNum(s.buzz, .35, 0, 1) * 20) : 0, trem].join('|');
+function wBuf(model, midi, layer, rr, s, trem, warm) {
+  const key = wKeyOf(model, midi, layer, rr, s, trem), hit = WORLD.cache.get(key);
+  if (hit) { hit.warm = hit.warm && !!warm; WORLD.cache.delete(key); WORLD.cache.set(key, hit); return hit.buf; } // a Map keeps insertion order: re-inserting = most recent
+  const t0 = typeof performance === 'object' ? performance.now() : 0;
+  const data = model === 'balafon' ? wBalafonNote(midi, layer, rr, s) : trem ? wTremolo(midi, layer, s, trem) : wPluck(model, midi, layer, rr, s);
+  const buf = new AudioBuffer({ length: data.length, numberOfChannels: 1, sampleRate: WORLD_SR }); buf.getChannelData(0).set(data);
+  WORLD.cache.set(key, { buf, bytes: data.length * 4, warm: !!warm }); WORLD.bytes += data.length * 4; WORLD.renders++;
+  if (typeof performance === 'object') WORLD.ms += performance.now() - t0;
+  while (WORLD.bytes > WORLD.cap && WORLD.cache.size > 1) { const [k0, v0] = WORLD.cache.entries().next().value; WORLD.cache.delete(k0); WORLD.bytes -= v0.bytes; }
+  WORLD.peak = Math.max(WORLD.peak, WORLD.bytes);
+  return buf;
+}
+const wTremRate = s => (wNum(s.trem, 0, 0, 1) > .01 ? Math.round(8 + 10 * s.trem) : 0);
+// the ney's and the mizmar's waveforms (one PeriodicWave per context)
+const WORLD_WAVES = new WeakMap();
+function wWave(c, kind) {
+  let m = WORLD_WAVES.get(c); if (!m) { m = {}; WORLD_WAVES.set(c, m); }
+  if (m[kind]) return m[kind];
+  const h = kind === 'ney' ? [0, 1, .16, .24, .05, .07, .02, .02] : [0, 1, .85, .7, .62, .5, .44, .38, .3, .26, .22, .2, .16, .14, .12, .1, .09];
+  const re = new Float32Array(h.length), im = new Float32Array(h.length); h.forEach((a, k) => { im[k] = a; });
+  m[kind] = c.createPeriodicWave(re, im); return m[kind];
+}
+Engine.prototype.worldBuild = function (i, midi, vel, t, srcs) {
+  const c = this.ctx, tr = this.p.tracks[i], s = tr.synth, model = wHas(SYNTH_FIELDS.world.opt, 'model') && SYNTH_FIELDS.world.opt.model.includes(s.model) ? s.model : 'oud';
+  const v = clamp(vel / 127, 0, 1), micro = worldMicro(this.p, midi);
+  if (!this.wLast) this.wLast = []; if (!this.wRR) this.wRR = new Map();
+  const prev = this.wLast[i]; this.wLast[i] = midi;
+  const mine = [...this.voices].filter(x => x.track === i && x.world && !x.ended); // at most 32 world voices on a track
+  if (mine.length >= 32) mine.sort((a, b) => a.t - b.t).slice(0, mine.length - 31).forEach(x => x.release(t, .03, true));
+  const out = c.createGain(); out.gain.value = s.level;
+  const env = c.createGain(); env.gain.value = 0;
+  const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.Q.value = .6;
+  const fc = Math.min(c.sampleRate * .45, 15000 * Math.pow(2, s.tone * 2.5) * (.5 + .5 * Math.pow(v, .6)));
+  lp.frequency.value = fc;
+  let node = lp; env.connect(lp);
+  if (s.lc > 25) { const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.Q.value = .6; hp.frequency.value = Math.min(s.lc, c.sampleRate * .45); node.connect(hp); node = hp; }
+  const pan = this.voicePanner ? this.voicePanner() : c.createStereoPanner();
+  if (pan.pan) pan.pan.value = clamp(s.width * (midi - 62) / 36, -.6, .6);
+  node.connect(pan); pan.connect(out); out.connect(this.voiceDest ? this.voiceDest(i, s) : this.t[i].in);
+  const vg = (1 - s.vel) + s.vel * Math.pow(v, 1.5), a = Math.max(.001, s.a);
+  const pitch = []; // the detune params a bend moves (cents)
+  const start0 = (prm, base) => { // micro tones, the glide from the last note (fretless slides), the scoop into the note
+    prm.value = base;
+    const gl = s.glide > 0 && prev != null && prev !== midi && Math.abs(prev - midi) <= 12, sc = wNum(s.scoop, 0, 0, 1);
+    if (gl) { prm.setValueAtTime(base + (prev - midi) * 100, t); prm.linearRampToValueAtTime(base, t + s.glide); }
+    else if (sc > .01) { prm.setValueAtTime(base - 180 * sc, t); prm.linearRampToValueAtTime(base, t + .03 + .06 * sc); }
+    pitch.push(prm);
+  };
+  const all = []; let natEnd = Infinity, decaying = false;
+  if (wHas(WORLD_PLUCK, model) || model === 'balafon') {
+    const layer = wLayerOf(vel), rk = i + '|' + midi + '|' + layer, rr = (this.wRR.get(rk) || 0) % 2; this.wRR.set(rk, rr + 1);
+    const trem = model === 'qanun' ? wTremRate(s) : 0;
+    const buf = wBuf(model, clamp(Math.round(midi), 0, 127), layer, rr, s, trem);
+    const src = c.createBufferSource(); src.buffer = buf; if (trem) { src.loop = true; }
+    start0(src.detune, micro);
+    const g = c.createGain(); g.gain.value = vg * (model === 'balafon' ? .9 : 1); src.connect(g); g.connect(env);
+    src.start(t); if (!trem) { natEnd = t + buf.duration; src.stop(natEnd + .01); }
+    env.gain.setValueAtTime(0, t); env.gain.linearRampToValueAtTime(1, t + (trem ? Math.max(a, .02) : a));
+    all.push(src); srcs.push(src);
+  } else if (model === 'ney' || model === 'mizmar') {
+    const ney = model === 'ney', f = mtof(midi), o = c.createOscillator(); o.setPeriodicWave(wWave(c, model)); o.frequency.value = f;
+    start0(o.detune, micro);
+    if (!(s.glide > 0 && prev != null && prev !== midi) && !(s.scoop > .01)) { o.detune.setValueAtTime(micro - (ney ? 30 : 15), t); o.detune.linearRampToValueAtTime(micro, t + (ney ? .09 : .04)); } // the breath finds the note
+    const vib = c.createOscillator(); vib.frequency.value = ney ? 5.2 : 6.4; const vd = c.createGain(); vd.gain.value = 0;
+    const depth = wNum(s.vib, .3, 0, 1) * (ney ? 22 : 16); vd.gain.setValueAtTime(0, t); vd.gain.linearRampToValueAtTime(0, t + .18); vd.gain.linearRampToValueAtTime(depth, t + .6);
+    vib.connect(vd); vd.connect(o.detune);
+    const tone = c.createGain(); tone.gain.value = vg * (ney ? .55 : .32);
+    let src = o;
+    if (!ney) { // the double reed: a shaper and two nasal formants
+      const sh = c.createWaveShaper(); sh.curve = this.curve ? this.curve(.25) : null; o.connect(sh);
+      const f1 = c.createBiquadFilter(); f1.type = 'peaking'; f1.frequency.value = 1350; f1.Q.value = 2.4; f1.gain.value = 9;
+      const f2 = c.createBiquadFilter(); f2.type = 'peaking'; f2.frequency.value = 2900; f2.Q.value = 3; f2.gain.value = 6;
+      const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 280; sh.connect(f1); f1.connect(f2); f2.connect(hp); src = hp;
+    }
+    src.connect(tone); tone.connect(env);
+    const br = wNum(s.breath, .35, 0, 1) * (ney ? 1 : .35);
+    let nz = null;
+    if (br > .01 && this.noiseBuf) { // the breath: noise around the note and a hiss on top, a burst at the start
+      nz = c.createBufferSource(); nz.buffer = this.noiseBuf; nz.loop = true;
+      const b1 = c.createBiquadFilter(); b1.type = 'bandpass'; b1.frequency.value = Math.min(f * 2, c.sampleRate * .4); b1.Q.value = 3;
+      const b2 = c.createBiquadFilter(); b2.type = 'highpass'; b2.frequency.value = 2600;
+      const g1 = c.createGain(), g2 = c.createGain(); g1.gain.value = br * .9 * vg; g2.gain.setValueAtTime(br * .25 * vg, t); g2.gain.setTargetAtTime(br * .06 * vg, t + .05, .08);
+      nz.connect(b1); b1.connect(g1); g1.connect(env); nz.connect(b2); b2.connect(g2); g2.connect(env);
+      nz.start(t, (wHash(i + '|' + midi) % 1000) / 1000); all.push(nz); srcs.push(nz);
+    }
+    o.start(t); vib.start(t); all.push(o, vib); srcs.push(o, vib);
+    const aa = Math.max(a, ney ? .06 : .025);
+    env.gain.setValueAtTime(0, t); env.gain.linearRampToValueAtTime(1.15, t + aa); env.gain.setTargetAtTime(1, t + aa, .12);
+  } else { // talking drum and log drum: tuned membranes / a pitched thump, they decay by themselves
+    decaying = true;
+    const talk = model === 'talkdrum', f = mtof(midi), dec = .4 + 1.2 * wNum(s.decay, .5, 0, 1);
+    const modes = talk ? [[1, 1, .32 * dec], [1.5, .34, .12 * dec], [2.0, .2, .07 * dec], [2.44, .1, .04 * dec]] : [[1, 1, .38 * dec], [2, .16 * (.4 + s.bright), .12 * dec]];
+    let end = t;
+    const bus = c.createGain(); bus.gain.value = vg;
+    if (!talk) { const sh = c.createWaveShaper(); sh.curve = this.curve ? this.curve(.18 + .3 * s.body) : null; bus.connect(sh); sh.connect(env); } else bus.connect(env);
+    modes.forEach(([k, amp, tau]) => {
+      const o = c.createOscillator(); o.type = 'sine'; o.frequency.value = f * k;
+      const D = o.detune; D.value = micro; pitch.push(D);
+      if (s.glide > 0 && prev != null && prev !== midi && Math.abs(prev - midi) <= 12) { D.setValueAtTime(micro + (prev - midi) * 100, t); D.linearRampToValueAtTime(micro, t + s.glide); }
+      else { D.setValueAtTime(micro + (talk ? 140 : 1100), t); D.linearRampToValueAtTime(micro, t + (talk ? .045 : .03)); } // the strike: the skin is tighter for an instant
+      const g = c.createGain(); g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(amp, t + .003); g.gain.exponentialRampToValueAtTime(.0001, t + .003 + tau * 4.6);
+      o.connect(g); g.connect(bus); o.start(t); o.stop(t + tau * 4.6 + .05); end = Math.max(end, t + tau * 4.6 + .05); all.push(o); srcs.push(o);
+    });
+    if (this.noiseBuf) { // the stick or the hand on the skin
+      const nz = c.createBufferSource(); nz.buffer = this.noiseBuf; const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = talk ? 2200 : 1400; bp.Q.value = 1;
+      const g = c.createGain(); g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(talk ? .35 : .18, t + .001); g.gain.exponentialRampToValueAtTime(.0001, t + .03);
+      nz.connect(bp); bp.connect(g); g.connect(bus); nz.start(t, (wHash('n' + midi) % 997) / 997); nz.stop(t + .04); all.push(nz); srcs.push(nz);
+    }
+    env.gain.setValueAtTime(1, t); natEnd = end;
+  }
+  const lastPitch = pitch.slice();
+  const voice = {
+    t, ended: false, relAt: Infinity, track: i, world: true,
+    ap: { cut: [lp.detune] },
+    bend: (t0, pts) => { if (typeof voiceBend === 'function') voiceBend(lastPitch, t0, pts, 100); },
+    release: (tOff, rOv, force) => {
+      if (voice.ended || (!force && tOff >= voice.relAt)) return;
+      voice.relAt = tOff; tOff = Math.max(tOff, t + .003);
+      if (decaying && !force) { // the membrane rings on; TALK bends it across the note (a squeeze of the drum)
+        const tk = wNum(s.talk, 0, -12, 12);
+        if (tk && tOff > t + .06) lastPitch.forEach(p => { try { p.setValueAtTime(micro, t + .05); p.linearRampToValueAtTime(micro + tk * 100, tOff); } catch (e) { /* stopped */ } });
+        if (tOff + .05 < natEnd) { const G = env.gain; G.setValueAtTime(1, tOff); G.setTargetAtTime(0, tOff, Math.max(.02, (rOv != null ? rOv : s.r) / 3)); }
+        return;
+      }
+      const r = Math.max(.01, rOv != null ? rOv : s.r), G = env.gain;
+      if (G.cancelAndHoldAtTime) G.cancelAndHoldAtTime(tOff); else G.cancelScheduledValues(tOff);
+      G.setTargetAtTime(0, tOff, Math.max(.003, r / 4));
+      const end = tOff + r * 1.3 + .05;
+      all.forEach(o => { try { if (!(o.buffer && !o.loop && t + o.buffer.duration < end)) o.stop(end); } catch (err) { /* already stopped */ } });
+    },
+  };
+  let left = all.length;
+  const done = () => {
+    if (--left > 0) return;
+    voice.ended = true; this.voices.delete(voice);
+    const cut = () => { try { out.disconnect(); } catch (err) { /* gone */ } };
+    if (this.offline) cut(); else setTimeout(cut, (typeof VOICE_LINGER === 'number' ? VOICE_LINGER : .1) * 1000);
+  };
+  all.forEach(o => { o.onended = done; });
+  if (decaying) voice.relAt = Infinity;
+  return voice;
+};
+{
+  const worldClassic0 = Engine.prototype.classicNote;
+  Engine.prototype.classicNote = function (i, midi, vel, t) {
+    const s = this.p.tracks[i].synth;
+    if (!(s && s.engine === 'world')) return worldClassic0.call(this, i, midi, vel, t);
+    return this.guardNote ? this.guardNote(this.worldBuild, i, midi, vel, t) : this.worldBuild(i, midi, vel, t, []);
+  };
+  // the other engines: a quarter tone of the maqam (P.wmicro) as a bend at the note's start
+  const worldSynthNote0 = Engine.prototype.synthNote;
+  Engine.prototype.synthNote = function (i, midi, vel, t) {
+    const v = worldSynthNote0.call(this, i, midi, vel, t);
+    if (this.p && this.p.wmicro === true) {
+      const s = this.p.tracks[i] && this.p.tracks[i].synth, c = worldMicro(this.p, midi);
+      if (c && s && s.engine !== 'world' && v && typeof v.bend === 'function') { try { v.bend(t, [[t + .002, c / 100]]); } catch (e) { /* a voice without pitch params */ } }
+    }
+    return v;
+  };
+  // idle-time warm-up: the middle layer of the notes a part usually plays (the first notes of a set do not render in the scheduler)
+  const worldWarm0 = Engine.prototype.warmJobs;
+  Engine.prototype.warmJobs = function (s) {
+    if (!(s && s.engine === 'world')) return worldWarm0.call(this, s);
+    const m = s.model; if (!(wHas(WORLD_PLUCK, m) || m === 'balafon')) return [];
+    const lo = m === 'kora' || m === 'balafon' ? 50 : m === 'qanun' ? 55 : 45, jobs = [];
+    for (let k = lo; k <= lo + 26; k++) jobs.push(() => {
+      if (!(this.p && this.p.tracks.some(t => t && t.synth === s))) return; // the track has another sound now
+      for (const [k0, v0] of WORLD.cache) { if (WORLD.bytes < WORLD.cap * .6) break; if (v0.warm) { WORLD.cache.delete(k0); WORLD.bytes -= v0.bytes; } } // older warm-ups no note played make room
+      if (WORLD.bytes < WORLD.cap * .6) wBuf(m, k, 1, 0, s, m === 'qanun' ? wTremRate(s) : 0, true);
+    }); // warm-ups stop at 60 % of the cache
+    return jobs;
+  };
+}
+if (typeof ENGINES === 'object' && Array.isArray(ENGINES) && !ENGINES.some(e => e[0] === 'world')) ENGINES.push(['world', 'World']);
+if (typeof ENGINE_INIT === 'object') ENGINE_INIT.world = 'Oud';
+// the presets (new names only)
+const WORLD_PRESETS = {
+  'Oud': { model: 'oud', r: .3, body: .65, bright: .45, scoop: .15, level: .85 },
+  'Oud Fretless Slide': { model: 'oud', r: .35, body: .7, bright: .4, scoop: .35, glide: .07, mono: true, level: .85 },
+  'Oud Bright Riff': { model: 'oud', r: .22, body: .5, bright: .75, scoop: .05, level: .8, decay: .35 },
+  'Kora': { model: 'kora', r: .9, body: .55, bright: .6, level: .8, decay: .6, width: .5 },
+  'Kora Soft': { model: 'kora', r: 1.1, body: .7, bright: .3, level: .85, decay: .7, width: .55, tone: -.2 },
+  'Ngoni': { model: 'ngoni', r: .2, body: .6, bright: .6, level: .85, decay: .4 },
+  'Qanun': { model: 'qanun', r: .5, body: .5, bright: .7, level: .75, decay: .55, width: .5 },
+  'Qanun Tremolo': { model: 'qanun', r: .35, body: .5, bright: .65, trem: .55, level: .7, a: .015, width: .5 },
+  'Ney': { model: 'ney', a: .08, r: .35, breath: .4, vib: .35, level: .8, tone: -.1 },
+  'Ney Breathy': { model: 'ney', a: .12, r: .5, breath: .75, vib: .45, level: .8, tone: -.2, scoop: .2 },
+  'Mizmar': { model: 'mizmar', a: .03, r: .15, breath: .2, vib: .3, level: .55, lc: 180 },
+  'Balafon Buzz': { model: 'balafon', r: .8, buzz: .45, bright: .5, body: .6, level: .8, decay: .5 },
+  'Talking Drum': { model: 'talkdrum', r: .3, decay: .5, talk: 0, level: .9 },
+  'Talking Drum Talk Up': { model: 'talkdrum', r: .3, decay: .55, talk: 5, level: .9 },
+  'Talking Drum Talk Down': { model: 'talkdrum', r: .3, decay: .55, talk: -4, level: .9 },
+  'Log Drum Thump': { model: 'logdrum', r: .25, decay: .45, bright: .5, body: .5, level: .75, lc: 25 },
+  'Log Drum Thump Deep': { model: 'logdrum', r: .3, decay: .7, bright: .3, body: .7, level: .75, lc: 25 },
+};
+Object.entries(WORLD_PRESETS).forEach(([n, d]) => { if (!wHas(SYNTH_PRESETS, n)) SYNTH_PRESETS[n] = Object.assign({ engine: 'world' }, d); });
+// automation (c16): the brightness lane, like the other engines
+if (typeof AUTO_ENG === 'object' && AUTO_ENG && !AUTO_ENG.world) AUTO_ENG.world = {
+  cut: { name: 'Brightness (tone, +-4 oct)', grp: 'Filter', kind: 'voice', lin: true, fmt: x => (x >= .5 ? '+' : '') + ((x - .5) * 8).toFixed(1) + ' oct', def: () => .5,
+    vp: x => (x && x.ap && x.ap.cut ? [[x.ap.cut[0], 1]] : []), off: (s, x) => (x - .5) * 9600 } };
+// sets: P.wmicro is kept only when it is on (a set without it saves the same JSON as before)
+{
+  const worldNorm0 = normalizeProject;
+  normalizeProject = function (p) { // eslint-disable-line no-func-assign
+    const out = worldNorm0(p);
+    if (out && typeof out === 'object') { if (p && typeof p === 'object' && p.wmicro === true) out.wmicro = true; else delete out.wmicro; }
+    return out;
+  };
+}
+
+// ---------- synthesized world drum voices (DRUM_FN: engine, out, time, velocity 0..1, pad, pitch ratio, decay mult -> s) ----------
+// A membrane is a few inharmonic sine modes (circular membrane ratios 1, 1.59, 2.14, 2.30, 2.65) with their own decays, a short
+// pitch drop at the strike and a filtered noise burst for the hand, the finger or the stick.
+function wMem(E, out, t, v, f, modes, o = {}) {
+  let bus = out, dur = .05;
+  if (o.drive) { const g = E.gain(1), sh = E.ctx.createWaveShaper(); sh.curve = E.curve(o.drive); g.connect(sh); sh.connect(out); bus = g; }
+  modes.forEach(([k, a, dec]) => {
+    const fr = f * k, os = E.osc('sine', fr * Math.pow(2, (o.drop || 0) / 12), t, dec * 5 + (o.bt || 0) + .05);
+    if (o.drop) os.frequency.exponentialRampToValueAtTime(fr, t + (o.dt || .03));
+    if (o.bend) { const t1 = t + (o.dt || .03) + (o.bd || .04); os.frequency.setValueAtTime(fr, t1); os.frequency.exponentialRampToValueAtTime(fr * Math.pow(2, o.bend / 12), t1 + (o.bt || .2)); }
+    if (o.bend2) { const t2 = t + (o.dt || .03) + (o.bd || .04) + (o.bt || .2); os.frequency.exponentialRampToValueAtTime(fr * Math.pow(2, (o.bend + o.bend2) / 12), t2 + (o.bt2 || .2)); }
+    const g = E.gain(0); E.perc(g.gain, t, v * a, dec, o.att || .001); os.connect(g); g.connect(bus); dur = Math.max(dur, dec * 1.6 + (o.bt || 0));
+  });
+  (o.n || []).forEach(([type, fq, q, a, dec, at]) => {
+    const n = E.noise(t, dec * 2 + .02), fl = E.filt(type, fq, q), g = E.gain(0); E.perc(g.gain, t, v * a, dec, at || .001);
+    n.connect(fl); fl.connect(g); g.connect(bus); dur = Math.max(dur, dec * 1.6);
+  });
+  return dur;
+}
+// zils / riq jingles: pairs of small cymbals, a few grains a few ms apart (fixed offsets: the same hit on every render)
+function wJingle(E, out, t, v, r, d, grains, spread) {
+  const mix = E.gain(.12);
+  [3150, 4720, 6280, 7900].forEach(f => E.osc('square', f * r, t, spread + .25 * d).connect(mix));
+  const hp = E.filt('highpass', 5200 * r, .8), bp = E.filt('bandpass', 8200 * r, 1.2), g = E.gain(0), G = g.gain;
+  G.setValueAtTime(.0001, t);
+  for (let k = 0; k < grains; k++) { const tk = t + spread * k / Math.max(1, grains - 1) + (k % 2 ? .0013 : 0), a = v * (1 - .25 * (k / grains)) * (k % 3 === 1 ? .7 : 1);
+    G.setValueAtTime(Math.max(.0002, a), tk); G.exponentialRampToValueAtTime(Math.max(.0002, a * .18), tk + .018); }
+  G.exponentialRampToValueAtTime(.0001, t + spread + .09 * d + .02);
+  mix.connect(hp); hp.connect(bp); bp.connect(g); g.connect(out);
+  const n = E.noise(t, spread + .1), nf = E.filt('highpass', 7000, .7), ng = E.gain(0); E.perc(ng.gain, t, v * .5, spread + .04 * d); n.connect(nf); nf.connect(ng); ng.connect(out);
+  return spread + .12 * d;
+}
+const WORLD_DRUMS = {
+  // darbuka (doumbek): the sampled doum / tek / ka are in the kits; these add the slap, the finger snap and the roll
+  wdslap(E, out, t, v, p, r, d) { return wMem(E, out, t, v, 330 * r, [[1, .55, .06 * d], [1.62, .3, .035 * d]], { drop: 2, n: [['bandpass', 1900 * r, .8, .85, .05 * d], ['highpass', 5200, .7, .25, .02]] }); },
+  wdsnap(E, out, t, v, p, r, d) { return wMem(E, out, t, v, 760 * r, [[1, .18, .02 * d]], { n: [['bandpass', 2900 * r, 1.6, .75, .016 * d], ['highpass', 6500, .7, .3, .012]] }); },
+  wdroll(E, out, t, v, p, r, d) { // "trrr": five teks of the ring and middle fingers, 22 ms apart, louder to the last
+    let dur = 0; for (let k = 0; k < 5; k++) dur = Math.max(dur, k * .022 * d + wMem(E, out, t + k * .022 * d, v * (.45 + .14 * k), 560 * r, [[1, .35, .03]], { n: [['bandpass', 3300 * r, 1.1, .8, .028], ['highpass', 6400, .7, .25, .015]] }));
+    return dur;
+  },
+  wdtek(E, out, t, v, p, r, d) { return wMem(E, out, t, v, 540 * r, [[1, .4, .045 * d], [2.3, .15, .02 * d]], { n: [['bandpass', 3200 * r, 1.2, .95, .035 * d], ['highpass', 6200, .7, .3, .02]] }); },
+  wdoum(E, out, t, v, p, r, d) { return wMem(E, out, t, v, 92 * r, [[1, 1, .26 * d], [1.59, .3, .11 * d], [2.14, .14, .06 * d]], { drop: 3, dt: .025, n: [['lowpass', 900, .7, .2, .02]] }); },
+  // riq (Egyptian tambourine): a small skin and five pairs of heavy jingles
+  wriqd(E, out, t, v, p, r, d) { return Math.max(wMem(E, out, t, v, 150 * r, [[1, .8, .16 * d], [1.59, .25, .07 * d]], { drop: 2, n: [['lowpass', 1200, .7, .2, .02]] }), wJingle(E, out, t, v * .35, r, d * .8, 3, .008)); },
+  wriqt(E, out, t, v, p, r, d) { return Math.max(wMem(E, out, t, v, 620 * r, [[1, .3, .03 * d]], { n: [['bandpass', 3000 * r, 1, .6, .025 * d]] }), wJingle(E, out, t, v * .8, r, d, 4, .01)); },
+  wriqj(E, out, t, v, p, r, d) { return wJingle(E, out, t, v, r, d, 5, .028 * d); },
+  wriqr(E, out, t, v, p, r, d) { return wJingle(E, out, t, v * .85, r, d, 14, .22 * d); },
+  wriqs(E, out, t, v, p, r, d) { return wJingle(E, out, t, v * 1.1, r * 1.04, d * 1.6, 2, .004); }, // the "sak": all the jingles at once, ringing
+  wzill(E, out, t, v, p, r, d) { // sagat / zills: two finger cymbals struck together
+    const mix = E.gain(.2); [2240, 3410, 5070, 6620].forEach((f, k) => { const o = E.osc('sine', f * r, t, .9 * d + .1), g = E.gain(0); E.perc(g.gain, t, v * [.5, .35, .25, .18][k], (.7 - .12 * k) * d); o.connect(g); g.connect(mix); });
+    mix.connect(out); const n = E.noise(t, .02), hp = E.filt('highpass', 6000), ng = E.gain(0); E.perc(ng.gain, t, v * .35, .012); n.connect(hp); hp.connect(ng); ng.connect(out);
+    return .9 * d;
+  },
+  // tabl baladi (the big Saidi bass drum): the stick on the big head, the thin stick on the other
+  wtabl(E, out, t, v, p, r, d) { return wMem(E, out, t, v, 60 * r, [[1, 1, .42 * d], [1.5, .38, .16 * d], [2.2, .12, .06]], { drop: 4, dt: .03, drive: .2, n: [['lowpass', 420, .7, .3, .03], ['bandpass', 2500, 1, .22, .01]] }); },
+  wtablk(E, out, t, v, p, r, d) { return wMem(E, out, t, v, 690 * r, [[1, .3, .04 * d]], { n: [['bandpass', 2900 * r, 1.4, .8, .02 * d], ['highpass', 7000, .7, .2, .01]] }); },
+  // djembe: bass (the middle of the skin), tone (the edge, flat fingers), slap (the edge, loose fingers: a crack), flam
+  wdjb(E, out, t, v, p, r, d) { return wMem(E, out, t, v, 70 * r, [[1, 1, .24 * d], [1.5, .22, .09 * d]], { drop: 5, dt: .025, n: [['lowpass', 650, .7, .4, .03]] }); },
+  wdjt(E, out, t, v, p, r, d) { return wMem(E, out, t, v, 325 * r, [[1, .85, .12 * d], [1.59, .45, .08 * d], [2.14, .26, .05 * d], [2.65, .14, .03 * d]], { drop: 1, n: [['bandpass', 1200 * r, .7, .35, .02]] }); },
+  wdjs(E, out, t, v, p, r, d) { return wMem(E, out, t, v, 410 * r, [[1, .35, .05 * d], [2.3, .22, .03 * d]], { drive: .25, n: [['bandpass', 2400 * r, .6, 1.1, .045 * d], ['highpass', 5000, .7, .45, .02]] }); },
+  wdjf(E, out, t, v, p, r, d) { return Math.max(WORLD_DRUMS.wdjs(E, out, t, v * .55, p, r * .98, d), .018 + WORLD_DRUMS.wdjs(E, out, t + .018, v, p, r, d)); },
+  // the dunun family (dundunba, sangban, kenkeni): a stick on a cowhide head; DECAY under 40 % = the muted (closed) stroke
+  wdun(E, out, t, v, p, r, d) { return wMem(E, out, t, v, 58 * r, [[1, 1, .42 * d], [1.47, .4, .2 * d], [2.1, .15, .08 * d]], { drop: 2, drive: .1, n: [['bandpass', 3000, 1, .26, .012], ['lowpass', 500, .7, .25, .03]] }); },
+  wsang(E, out, t, v, p, r, d) { return wMem(E, out, t, v, 86 * r, [[1, 1, .32 * d], [1.47, .38, .15 * d], [2.1, .14, .06 * d]], { drop: 2, n: [['bandpass', 3200, 1, .26, .012], ['lowpass', 700, .7, .2, .025]] }); },
+  wkenk(E, out, t, v, p, r, d) { return wMem(E, out, t, v, 132 * r, [[1, .95, .22 * d], [1.47, .35, .1 * d], [2.1, .12, .05 * d]], { drop: 2, n: [['bandpass', 3400, 1, .28, .01]] }); },
+  // shekere (a gourd in a net of beads): a swish and a slap on the bottom
+  wshek(E, out, t, v, p, r, d) {
+    const n = E.noise(t, .14 * d + .05), bp = E.filt('bandpass', 5600 * r, .9), hp = E.filt('highpass', 2600), g = E.gain(0), G = g.gain, a = .035 * d;
+    G.setValueAtTime(.0001, t); G.exponentialRampToValueAtTime(v * .75, t + a); G.exponentialRampToValueAtTime(v * .3, t + a + .03); G.exponentialRampToValueAtTime(.0001, t + a + .1 * d);
+    n.connect(bp); bp.connect(hp); hp.connect(g); g.connect(out); return a + .12 * d;
+  },
+  wshks(E, out, t, v, p, r, d) { return Math.max(wMem(E, out, t, v, 190 * r, [[1, .6, .07 * d]], { n: [['bandpass', 900, .8, .4, .03]] }), WORLD_DRUMS.wshek(E, out, t, v * .7, p, r, d * .7)); },
+  // iron bells (gankogui, the dunun bell): inharmonic partials, a hard strike; DECAY low = muted
+  wbell(E, out, t, v, p, r, d) {
+    const mix = E.gain(1); [[1, .6, .5], [2.76, .3, .25], [5.4, .18, .12], [8.9, .08, .05]].forEach(([k, a, dc]) => { const o = E.osc('sine', 880 * k * r, t, dc * d * 3 + .05), g = E.gain(0); E.perc(g.gain, t, v * a, dc * d); o.connect(g); g.connect(mix); });
+    const n = E.noise(t, .01), bp = E.filt('bandpass', 4200, 1.5), ng = E.gain(0); E.perc(ng.gain, t, v * .3, .006); n.connect(bp); bp.connect(ng); ng.connect(mix);
+    mix.connect(out); return .5 * d * 1.6;
+  },
+  // talking drum (dundun of the Yoruba / tama): the player squeezes the cords, the pitch moves
+  wtdlo(E, out, t, v, p, r, d) { return wMem(E, out, t, v, 118 * r, [[1, 1, .3 * d], [1.5, .3, .12 * d], [2, .16, .06 * d]], { drop: 2, n: [['bandpass', 2300, 1, .32, .012]] }); },
+  wtdhi(E, out, t, v, p, r, d) { return wMem(E, out, t, v, 186 * r, [[1, 1, .24 * d], [1.5, .28, .1 * d], [2, .14, .05 * d]], { drop: 2, n: [['bandpass', 2500, 1, .32, .012]] }); },
+  wtdup(E, out, t, v, p, r, d) { return wMem(E, out, t, v, 120 * r, [[1, 1, .42 * d], [1.5, .3, .16 * d], [2, .14, .07 * d]], { drop: 1, bend: 7, bd: .02, bt: .22 * d, n: [['bandpass', 2300, 1, .3, .012]] }); },
+  wtddn(E, out, t, v, p, r, d) { return wMem(E, out, t, v, 200 * r, [[1, 1, .42 * d], [1.5, .3, .16 * d], [2, .14, .07 * d]], { drop: 1, bend: -8, bd: .03, bt: .26 * d, n: [['bandpass', 2500, 1, .3, .012]] }); },
+  wtdgl(E, out, t, v, p, r, d) { return wMem(E, out, t, v, 130 * r, [[1, 1, .55 * d], [1.5, .3, .2 * d], [2, .14, .08 * d]], { drop: 1, bend: 6, bd: .02, bt: .14 * d, bend2: -9, bt2: .22 * d, n: [['bandpass', 2300, 1, .3, .012]] }); },
+  // udu (clay pot drum): the hole is hit, the air "bloops" up
+  wudu(E, out, t, v, p, r, d) { return wMem(E, out, t, v, 95 * r, [[1, 1, .3 * d], [2.02, .2, .1 * d]], { att: .006, bend: 5, bd: .0, bt: .08, n: [['lowpass', 400, .7, .2, .03, .004]] }); },
+  // log drum hit (amapiano): a pitched thump with a fast drop, saturated
+  wlog(E, out, t, v, p, r, d) { return wMem(E, out, t, v, 55 * r, [[1, 1, .3 * d], [2, .22, .1 * d], [3, .06, .05 * d]], { drop: 12, dt: .035, drive: .3, n: [['bandpass', 1500, 1, .15, .01]] }); },
+};
+Object.entries(WORLD_DRUMS).forEach(([k, fn]) => { if (!wHas(DRUM_FN, k)) DRUM_FN[k] = fn; });
+const WORLD_DRUM_NAMES = { wdslap: 'Darbuka Slap', wdsnap: 'Darbuka Snap', wdroll: 'Darbuka Roll', wdtek: 'Darbuka Tek', wdoum: 'Darbuka Doum',
+  wriqd: 'Riq Dum', wriqt: 'Riq Tek', wriqj: 'Riq Jingle', wriqr: 'Riq Roll', wriqs: 'Riq Sak', wzill: 'Zills', wtabl: 'Tabl Baladi', wtablk: 'Tabl Tak',
+  wdjb: 'Djembe Bass', wdjt: 'Djembe Tone', wdjs: 'Djembe Slap', wdjf: 'Djembe Flam', wdun: 'Dundunba', wsang: 'Sangban', wkenk: 'Kenkeni',
+  wshek: 'Shekere', wshks: 'Shekere Slap', wbell: 'Iron Bell', wtdlo: 'Talking Drum Lo', wtdhi: 'Talking Drum Hi', wtdup: 'Talking Drum Up',
+  wtddn: 'Talking Drum Down', wtdgl: 'Talking Drum Gliss', wudu: 'Udu', wlog: 'Log Drum Hit' };
+Object.entries(WORLD_DRUM_NAMES).forEach(([k, n]) => { if (!wHas(DRUM_VOICES, k)) DRUM_VOICES[k] = n; });
+// the generator's roles of these voices (a kit with an orchestral pad uses the pads' own roles)
+if (typeof GEN_VOICE === 'object' && GEN_VOICE) Object.assign(GEN_VOICE, Object.fromEntries(Object.entries({ wdslap: 'C', wdsnap: 'M', wdroll: 'O', wdtek: 'S', wdoum: 'K',
+  wriqd: 'K', wriqt: 'S', wriqj: 'T', wriqr: 'O', wriqs: 'C', wzill: 'CR', wtabl: 'K', wtablk: 'M', wdjb: 'K', wdjt: 'G', wdjs: 'S', wdjf: 'C', wdun: 'TOM', wsang: 'TOM',
+  wkenk: 'M', wshek: 'T', wshks: 'H', wbell: 'R', wtdlo: 'TOM', wtdhi: 'M', wtdup: 'TOM', wtddn: 'TOM', wtdgl: 'TOM', wudu: 'TOM', wlog: 'TOM' }).filter(([k]) => !wHas(GEN_VOICE, k))));
+
+// ---------- the kits: 16 pads, sampled pads (voice 'orch', section 3t) next to the synthesized ones ----------
+// [name, voice or 'inst/element' (sampled), role, options]
+const WORLD_KIT_DEFS = {
+  w_darbuka: { name: 'Darbuka Ensemble', pads: [
+    ['DOUM', 'p_world/darbuka_1_hit', 'K', { duck: true, ofb: 'kick2', olen: 1.24 }], ['TEK', 'p_world/darbuka_3_hit', 'S', { ofb: 'rim', olen: .5 }],
+    ['KA', 'p_world/darbuka_5_hit', 'G', { ofb: 'rim', db: -2, olen: .56 }], ['DOUM 2', 'p_world/darbuka_2_hit', 'D2', { ofb: 'kick2' }],
+    ['TEK 2', 'p_world/darbuka_4_hit', 'M', { ofb: 'rim', db: -1 }], ['SLAP', 'wdslap', 'C'], ['ROLL', 'wdroll', 'O', { level: .7 }], ['RIQ JINGLE', 'wriqj', 'T', { level: .45 }],
+    ['RIQ TEK', 'wriqt', 'H', { level: .5 }], ['TABL DUM', 'wtabl', 'TOM'], ['TABL TAK', 'wtablk', 'R', { level: .55 }], ['FRAME LO', 'p_world/hdruml_hit', 'FL', { ofb: 'tom' }],
+    ['FRAME HI', 'p_world/hdrums_hit', 'FH', { ofb: 'tom' }], ['TAMB', 'p_shake/tamb1_hit', 'TB', { ofb: 'ohat', db: -4 }], ['FING CYM', 'p_bells/fing_cymb', 'CR', { ofb: 'ride', db: -5, olen: 6 }],
+    ['ZILLS', 'wzill', 'Z', { level: .4 }]] },
+  w_riq: { name: 'Riq & Frame', pads: [
+    ['RIQ DUM', 'wriqd', 'K', { duck: true }], ['RIQ TEK', 'wriqt', 'S'], ['RIQ KA', 'wriqt', 'G', { tune: 3, decay: .6, level: .55 }], ['JINGLE', 'wriqj', 'T', { level: .5 }],
+    ['JINGLE ROLL', 'wriqr', 'O', { level: .55 }], ['SAK', 'wriqs', 'C', { level: .6 }], ['BENDIR LO', 'p_world/hdruml_hit', 'TOM', { ofb: 'tom' }], ['BENDIR HI', 'p_world/hdrums_hit', 'M', { ofb: 'tom' }],
+    ['BENDIR MUTE', 'p_world/hdruml_hitmuted', 'FLM', { ofb: 'tom', choke: 1 }], ['FRAME HAND', 'p_world/hdrums_hand', 'H', { ofb: 'rim', db: -2 }], ['TAMB', 'p_shake/tamb1_hit', 'R', { ofb: 'ohat', db: -4 }],
+    ['TAMB SHAKE', 'p_shake/tamb1_shake', 'TS', { ofb: 'shaker', db: -4 }], ['TAMB ROLL', 'p_shake/tamb1_roll', 'TR', { ofb: 'shaker', db: -5 }], ['DOUM', 'p_world/darbuka_1_hit', 'K2', { ofb: 'kick2' }],
+    ['FING CYM', 'p_bells/fing_cymb', 'CR', { ofb: 'ride', db: -5, olen: 6 }], ['ZILLS', 'wzill', 'Z', { level: .4 }]] },
+  w_west: { name: 'West African', pads: [
+    ['DJ BASS', 'wdjb', 'K', { duck: true }], ['DJ SLAP', 'wdjs', 'S'], ['DJ TONE', 'wdjt', 'G', { level: .7 }], ['DJ FLAM', 'wdjf', 'C', { level: .7 }],
+    ['DUNDUNBA', 'wdun', 'DD'], ['DUNDUN MUTE', 'wdun', 'DDM', { decay: .3 }], ['SANGBAN', 'wsang', 'SB', { level: .75 }], ['SANGBAN MUTE', 'wsang', 'SBM', { decay: .3, level: .75 }],
+    ['KENKENI', 'wkenk', 'KK', { level: .7 }], ['KENKENI MUTE', 'wkenk', 'KKM', { decay: .3, level: .7 }], ['BELL', 'w_bells/cowbell2_normal', 'R', { ofb: 'rim', db: -6 }], ['BELL MUTE', 'w_bells/cowbell1_muted', 'RM', { ofb: 'rim', db: -6 }],
+    ['SHEKERE', 'wshek', 'T', { level: .5 }], ['SHEKERE SLAP', 'wshks', 'H', { level: .55 }], ['AGOGO HI', 'p_world/agogo_high', 'AH', { ofb: 'rim', db: -6 }], ['AGOGO LO', 'p_world/agogo_low', 'AL', { ofb: 'rim', db: -6 }]] },
+  w_talk: { name: 'Talking Drum & Bells', pads: [
+    ['TD LOW', 'wtdlo', 'K', { duck: true }], ['TD HIGH', 'wtdhi', 'S'], ['TD UP', 'wtdup', 'TOM'], ['TD DOWN', 'wtddn', 'M'], ['TD GLISS', 'wtdgl', 'C', { level: .75 }],
+    ['TD MUTE', 'wtdhi', 'G', { decay: .25, level: .6 }], ['GANKOGUI HI', 'wbell', 'R', { level: .45 }], ['GANKOGUI LO', 'wbell', 'RL', { tune: -5, level: .45 }],
+    ['COWBELL', 'w_bells/cowbell1_hit', 'CB', { ofb: 'rim', db: -6 }], ['AGOGO HI', 'p_world/agogo_high', 'AH', { ofb: 'rim', db: -6 }], ['AGOGO LO', 'p_world/agogo_low', 'AL', { ofb: 'rim', db: -6 }],
+    ['SHEKERE', 'wshek', 'T', { level: .5 }], ['SHAKER', 'p_shake/shakerdouble_down|p_shake/shakerdouble_up', 'H', { ofb: 'shaker', db: -4 }], ['CLAVES', 'p_world/claves1_hit', 'CL', { ofb: 'rim', db: -6 }],
+    ['LOG DRUM', 'p_world/logdrumlo_medm', 'LG', { ofb: 'tom', db: -3 }], ['UDU', 'wudu', 'U', { level: .7 }]] },
+  w_afrohouse: { name: 'Afro House', pads: [
+    ['KICK', 'pkick', 'K', { duck: true }], ['CLAP', 'pclap', 'S', { level: .6 }], ['RIM', 'rim', 'M', { level: .5 }], ['HAT', 'pchat', 'H', { level: .38 }],
+    ['OPEN HAT', 'pohat', 'O', { level: .28 }], ['SHAKER', 'p_shake/shakerdouble_down|p_shake/shakerdouble_up', 'T', { ofb: 'shaker', db: -6 }], ['CONGA', 'p_world/conga_hitn', 'TOM', { ofb: 'tom', db: -3 }],
+    ['CONGA MUTE', 'p_world/conga_hitfm', 'CS', { ofb: 'tom', db: -4 }], ['BONGO', 'p_world/bongoh_hit1', 'BG', { ofb: 'rim', db: -5 }], ['LOG', 'wlog', 'LG', { level: .6 }],
+    ['BELL', 'w_bells/cowbell2_normal', 'R', { ofb: 'rim', db: -9 }], ['SHEKERE', 'wshek', 'SK', { level: .4 }], ['DJ SLAP', 'wdjs', 'C', { level: .5 }], ['TD UP', 'wtdup', 'TD', { level: .6 }],
+    ['TAMB', 'p_shake/tamb1_hit', 'TB', { ofb: 'ohat', db: -8 }], ['CRASH', 'crash', 'CR', { level: .35 }]] },
+};
+const WORLD_SRC_OK = /^[a-z][a-z0-9_]{0,23}\/[a-z0-9_]{1,48}(\|[a-z][a-z0-9_]{0,23}\/[a-z0-9_]{1,48}){0,3}$/;
+Object.entries(WORLD_KIT_DEFS).forEach(([id, k]) => {
+  if (typeof KITS !== 'object' || wHas(KITS, id)) return;
+  const orchOk = typeof DRUM_VOICES === 'object' && wHas(DRUM_VOICES, 'orch');
+  KITS[id] = { name: k.name, pads: k.pads.map(([n, src, role, o0]) => {
+    const o = Object.assign({}, o0 || {});
+    if (WORLD_SRC_OK.test(src) && orchOk) { // a sampled pad: the orchestra's pad voice
+      const db = o.db || 0; delete o.db; const len = o.olen; delete o.olen;
+      return [n, 'orch', Object.assign({ osrc: src, ofb: o.ofb || 'tom', orole: role, level: Math.round(.8 * Math.pow(10, db / 20) * 1000) / 1000 }, len ? { olen: len } : null, o, { ofb: o.ofb || 'tom' })];
+    }
+    if (WORLD_SRC_OK.test(src)) return [n, o.ofb || 'tom', { level: .7 }]; // a build without the orchestra: the synth fallback voice
+    delete o.ofb;
+    return [n, src, o];
+  }) };
+});
+// the roles of the kits' synthesized pads (genKitMap reads orole only from orchestral pads): the drum styles below use them
+const WORLD_ROLE_OF = {}; Object.entries(WORLD_KIT_DEFS).forEach(([id, k]) => { WORLD_ROLE_OF[id] = k.pads.map(p => p[2]); });
+if (typeof genKitMap === 'function') {
+  const worldKitMap0 = genKitMap;
+  genKitMap = function (tr) { // eslint-disable-line no-func-assign
+    const m = worldKitMap0(tr);
+    if (!tr || !wHas(WORLD_ROLE_OF, tr.kit) || !Array.isArray(tr.pads) || tr.pads.length < 16) return m;
+    const own = []; Object.entries(m.roles || {}).forEach(([r, l]) => l.forEach(i => { own[i] = r; }));
+    const names = WORLD_KIT_DEFS[tr.kit].pads.map(p => p[0]), roles = {};
+    tr.pads.forEach((pd, i) => { const r = i < 16 && pd && pd.name === names[i] ? WORLD_ROLE_OF[tr.kit][i] : own[i] || 'X'; (roles[r] = roles[r] || []).push(i); }); // a renamed pad keeps the role of its sound
+    return { kind: 'drums', roles, slices: [] };
+  };
+}
+
+// ---------- drum styles of the generator (GEN_DRUM format): Arabic iqa'at and West African / afro grooves ----------
+// Roles on the world kits: K doum / djembe bass, S tek / slap, G ka / tone, M the second tek, T tops (jingles, shekere), H riq tek /
+// shekere slap, O roll, R bell or tabl tak, TOM tabl dum / conga, DD SB KK the dunun family (muted: DDM SBM KKM), C slap / flam.
+// On a DnB kit the same rows play doum = kick, tek = snare, ka = ghost. Digits = velocity; x: = 32nds, e: = 8th triplets (12 a bar).
+const WORLD_DRUM = {
+  maqsum: { name: 'Maqsum', desc: 'Maqsum, the backbone of Egyptian music: D T . T D . T . (doum on 1 and 3, tek on the "and" of 1, the "and" of 2 and on 4). Ka strokes and the riq fill the gaps',
+    base: { K: '9.......8.......', S: '..8...7.....8...' }, axes: [
+      [{ G: '....4.....4...4.' }, { G: '.3..4.3...4.3.4.' }, { G: '....3.......4.3.|....3...3...4545' }],
+      [{ T: '5.3.5.3.5.3.5.3.' }, { H: '..5...5...5...5.' }, { T: '6363636363636363' }],
+      [{}, { M: '.............6..' }, { 'O~x': 'x:................................|........................7.......' }]] },
+  baladi: { name: 'Baladi', desc: 'Baladi ("of the country"): D D . T D . T . Two doums open the bar: heavier and earthier than maqsum, the street groove of Cairo',
+    base: { K: '9.8.....9.......', S: '......8.....8...' }, axes: [
+      [{ G: '....4.....4...4.' }, { G: '...3.3....4.3.4.' }, { G: '....4.....3.3333' }],
+      [{ T: '5.3.5.3.5.3.5.3.' }, { T: '5353535353535353' }, { H: '..5...5...5...5.' }],
+      [{}, { M: '...5...........5' }]] },
+  saidi: { name: 'Saidi', desc: 'Saidi (Upper Egypt, the stick dance): D T . D D . T . The tabl baladi doubles the doums: proud, galloping, heavy',
+    base: { K: '9.....8.9.......', S: '..8.........8...' }, axes: [
+      [{ TOM: '9.....8.9.......' }, { TOM: '9.....8.9.....6.' }, {}],
+      [{ G: '....4.....4...4.' }, { G: '....4.....3.3.4.' }, { R: '..6...6...6...6.' }],
+      [{ T: '5.3.5.3.5.3.5.3.' }, { T: '5353535353535353' }]] },
+  malfuf: { name: 'Malfuf', desc: 'Malfuf ("wrapped"): D . . T . . T . twice a bar, a fast 2/4. Entrances, chases and drum solos',
+    base: { K: '9.......9.......', S: '...8..8....8..8.' }, axes: [
+      [{}, { G: '.....3.......3..' }, { G: '.3...3...3...3.3' }],
+      [{ T: '5.3.5.3.5.3.5.3.' }, { T: '6363636363636363' }]] },
+  ayoub: { name: 'Ayoub', desc: 'Ayoub (zaar trance): D . . k D . T . a 2/4 that never stops, twice a bar. Hypnotic: builds and trance sections',
+    base: { K: '9...8...9...8...', G: '...5.......5....', S: '......8.......8.' }, axes: [
+      [{}, { T: '5.3.5.3.5.3.5.3.' }],
+      [{}, { M: '.5.......5......' }, { 'O~x': 'x:................................|........................6.......' }]] },
+  chiftetelli: { name: 'Chiftetelli', desc: 'Chiftetelli: a slow 8/4 over two bars, D . . T . T . . | D . D . T . . . Belly dance, taqsim and slow oud songs',
+    base: { K: '9...............9...8...........', S: '......8...8.............8.......' }, axes: [
+      [{ G: '....3.......3...........3...3.3.' }, { G: '..3.....3.....3.....3.....3...3.' }],
+      [{ T: '5.3.5.3.5.3.5.3.' }, { H: '..4...4...4...4.' }]] },
+  kuku: { name: 'Kuku', desc: 'Kuku (Guinea, a fishermen\'s dance): straight 16ths, the djembe answering bass with tones and slaps, the bell on the 8ths and the three dunun interlocking',
+    base: { K: '9.......8.......', S: '......9.......9.', R: '9.6.9.6.9.6.9.6.' }, axes: [
+      [{ G: '..7.7.....7.7...' }, { G: '..7.7.7...7.7.7.' }, { G: '.6.7.....6.7....' }],
+      [{ DD: '9...........8...', SB: '....8..8....8...', KK: '..7...7...7...7.' }, { DD: '9.....8.....9...', SBM: '..6.....6.......', SB: '....8.......8...', KK: '..7...7...7...7.' }],
+      [{ T: '5353535353535353' }, { T: '5.3.5.3.5.3.5.3.', H: '....5.......5...' }]] },
+  djole: { name: 'Djole (12/8)', desc: 'A djole-like 12/8 feel on the 8th triplets: the standard bell (x.x.xx.x.x.x), djembe bass on the beats, slaps and tones on the triplets, dunun on top. Plays against a straight DnB or house grid',
+    base: { 'R~e': 'e:9.7.97.7.7.', 'K~e': 'e:9.....8.....' }, axes: [
+      [{ 'S~e': 'e:...9.....9..', 'G~e': 'e:.7.7...7.7.' }, { 'S~e': 'e:..9..9..9..9', 'G~e': 'e:.6...6...6..' }],
+      [{ 'DD~e': 'e:9.....9..9..', 'SB~e': 'e:..8...8.....' }, { 'DD~e': 'e:9........8..', 'SB~e': 'e:...8.8...8.8', 'KK~e': 'e:..7..7..7..7' }],
+      [{ 'T~e': 'e:535353535353' }, { 'T~e': 'e:5.35.35.35.3' }]] },
+  afrobeats: { name: 'Afrobeats', desc: 'Afrobeats: the kick on 1 and the 3-3-2 push, a clap on 2 and 4, a rim in tresillo and shakers in 16ths with accents on the offbeats',
+    base: { K: '9.....8...9.....', S: '....8.......8...' }, axes: [
+      [{ M: '...6..6....6..6.' }, { M: '9..6..6...6.....' }, { M: '...6..6...6..6..' }],
+      [{ T: '5.4.5.4.5.4.5.4.' }, { T: '4646464646464646' }, { H: '..6...6...6...6.' }],
+      [{}, { TOM: '..........6..6..' }, { TOM: '......6....6..6.' }]] },
+  amapiano: { name: 'Amapiano', desc: 'Amapiano: a soft kick on every beat, a clap on 2 and 4, a shaker in 16ths and the syncopated percussion (rim, conga) that leaves room for the log drum',
+    base: { K: '9...9...9...9...', S: '....8.......8...' }, axes: [
+      [{ T: '5353535353535353' }, { T: '5.4.5.4.5.4.5.4.' }],
+      [{ M: '..6.....6..6....' }, { M: '...6..6.....6...' }, { TOM: '......6..6....6.' }],
+      [{}, { H: '..6...6...6...6.' }]] },
+  afrohouse: { name: 'Afro house', desc: 'Afro house: four on the floor, a clap on 2 and 4, offbeat hats, a shaker in 16ths, congas and a bell in a 3-2 clave feel',
+    base: { K: '9...9...9...9...', S: '....8.......8...' }, axes: [
+      [{ H: '..7...7...7...7.' }, { H: '..7...7...7...7.', O: '..............6.' }],
+      [{ T: '4343434343434343' }, { T: '5.3.5.3.5.3.5.3.' }],
+      [{ TOM: '......6..6....6.', R: '9..6..6...6.6...' }, { TOM: '...6..6....6..6.', CS: '..5.......5.....' }, { TOM: '......6..6....6.', BG: '.5...5...5...5..' }]] },
+};
+if (typeof GEN_DRUM === 'object' && GEN_DRUM) Object.entries(WORLD_DRUM).forEach(([k, v]) => { if (!wHas(GEN_DRUM, k)) GEN_DRUM[k] = v; });
+
+// ---------- GENERATE SONG: four world styles that fuse with the app's genres ----------
+// Original material only: the riffs are built from motif shapes of each maqam / mode (the turn around the tonic, the run up the
+// first jins and back, the b2 that falls home, the pentatonic interlocks), a seeded rhythm cell and the song's progression.
+if (typeof GEN_PROGS === 'object' && GEN_PROGS) Object.entries({
+  'wm-hijaz': { name: 'Hijaz I-bII-I-bvii', fam: 'dark', scale: 'hijaz', deg: [0, 1, 0, 6], per: 2, harm: 'triad',
+    note: 'Maqam Hijaz on one tonic: the major home chord and the chord a semitone above it (bII), the pull of the Middle East. The b vii answers' },
+  'wm-hijaz-b': { name: 'Hijaz I-bvii-bVI-bII', fam: 'dark', scale: 'hijaz', deg: [0, 6, 5, 1], per: 2, harm: 'triad',
+    note: 'Down the Hijaz scale to bVI, then the bII leans back into the home chord: the cadence of a thousand desert drops' },
+  'wm-kurd': { name: 'Kurd i-bII-bVII-i', fam: 'dark', scale: 'kurd', deg: [0, 1, 6, 0], per: 2, harm: 'triad',
+    note: 'Maqam Kurd (a minor with a b2): dark and modal, the bII and bVII circle the minor tonic. Riffs and halftime menace' },
+  'wm-bayati': { name: 'Bayati i-bVII-bVI-bVII', fam: 'dark', scale: 'bayati', deg: [0, 6, 5, 6], per: 2, harm: 'triad',
+    note: 'Maqam Bayati: the 2nd is half-flat. With QUARTER TONES on, the World engine (oud, ney, qanun) plays it between b2 and 2' },
+  'wm-nahawand': { name: 'Nahawand i-iv-V-i', fam: 'dark', scale: 'nahawand', deg: [0, 3, 4, 0], per: 2, harm: 'triad',
+    note: 'Maqam Nahawand, the Arabic minor: iv sinks, the major V pulls home. Strings and qanun love it' },
+  'wa-pent': { name: 'Highlife I-IV-I-V', fam: 'bright', scale: 'major', deg: [0, 3, 0, 4], per: 2, harm: 'triad',
+    note: 'The bright major loop of highlife and kora songs: the melodies stay on the major pentatonic' },
+  'wa-mix': { name: 'Mande I-bVII-IV-I', fam: 'bright', scale: 'mixolydian', deg: [0, 6, 3, 0], per: 2, harm: 'triad',
+    note: 'Mixolydian, close to the kora and mbira tunings: the bVII major a tone under home, then IV' },
+  'wa-minor': { name: 'Afro minor i-IV-i-v', fam: 'liquid', scale: 'dorian', deg: [0, 3, 0, 4], per: 2, harm: 'seventh',
+    note: 'Dorian: the IV is major. The deep, warm minor of afro house and amapiano' },
+  'wa-house': { name: 'Afro house i-VI-III-VII', fam: 'liquid', scale: 'minor', deg: [0, 5, 2, 6], per: 2, harm: 'seventh',
+    note: 'A minor loop with 7ths under kora and marimba: it never resolves, so the groove can ride for minutes' },
+}).forEach(([k, v]) => { if (!wHas(GEN_PROGS, k)) GEN_PROGS[k] = v; });
+
+const WORLD_ARR = {
+  mideast: [['intro', 16], ['build', 8], ['drop', 16], ['breakdown', 16], ['build', 8], ['drop2', 16], ['outro', 16]],
+  desert: [['intro', 16], ['build', 8], ['drop', 32], ['breakdown', 16], ['build', 8], ['drop2', 32], ['outro', 16]],
+  afrodnb: [['intro', 16], ['build', 8], ['drop', 32], ['breakdown', 16], ['build', 8], ['drop2', 32], ['outro', 16]],
+  afrohouse: [['intro', 16], ['build', 8], ['drop', 32], ['breakdown', 16], ['build', 8], ['drop2', 32], ['outro', 16]],
+};
+const wPresets = (names, fb) => names.filter(n => wHas(SYNTH_PRESETS, n)).concat(fb || []);
+if (typeof GEN_STYLES === 'object' && GEN_STYLES) Object.entries({
+  wmideastdub: { name: 'Middle-eastern dubstep', short: 'Mideast dub', genre: 'neuro', bpm: 140, swing: 0, keys: [2, 4, 7, 9], world: 'mideast', arr: WORLD_ARR.mideast,
+    desc: '140 BPM half-step in maqam Hijaz or Kurd: an oud riff on the drops, ney calls over a strings bed, the darbuka in maqsum and malfuf against the halftime snare, talking growls on the bass',
+    progs: ['wm-hijaz', 'wm-kurd', 'wm-hijaz-b'], drums: ['dubhalf', 'halftime'], chop: false, dens: 'mid', switchBeat: 'halftime',
+    rhythm: { bass: ['tripgrowl', 'brostep'], sub: ['kick', 'long'], stab: ['hits'], pad: ['hold'], lead: ['motif', 'hook'] }, harm: { pad: 'triad', stab: 'triad' },
+    presets: { bass: wPresets(['PRO Talking Bass', 'Tidal Talking Bass', 'Tidal Talker Gate', 'Growl Formant']), sub: wPresets(['Sub Square Grit', 'Sub Pure Mono', 'Sub Sine']), stab: wPresets(['Ney']),
+      pad: wPresets(['Strings Sustain', 'Strings + Choir', 'Polar Dark Pad']), lead: wPresets(['Oud Bright Riff', 'Oud']) },
+    kits: { DRUMS: 'pro', BREAK: 'w_darbuka' }, fx: {}, master: 'neuro' },
+  wdesertdnb: { name: 'Desert DnB', short: 'Desert DnB', genre: 'neuro', bpm: 174, swing: 0, keys: [2, 4, 5, 9], world: 'desert', arr: WORLD_ARR.desert,
+    desc: 'Drum & bass from the desert: darbuka rolls over the two-step, a ney hook in Hijaz, Bayati (quarter tones on) or Nahawand, a qanun in tremolo and runs, an orchestral strings bed and a deep reese',
+    progs: ['wm-hijaz', 'wm-bayati', 'wm-nahawand'], drums: ['twostep', 'roller'], chop: false, dens: 'mid',
+    rhythm: { bass: ['stepper', 'roller'], sub: ['kick'], stab: ['hits'], pad: ['hold'], lead: ['motif', 'hook'] }, harm: { pad: 'triad', stab: 'triad' },
+    presets: { bass: wPresets(['PRO Velvet Reese', 'Rolling Reese', 'Neuro Reese Wide']), sub: wPresets(['PRO Liquid Sub', 'Sub Pure Mono', 'Sub Sine']), stab: wPresets(['Qanun Tremolo', 'Qanun']),
+      pad: wPresets(['Strings Sustain', 'Strings + Choir', 'Polar Dark Pad']), lead: wPresets(['Ney', 'Ney Breathy']) },
+    kits: { DRUMS: 'pro', BREAK: 'w_darbuka' }, fx: {}, master: 'neuro' },
+  wafrodnb: { name: 'Afro DnB', short: 'Afro DnB', genre: 'liquid', bpm: 174, swing: 0, keys: [0, 2, 5, 7], world: 'afrodnb', arr: WORLD_ARR.afrodnb,
+    desc: 'Afro bass at 174: a kora ostinato and runs on the lead, a balafon interlock, a talking drum that talks over the breaks, djembe, dunun, bell and shekere on the break lane (12/8 against the two-step in the breakdown)',
+    progs: ['wa-pent', 'wa-mix', 'wa-minor'], drums: ['twostep', 'liquid'], chop: false, dens: 'mid',
+    rhythm: { bass: ['walking', 'stepper'], sub: ['long', 'kick'], stab: ['hits'], pad: ['hold'], lead: ['motif', 'hook'] }, harm: { pad: 'triad', stab: 'triad' },
+    presets: { bass: wPresets(['PRO Velvet Reese', 'Rolling Reese', 'Reese Soft']), sub: wPresets(['PRO Liquid Sub', 'Sub Pure Mono', 'Sub Sine']), stab: wPresets(['Balafon', 'Balafon Buzz']),
+      pad: wPresets(['Talking Drum Talk Up', 'Talking Drum']), lead: wPresets(['Kora', 'Ngoni']) },
+    kits: { DRUMS: 'pro', BREAK: 'w_west' }, fx: {}, master: 'liquid' },
+  wafrohouse: { name: 'Afro house world', short: 'Afro house', genre: 'liquid', bpm: 120, swing: 0, keys: [9, 2, 7, 5], world: 'afrohouse', arr: WORLD_ARR.afrohouse,
+    desc: 'Afro house at 120: four on the floor with congas and a bell, a kora riff, marimba chords and arps, the amapiano log drum on the bass, talking drum and shekere on the percussion lane',
+    progs: ['wa-minor', 'wa-house', 'wa-mix'], drums: ['afrohouse', 'amapiano'], chop: false, dens: 'mid',
+    rhythm: { bass: ['sustain'], sub: ['long'], stab: ['hits'], pad: ['hold'], lead: ['motif', 'hook'] }, harm: { pad: 'seventh', stab: 'seventh' },
+    presets: { bass: wPresets(['Log Drum Thump', 'Log Drum Thump Deep']), sub: wPresets(['Sub Pure Mono', 'Sub Sine']), stab: wPresets(['Marimba', 'Balafon + Marimba']),
+      pad: wPresets(['PRO Silk Pad', 'Polar Pad Wide', 'Warm Pad']), lead: wPresets(['Kora', 'Kora Soft']) },
+    kits: { DRUMS: 'w_afrohouse', BREAK: 'w_talk' }, fx: {}, master: 'liquid' },
+}).forEach(([k, v]) => { if (!wHas(GEN_STYLES, k)) GEN_STYLES[k] = v; });
+// the lanes the world writing owns (the generator keeps the others)
+const WORLD_LANES = { mideast: ['BREAK', 'STAB', 'PAD', 'LEAD'], desert: ['BREAK', 'STAB', 'PAD', 'LEAD'], afrodnb: ['BREAK', 'STAB', 'PAD', 'LEAD'], afrohouse: ['BREAK', 'BASS', 'SUB', 'STAB', 'PAD', 'LEAD'] };
+const WORLD_T = { DRUMS: 0, BREAK: 1, BASS: 2, SUB: 3, STAB: 4, PAD: 5, LEAD: 6, FX: 7 };
+
+// ---------- sounds and mix of the world lanes ----------
+if (typeof genStyleSounds === 'function') {
+  const worldSounds0 = genStyleSounds;
+  genStyleSounds = function (P, st, rng) { // eslint-disable-line no-func-assign
+    worldSounds0(P, st, rng);
+    if (!st || !st.world) return;
+    const L = n => P.tracks[WORLD_T[n]], w = st.world, dnb = st.bpm > 150;
+    const br = L('BREAK'); Object.assign(br.fx, { ftype: 'highpass', freq: 28, eqHp: 30, eqHpS: 12, eqLp: 17000, comp: .18, sc: dnb ? .12 : 0 }); Object.assign(br.mix, { vol: w === 'afrohouse' ? .56 : .6, sendA: .14, sendB: .02 });
+    const lane = (n, fx, mix) => { const t = L(n); if (!t || t.type !== 'synth') return; Object.assign(t.fx, { res: .7, sat: 0, chorus: 0 }, fx); Object.assign(t.mix, mix); };
+    if (w === 'mideast' || w === 'desert') {
+      lane('LEAD', { ftype: 'highpass', freq: 140, eqHp: 150, eqLp: 15000, sc: 0, comp: .2 }, { vol: .6, sendA: .26, sendB: .12 });
+      lane('STAB', { ftype: 'highpass', freq: 160, eqHp: 170, eqLp: 15000, sc: .1, comp: .12 }, { vol: .52, sendA: .3, sendB: .08 });
+      lane('PAD', { ftype: 'highpass', freq: 90, eqHp: 100, eqLp: 14000, sc: .3, comp: .1 }, { vol: .46, sendA: .34 });
+    } else if (w === 'afrodnb') {
+      lane('LEAD', { ftype: 'highpass', freq: 150, eqHp: 160, eqLp: 16000, sc: 0, comp: .15 }, { vol: .58, sendA: .22, sendB: .1 });
+      lane('STAB', { ftype: 'highpass', freq: 170, eqHp: 180, eqLp: 15000, sc: .12, comp: .12 }, { vol: .5, sendA: .24, sendB: .06 });
+      lane('PAD', { ftype: 'highpass', freq: 45, eqHp: 50, eqLp: 12000, sc: .2, comp: .2 }, { vol: .55, sendA: .16, sendB: .1 });
+    } else {
+      lane('LEAD', { ftype: 'highpass', freq: 160, eqHp: 170, eqLp: 16000, sc: .1, comp: .15 }, { vol: .55, sendA: .22, sendB: .14 });
+      lane('STAB', { ftype: 'highpass', freq: 180, eqHp: 190, eqLp: 15000, sc: .2, comp: .12 }, { vol: .5, sendA: .22, sendB: .1 });
+      lane('BASS', { ftype: 'lowpass', freq: 9000, eqHp: 28, eqHpS: 12, eqLp: 8000, sc: .45, comp: .25, dist: false, ott: false }, { vol: .66, sendA: 0, sendB: 0 });
+      lane('PAD', { ftype: 'highpass', freq: 160, eqHp: 170, eqLp: 12000, sc: .35, comp: .1 }, { vol: .4, sendA: .3 });
+      const dr = L('DRUMS'); Object.assign(dr.mix, { vol: .72 });
+    }
+    if (typeof fxSanitize === 'function') WORLD_LANES[w].concat(['BREAK']).forEach(n => { const t = L(n); if (t && t.fx) fxSanitize(t.fx); });
+    if (wHas(WORLD_MICRO, P.scale)) P.wmicro = true; // Bayati, Rast, Saba, Sikah: the quarter tones on
+  };
+}
+
+// ---------- the writing ----------
+const wV = v => clamp(Math.round(v), 1, 127);
+function wChords(P, L) {
+  const pr = GEN_PROGS[P.gen && P.gen.prog] || GEN_PROGS['wm-hijaz'], chords = genProgChords(P, P.gen.prog, 'triad'), tl = genTimeline(pr, chords, L);
+  return { segs: tl.segs, at: s => (tl.segs.find(g => s >= g.s && s < g.s + g.l) || tl.segs[0]).ch };
+}
+// the notes of the set's scale (or pcs, intervals above the key) between lo and hi
+function wLadder(P, lo, hi, pcs) {
+  const key = genKey(P), sc = pcs || SCALES[genHas(SCALES, P.scale) ? P.scale : 'minor'], out = [];
+  for (let p = lo; p <= hi; p++) if (sc.includes(wMod(p - key, 12))) out.push(p);
+  return out;
+}
+const wPent = P => ((SCALES[P.scale] || []).includes(3) ? [0, 3, 5, 7, 10] : [0, 2, 4, 7, 9]);
+const wNear = (lad, p) => { let b = 0; lad.forEach((q, k) => { if (Math.abs(q - p) < Math.abs(lad[b] - p)) b = k; }); return b; };
+// drum rows -> notes on a world kit (roles of WORLD_ROLE_OF; a role the kit lacks is skipped)
+function wRows(kit, rows, bars, scale = 1, from = 0) {
+  const roles = WORLD_ROLE_OF[kit] || [], out = [];
+  Object.entries(rows).forEach(([key, str]) => {
+    const r = key.split('~')[0], pad = roles.indexOf(r); if (pad < 0) return;
+    const m = /^([ex]):/.exec(str), u = m ? (m[1] === 'e' ? 4 / 3 : .5) : 1, per = Math.round(16 / u), s0 = (m ? str.slice(2) : str).replace(/[\s|]/g, '');
+    for (let b = from; b < bars; b++) for (let i = 0; i < per; i++) {
+      const ch = s0[(b * per + i) % s0.length], v = ch === 'X' ? 127 : ch === 'x' ? 100 : ch >= '1' && ch <= '9' ? Math.round(+ch * 127 / 9) : 0;
+      if (v) { const s = Math.round((b * 16 + i * u) * 48) / 48; out.push({ s, p: pad, l: 1, v: wV(v * (typeof scale === 'function' ? scale(s) : scale)) }); }
+    }
+  });
+  return out;
+}
+// rhythm cells of two bars ('x' = a note, '-' = it holds, '.' = rest) and the motif shapes (steps on the ladder)
+const WORLD_CELLS = {
+  maqam: ['x.xxx.x.x-..x.x.x.xxx.x.x-------', 'x--x--x-x.x.x---x--x--x-x.x.x.x.', 'x.x.xx.xx-..x.x.x.x.xx.x--------', 'x---x.x.x---x.xxx---x.x.x.x.x---', 'x.xx.xx.x---x.x.x.xx.xx.x.x.x---'],
+  afro: ['x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.', 'x..x..x.x..x..x.x..x..x.x.x.x...', 'x.xx.x.xx.xx.x.xx.xx.x.xx.x.x.x.', 'x-x.x-x.x.x.x-x.x-x.x-x.x.x.x---'],
+};
+const WORLD_SHAPES = {
+  maqam: [[0, 1, 0, -1, 0, 2, 1, 0], [0, 1, 2, 3, 4, 3, 2, 1, 0], [4, 3, 2, 1, 2, 1, 0, -1, 0], [0, 0, 1, 0, -1, -2, -1, 0], [0, 2, 1, 3, 2, 4, 3, 1, 0], [2, 1, 0, 1, 2, 3, 2, 1]],
+  afro: [[0, 2, 1, 3, 2, 4, 3, 1], [4, 3, 2, 3, 1, 2, 0, 1], [0, 1, 2, 4, 3, 2, 1, 0], [2, 0, 3, 1, 4, 2, 1, 0], [0, 4, 3, 2, 3, 1, 2, 0]],
+};
+// a riff of `bars` bars: the cell stretched by `slow` (2 = 8ths at DnB tempo), the shape walked over the ladder from the anchor,
+// moved to the chord root's degree when the chord changes, the last two bars answer and come home
+function wRiff(P, C, lad, rng, o) {
+  const cell = o.cell || rng.pick(WORLD_CELLS[o.fam]), shape = o.shape || rng.pick(WORLD_SHAPES[o.fam]), slow = o.slow || 1, L = o.bars * 16, out = [];
+  const home = wNear(lad, o.center), period = 32 * slow;
+  let k = 0;
+  for (let s0 = 0; s0 < L; s0 += period) {
+    const answer = s0 + period >= L && L > period, seq = !answer && (s0 / period) % 2 === 1 ? (o.seq || 0) : 0;
+    for (let i = 0; i < 32; i++) {
+      if (cell[i] !== 'x') continue;
+      let len = 1; while (i + len < 32 && cell[i + len] === '-') len++;
+      const s = s0 + i * slow; if (s >= L) break;
+      const ch = C.at(s), rootIdx = wNear(lad, home + (o.follow ? 0 : 0)), rootP = lad[rootIdx];
+      const shift = o.follow && ch ? wNear(lad, rootP + wMod(ch.root - wMod(rootP, 12), 12) - (wMod(ch.root - wMod(rootP, 12), 12) > 6 ? 12 : 0)) - rootIdx : 0;
+      let deg = shape[k % shape.length] + seq + shift; k++;
+      if (answer && i >= 24) deg = [1, 0, 0, 0][Math.min(3, (i - 24) >> 1)]; // the answer falls home (b2 -> 1 in Hijaz and Kurd)
+      const idx = clamp(home + deg, 0, lad.length - 1), v = o.v + (i % 8 === 0 ? 10 : i % 4 === 0 ? 4 : -4) + Math.round((rng() - .5) * 8);
+      out.push({ s, p: lad[idx], l: Math.max(1, len * slow - (o.legato ? 0 : 1) * (slow > 1 ? 1 : 0)), v: wV(v) });
+    }
+  }
+  return out;
+}
+// ornaments: an oud's grace notes and fretless slides (glide g), a ney's fall at the end of a phrase (bend b)
+function wOrnament(notes, lad, rng, kind) {
+  const out = [];
+  notes.forEach((n, j) => {
+    const nx = notes[j + 1];
+    if (kind === 'oud' && n.s % 8 === 0 && n.s >= 1 && rng() < .35) { const k = lad.indexOf(n.p); if (k >= 0 && k + 1 < lad.length) out.push({ s: n.s - .5, p: lad[k + 1], l: .5, v: wV(n.v - 20) }); }
+    const m = Object.assign({}, n);
+    if (kind === 'oud' && nx && nx.s - (n.s + n.l) < .01 && Math.abs(nx.p - n.p) <= 3 && n.l >= 2 && rng() < .3) m.g = 1; // slide into the next note
+    if (kind === 'ney' && n.l >= 6 && (!nx || nx.s - (n.s + n.l) >= 2) && rng() < .6) m.b = -.6;
+    out.push(m);
+  });
+  return out.filter(n => n.s >= 0);
+}
+// taqsim-like long phrases (ney, qanun tremolo): long notes moving by step around the tonic and the 4th / 5th, home at the end
+function wLong(lad, center, rng, bars, v, o = {}) {
+  const out = [], home = wNear(lad, center), L = bars * 16;
+  const path = rng.pick([[0, 1, 2, 1, 0, -1, 0, 0], [4, 3, 2, 3, 2, 1, 0, 0], [0, 2, 3, 4, 3, 2, 1, 0], [2, 1, 0, -1, 0, 1, 2, 0]]);
+  let s = o.from || 0, k = 0;
+  while (s < L - 2) {
+    const len = rng.pick(o.lens || [6, 8, 10, 12, 4]), l = Math.min(len, L - s - (o.gap ? 4 : 0));
+    if (l <= 0) break;
+    out.push({ s, p: lad[clamp(home + path[k % path.length], 0, lad.length - 1)], l, v: wV(v + (k % 2 ? -6 : 4)) });
+    s += l + (rng() < .4 ? 2 : 0); k++;
+  }
+  return out;
+}
+// held chords (strings bed): voice-led, a tonic drone under them
+function wPad(P, C, reg, v, o = {}) {
+  const out = []; let prev = null;
+  C.segs.forEach(g => {
+    const voi = genVoice(g.ch, prev, reg[0], reg[1], true); prev = voi;
+    let l = g.l; if (o.gap && g.s + l > 120) l = 120 - g.s; if (l <= 0) return;
+    voi.forEach(p => out.push({ s: g.s, p, l, v }));
+  });
+  if (o.drone) out.push({ s: 0, p: o.drone, l: o.gap ? 120 : 128, v: wV(v - 6) });
+  return out;
+}
+// kora kumbengo: the thumb on the beat (root / 5th low), the fingers answering on the offbeats through the pentatonic
+function wKora(P, C, rng, bars, v, runs) {
+  const lad = wLadder(P, 55, 86, wPent(P)), low = wLadder(P, 43, 60, wPent(P)), out = [], L = bars * 16, figs = [[2, 4, 3, 5], [3, 2, 4, 3], [4, 3, 5, 4], [2, 3, 4, 2]];
+  const fig = rng.pick(figs);
+  for (let s = 0; s < L; s += 2) {
+    const ch = C.at(s), beat = s % 4 === 0;
+    if (beat) { const r = low[wNear(low, 48 + wMod(ch.root - 48, 12))]; out.push({ s, p: s % 8 === 0 ? r : low[Math.min(low.length - 1, low.indexOf(r) + 2)] || r, l: 3, v: wV(v - 6) }); }
+    else { const k = (s >> 1) % 4, base = wNear(lad, 60 + wMod(ch.root - 60, 12)); out.push({ s, p: lad[clamp(base + fig[k] - 2, 0, lad.length - 1)], l: 2, v: wV(v + (s % 8 === 2 ? 4 : -4)) }); }
+  }
+  if (runs) for (let b = 3; b < bars; b += 4) { // birimintingo: a descending run over the last beat pair
+    const s0 = b * 16 + 8, top = lad.length - 2; for (let j = 0; j < 8; j++) out.push({ s: s0 + j, p: lad[clamp(top - j, 0, lad.length - 1)], l: 1, v: wV(v + 6 - j) });
+  }
+  const run = new Set(out.filter(n => n.l === 1).map(n => n.s)); return out.filter(n => n.l === 1 || !run.has(n.s) || n.s % 4 === 0);
+}
+// balafon interlock: the low hand in 3-3-2 on chord tones, the high hand filling the other 16ths a 3rd or a 5th above
+function wBalafon(P, C, rng, bars, v, dense) {
+  const lad = wLadder(P, 60, 89, wPent(P)), out = [], L = bars * 16, lowAt = [0, 3, 6, 8, 11, 14], step = dense ? 1 : 2;
+  for (let s = 0; s < L; s += step) {
+    const ch = C.at(s), base = wNear(lad, 62 + wMod(ch.root - 62, 12)), i = s % 16;
+    if (lowAt.includes(i)) out.push({ s, p: lad[base], l: 1, v: wV(v + (i === 0 ? 8 : 0)) });
+    else if (dense || i % 2 === 0) out.push({ s, p: lad[clamp(base + [2, 3, 1, 4][(s >> 1) % 4], 0, lad.length - 1)], l: 1, v: wV(v - 10 + Math.round(rng() * 8)) });
+  }
+  return out;
+}
+// talking drum phrases (World engine, Talking drum model): two pitches and the talking bends
+function wTalk(P, rng, bars, v, busy) {
+  const key = genKey(P), lo = 45 + wMod(key - 45, 12), out = [], cells = busy ? ['x.x..x.xx.x..x..', 'x..x.x..x.xx.x..', 'xx.x..x.x..x.x.x'] : ['x.......x..x....', 'x...x.....x.x...', 'x..x......x.....'];
+  for (let b = 0; b < bars; b++) {
+    const c = cells[(b + (b >> 2)) % cells.length];
+    for (let i = 0; i < 16; i++) if (c[i] === 'x') {
+      const hi = (i + b) % 3 === 1, n = { s: b * 16 + i, p: hi ? lo + 5 : lo, l: i % 4 === 0 ? 3 : 1, v: wV(v + (i % 4 === 0 ? 8 : -6)) };
+      if (i % 8 === 0 && b % 2 === 1) n.b = 4; else if (i === 10 || (busy && i === 13)) n.b = -3;
+      out.push(n);
+    }
+  }
+  return out;
+}
+// amapiano log drum: syncopated roots, a slide up into the next note now and then
+function wLog(P, C, rng, bars, v, busy) {
+  const out = [], cell = busy ? '9..7..8...7.8..6' : '9.....8...7.....', alt = '9..7......8..7..';
+  for (let b = 0; b < bars; b++) {
+    const c = b % 4 === 3 ? alt : cell;
+    for (let i = 0; i < 16; i++) if (c[i] !== '.') {
+      const s = b * 16 + i, ch = C.at(s), r = 36 + wMod(ch.root - 36, 12), p = i === 6 || i === 12 ? r + 12 : i === 10 ? r + 7 : r;
+      const n = { s, p, l: i % 4 === 0 ? 3 : 2, v: wV(v * (+c[i]) / 9 + 20) }; if (i === 12 && rng() < .5) n.g = 1;
+      out.push(n);
+    }
+  }
+  return out;
+}
+// marimba chords off the beat (afro house), an arpeggio in the second drop
+function wMarimba(P, C, rng, bars, v, arp) {
+  const out = []; let prev = null;
+  for (let b = 0; b < bars; b++) for (const i of arp ? [0, 2, 4, 6, 8, 10, 12, 14] : [2, 6, 10, 14]) {
+    const s = b * 16 + i, ch = C.at(s), voi = genVoice(ch, prev, 60, 79, false); prev = voi;
+    if (arp) out.push({ s, p: voi[(i >> 1) % voi.length] + (i % 8 === 6 ? 12 : 0), l: 2, v: wV(v - 4 + (i % 4 === 0 ? 6 : 0)) });
+    else voi.forEach(p => out.push({ s, p, l: 1, v: wV(v + (i === 14 ? -8 : 0)) }));
+  }
+  return out;
+}
+const wStop = (notes, s = 124) => notes.filter(n => n.s < s);
+function worldClips(P, st, rng) {
+  const w = st.world, own = new Set(WORLD_LANES[w]), L = 128, C = wChords(P, L), row = k => GEN_SONG_ROWS[k][0], tr = n => P.tracks[WORLD_T[n]];
+  const put = (key, lane, notes) => {
+    if (!own.has(lane) || !genHas(GEN_SONG_ROWS, key)) return;
+    const c = { name: `${GEN_SONG_ROWS[key][1]} ${lane}`.slice(0, 24), bars: 8, notes: dedupe(notes.filter(n => n.s >= 0 && n.s < L).map(n => Object.assign({}, n))) };
+    const old = tr(lane).clips[row(key)]; if (old && old.groove && lane !== 'BREAK') c.groove = old.groove;
+    tr(lane).clips[row(key)] = c;
+  };
+  const keys = ['intro', 'intro2', 'build', 'drop', 'drop2', 'dropEnd', 'bdown', 'bdown2', 'dropB', 'dropB2', 'dropBEnd', 'outro'];
+  const isDrop = k => /^drop/.test(k), isB = k => /^dropB/.test(k), dnb = st.bpm > 150, maq = w === 'mideast' || w === 'desert';
+  const kit = tr('BREAK').kit;
+  // ---- BREAK: the world percussion
+  keys.forEach(k => {
+    let n = [];
+    if (kit === 'w_darbuka') {
+      if (isDrop(k)) {
+        n = wRows(kit, isB(k) ? { K: '9.......8.......', S: '..8...7.....8...', G: '.3..4.3...4.3.4.', T: '5.3.5.3.5.3.5.3.', TOM: w === 'mideast' ? '9...............' : '' }
+          : { K: '9.8.....9.......', S: '......8.....8...', G: '....4.....4...4.', H: '..5...5...5...5.' }, 8);
+        [[56, 'x:........................6789'], [120, 'x:................56789XXX']].forEach(([s0, roll]) => { // the rolls into bar 5 and into the next phrase
+          n = n.filter(x => x.s < s0 || x.s >= s0 + 8 || x.p === 0);
+          const r = roll.slice(2); for (let j = 0; j < r.length; j++) if (r[j] !== '.') n.push({ s: s0 + j * .5, p: 1, l: .5, v: wV(r[j] === 'X' ? 124 : 60 + 6 * +r[j]) });
+        });
+        if (k === 'dropEnd' || k === 'dropBEnd') n.push({ s: 124, p: 6, l: 1, v: 110 });
+      } else if (k === 'build') {
+        n = wRows(kit, { K: '9.......9.......', S: '...8..8....8..8.', T: '5353535353535353' }, 4, s => .6 + .4 * s / 64);
+        for (let s = 64; s < 120; s += s < 96 ? 1 : .5) n.push({ s, p: s % 2 ? 1 : 2, l: .5, v: wV(50 + 70 * (s - 64) / 56) });
+        n.push({ s: 120, p: 6, l: 1, v: 120 }); n = wStop(n, 122);
+      } else if (k === 'intro2') n = wRows(kit, { FL: '9...............', FH: '......6.....6...', T: '4.3.4.3.4.3.4.3.' }, 8);
+      else if (/^bdown/.test(k)) n = wRows(kit, k === 'bdown2' ? { K: '9...8...9...8...', G: '...5.......5....', S: '......8.......8.', FL: '9...............' } : { FL: '8.......6.......', FH: '....5.......5.5.', Z: '9...............' }, 8);
+      else if (k === 'outro') n = wRows(kit, { K: '9.......8.......', S: '..8...7.....8...', T: '5.3.5.3.5.3.5.3.' }, 8, s => 1 - .5 * s / 128);
+      else return;
+    } else if (kit === 'w_west') {
+      if (isDrop(k)) {
+        n = wRows(kit, isB(k) ? { K: '9.......8.......', S: '......9.......9.', G: '..7.7.7...7.7.7.', R: '9.6.9.6.9.6.9.6.', DD: '9.....8.....9...', SBM: '..6.....6.......', SB: '....8.......8...', KK: '..7...7...7...7.', T: '5353535353535353' }
+          : { K: '9.......8.......', S: '......9.......9.', G: '..7.7.....7.7...', R: '9.6.9.6.9.6.9.6.', DD: '9...........8...', SB: '....8..8....8...', KK: '..7...7...7...7.', T: '5.3.5.3.5.3.5.3.' }, 8);
+        if (k === 'dropEnd' || k === 'dropBEnd') { n = n.filter(x => x.s < 112); for (let s = 112; s < 128; s += 1) n.push({ s, p: s % 2 ? 1 : 3, l: 1, v: wV(70 + 3 * (s - 112)) }); }
+      } else if (k === 'build') { n = wRows(kit, { K: '9.......9.......', R: '9.6.9.6.9.6.9.6.' }, 8, s => .6 + .4 * s / 128); for (let s = 64; s < 122; s += s < 96 ? 2 : 1) n.push({ s, p: 1, l: 1, v: wV(55 + 65 * (s - 64) / 58) }); n = wStop(n, 122); }
+      else if (k === 'intro2') n = wRows(kit, { R: '9.6.9.6.9.6.9.6.', T: '4.3.4.3.4.3.4.3.' }, 8);
+      else if (/^bdown/.test(k)) n = wRows(kit, k === 'bdown2' ? { 'R~e': 'e:9.7.97.7.7.', 'K~e': 'e:9.....8.....', 'S~e': 'e:...9.....9..', 'G~e': 'e:.7.7...7.7.', 'DD~e': 'e:9.....9..9..', 'T~e': 'e:535353535353' } : { 'R~e': 'e:9.7.97.7.7.', 'T~e': 'e:5.35.35.35.3', 'K~e': 'e:9...........' }, 8);
+      else if (k === 'outro') n = wRows(kit, { K: '9.......8.......', G: '..7.7.....7.7...', R: '9.6.9.6.9.6.9.6.' }, 8, s => 1 - .5 * s / 128);
+      else return;
+    } else if (kit === 'w_talk') {
+      if (isDrop(k)) n = wRows(kit, isB(k) ? { K: '9.....8.........|9.......8..8....', S: '....8.......8.8.', TOM: '..........7.....', M: '..............7.|.....6..........', R: '9.6.6.9.6..6.6..', T: '5353535353535353', CL: '....6.......6...' }
+        : { K: '9.......8.......', S: '....7.......7...', TOM: '..........6.....|......6.........', R: '9.6.6.9.6..6.6..', T: '5.4.5.4.5.4.5.4.' }, 8);
+      else if (k === 'build') { n = wRows(kit, { R: '9.6.6.9.6..6.6..', T: '5353535353535353' }, 8, s => .6 + .4 * s / 128); for (let s = 96; s < 122; s += 2) n.push({ s, p: s % 4 ? 1 : 0, l: 1, v: wV(60 + 2 * (s - 96)) }); n.push({ s: 120, p: 4, l: 1, v: 110 }); n = wStop(n, 124); }
+      else if (k === 'intro2') n = wRows(kit, { R: '9.6.6.9.6..6.6..', T: '4.3.4.3.4.3.4.3.' }, 8);
+      else if (/^bdown/.test(k)) n = wRows(kit, { K: '9...............', TOM: '........7.......', U: '......5.....5...', T: '4.3.4.3.4.3.4.3.' }, 8);
+      else if (k === 'outro') n = wRows(kit, { R: '9.6.6.9.6..6.6..', T: '5.4.5.4.5.4.5.4.', K: '9...............' }, 8, s => 1 - .5 * s / 128);
+      else return;
+    } else return;
+    put(k, 'BREAK', n);
+  });
+  // ---- the melodic lanes
+  const slow = dnb ? 2 : 1;
+  if (maq) {
+    const ladL = wLadder(P, w === 'mideast' ? 52 : 62, w === 'mideast' ? 79 : 88), ladS = wLadder(P, 57, 84), hookCell = rng.pick(WORLD_CELLS.maqam), hookShape = rng.pick(WORLD_SHAPES.maqam);
+    const center = w === 'mideast' ? 62 + wMod(genKey(P) - 62, 12) : 69 + wMod(genKey(P) - 69, 12);
+    const lead = w === 'mideast' ? 'oud' : 'ney';
+    keys.forEach(k => {
+      let n = null; const v = isDrop(k) ? 104 : k === 'build' ? 88 : 80;
+      if (isDrop(k)) n = wRiff(P, C, ladL, rng, { fam: 'maqam', cell: hookCell, shape: hookShape, slow: w === 'desert' ? 2 : 1, bars: 8, center, v, seq: isB(k) ? 1 : 0, legato: lead === 'ney' });
+      else if (k === 'build') n = wStop(wRiff(P, C, ladL, rng, { fam: 'maqam', cell: hookCell, shape: hookShape.slice(0, 4), slow: 2, bars: 8, center, v, legato: true }), 120);
+      else if (k === 'intro2' || k === 'bdown2') n = w === 'mideast' ? wRiff(P, C, ladL, rng, { fam: 'maqam', cell: 'x---x---x.x.x---x-------x.x.x---', shape: hookShape, slow: 2, bars: 8, center, v: v - 8 }) : wLong(ladL, center, rng, 8, v);
+      else if (k === 'outro') n = wLong(ladL, center, rng, 8, v - 10);
+      else return;
+      put(k, 'LEAD', wOrnament(n, ladL, rng, lead));
+    });
+    keys.forEach(k => { // STAB: ney calls (dubstep) or the qanun (desert DnB)
+      let n = null; const v = isDrop(k) ? 92 : 78;
+      if (w === 'mideast') {
+        if (k === 'intro' || /^bdown/.test(k)) n = wLong(ladS, center + 12 > 84 ? center : center + 12, rng, 8, v, { lens: [8, 12, 16, 6] });
+        else if (isDrop(k) && isB(k)) n = wLong(ladS, center, rng, 8, v - 6, { lens: [4, 6], from: 64 });
+        else if (k === 'build') n = wLong(ladS, center, rng, 8, v, { lens: [16, 8], gap: true });
+        else return;
+        put(k, 'STAB', wOrnament(n, ladS, rng, 'ney'));
+      } else {
+        if (isDrop(k)) { n = wRiff(P, C, ladS, rng, { fam: 'maqam', cell: 'x.x.x.x.x.x.x.x.x.x.x.x.xxxxxxxx', shape: [0, 1, 2, 3, 4, 3, 2, 1], bars: 8, center: center - 5, v, seq: 1 }); }
+        else if (/^bdown/.test(k) || k === 'intro2') n = wLong(ladS, center - 5, rng, 8, v, { lens: [8, 12, 16] });
+        else if (k === 'build') n = wStop(wLong(ladS, center - 5, rng, 8, v + 8, { lens: [4, 4, 8] }), 120);
+        else return;
+        put(k, 'STAB', n);
+      }
+    });
+    keys.forEach(k => { // PAD: the strings bed with the tonic drone
+      const drop = isDrop(k), v = drop ? 92 : k === 'build' ? 80 : 66;
+      if (k === 'build' && w === 'mideast') return;
+      put(k, 'PAD', wPad(P, C, drop ? [55, 79] : [50, 76], v, { gap: k === 'build', drone: drop ? null : 38 + wMod(genKey(P) - 38, 12) }));
+    });
+  } else if (w === 'afrodnb') {
+    keys.forEach(k => {
+      const drop = isDrop(k);
+      if (drop) put(k, 'LEAD', wKora(P, C, rng, 8, 96, isB(k)));
+      else if (k === 'intro2' || /^bdown/.test(k)) put(k, 'LEAD', wKora(P, C, rng, 8, 80, false).filter(n => n.s % 4 === 0 || k !== 'intro2'));
+      else if (k === 'build') put(k, 'LEAD', wStop(wKora(P, C, rng, 8, 88, false), 120));
+      else if (k === 'outro') put(k, 'LEAD', wKora(P, C, rng, 8, 78, false).filter(n => n.s < 96));
+      if (drop) put(k, 'STAB', wBalafon(P, C, rng, 8, 86, isB(k)));
+      else if (k === 'bdown2' || k === 'build') put(k, 'STAB', wStop(wBalafon(P, C, rng, 8, 74, false), k === 'build' ? 120 : 128));
+      if (drop || /^bdown/.test(k) || k === 'build') put(k, 'PAD', k === 'build' ? wStop(wTalk(P, rng, 8, 92, true), 120) : wTalk(P, rng, 8, drop ? 100 : 86, drop));
+    });
+  } else { // afro house
+    const ladL = wLadder(P, 60, 86, wPent(P)), cell = rng.pick(WORLD_CELLS.afro), shape = rng.pick(WORLD_SHAPES.afro), center = 64 + wMod(genKey(P) - 64, 12);
+    keys.forEach(k => {
+      const drop = isDrop(k);
+      if (drop) put(k, 'LEAD', wRiff(P, C, ladL, rng, { fam: 'afro', cell, shape, bars: 8, center, v: 96, seq: isB(k) ? 2 : 0 }));
+      else if (k === 'intro2' || k === 'bdown2') put(k, 'LEAD', wKora(P, C, rng, 8, 80, false));
+      else if (k === 'build') put(k, 'LEAD', wStop(wRiff(P, C, ladL, rng, { fam: 'afro', cell, shape, bars: 8, center, v: 86 }), 120));
+      if (drop) put(k, 'STAB', wMarimba(P, C, rng, 8, 88, isB(k)));
+      else if (/^bdown/.test(k) || k === 'intro2') put(k, 'STAB', wMarimba(P, C, rng, 8, 72, true));
+      else if (k === 'build') put(k, 'STAB', wStop(wMarimba(P, C, rng, 8, 80, false), 120));
+      if (drop) put(k, 'BASS', wLog(P, C, rng, 8, 100, isB(k)));
+      else if (k === 'bdown2' || k === 'intro2') put(k, 'BASS', wLog(P, C, rng, 8, 84, false));
+      else if (k === 'build') put(k, 'BASS', wStop(wLog(P, C, rng, 8, 90, false), 112));
+      if (/^bdown/.test(k) || k === 'intro2' || k === 'outro') put(k, 'PAD', wPad(P, C, [55, 79], k === 'outro' ? 60 : 70)); // the bed where the marimba thins out
+      else if (k === 'build') put(k, 'PAD', wPad(P, C, [55, 79], 76, { gap: true }));
+    });
+  }
+}
+if (typeof genSongClips === 'function') {
+  const worldClips0 = genSongClips;
+  genSongClips = function (P, st, rng) { // eslint-disable-line no-func-assign
+    const r = worldClips0(P, st, rng);
+    if (st && st.world) worldClips(P, st, rng);
+    return r;
+  };
+}
+// the arrangement of the lanes the world writing owns, from the generator's plan of sections
+function worldLayout(P, st, plan) {
+  const row = k => GEN_SONG_ROWS[k][0];
+  WORLD_LANES[st.world].forEach(name => {
+    const tr = P.tracks[WORLD_T[name]]; if (!tr) return;
+    const has = k => !!tr.clips[row(k)];
+    tr.arr = [];
+    plan.forEach(([sec, a, n]) => {
+      const m = n / 8;
+      for (let k = 0; k < m; k++) {
+        const b = a + 8 * k, last = k === m - 1, h = Math.max(1, m >> 1);
+        let key = null;
+        if (sec === 'intro') key = k < h ? 'intro' : 'intro2';
+        else if (sec === 'build') key = 'build';
+        else if (sec === 'drop' || sec === 'drop2') { const B = sec === 'drop2'; key = last && m > 1 ? (B ? 'dropBEnd' : 'dropEnd') : k % 2 ? (B ? 'dropB2' : 'drop2') : B ? 'dropB' : 'drop'; }
+        else if (sec === 'breakdown') key = m > 1 && last ? 'bdown2' : 'bdown';
+        else if (sec === 'switch') key = 'drop';
+        else if (sec === 'outro') key = 'outro';
+        if (key && !has(key)) key = has(key.replace(/2$|End$/, '')) ? key.replace(/2$|End$/, '') : null;
+        if (key) tr.arr.push({ start: b, slot: row(key), len: Math.min(8, a + n - b), off: 0 });
+      }
+    });
+  });
+  return plan;
+}
+if (typeof genSongLayout === 'function') {
+  const worldLayout0 = genSongLayout;
+  genSongLayout = function (P, st) { // eslint-disable-line no-func-assign
+    const plan = worldLayout0(P, st);
+    if (st && st.world) worldLayout(P, st, plan);
+    return plan;
+  };
+}
+
+// ---------- world loops for the loop library (section 3q) ----------
+// A built-in loop is a clip of a generated song (style + seed). The world styles' library songs (WORLD_LOOP_SONGS: a style, the
+// progression its seed picks, the kit of the percussion lane) get six extra scenes, LOOPS 1-6, only when the loop library makes
+// them (libSong): a bank of rhythms on the BREAK lane and of riffs on the melodic lanes. A recipe names 'LOOPS n:LANE'.
+// Registration: libRegisterRecipes (section 3q, wave 4) when the build has it, else the catalogue (libRecipes) and libBuild are
+// wrapped here. A song made by GENERATE SONG never has the bank.
+// [style, progression, BREAK kit] -> the seed is the first one (from 9001) whose song picks that progression (genSong's first pick)
+const WORLD_LOOP_SONGS = [
+  ['wmideastdub', 'wm-hijaz', 'w_darbuka'], ['wmideastdub', 'wm-kurd', 'w_riq'], ['wmideastdub', 'wm-hijaz-b', 'w_talk'],
+  ['wdesertdnb', 'wm-hijaz', 'w_darbuka'], ['wdesertdnb', 'wm-bayati', 'w_riq'], ['wdesertdnb', 'wm-nahawand', 'w_west'],
+  ['wafrodnb', 'wa-pent', 'w_west'], ['wafrodnb', 'wa-mix', 'w_talk'],
+  ['wafrohouse', 'wa-minor', 'w_talk'], ['wafrohouse', 'wa-house', 'w_west'], ['wafrohouse', 'wa-mix', 'w_darbuka'], ['wafrohouse', 'wa-minor', 'w_riq'],
+];
+const WORLD_LOOP = (() => {
+  const out = [], used = new Set();
+  WORLD_LOOP_SONGS.forEach(([style, prog, kit]) => {
+    const st = typeof GEN_STYLES === 'object' && GEN_STYLES[style]; if (!st) return;
+    const progs = st.progs.filter(x => wHas(GEN_PROGS, x));
+    for (let seed = 9001; seed < 9400; seed++) {
+      if (used.has(style + ':' + seed)) continue;
+      const rng = genRng(seed), pr = rng.pick(progs);
+      if (pr === prog) { used.add(style + ':' + seed); out.push({ style, prog, kit, seed, bpm: st.bpm, key: rng.pick(st.keys), scale: GEN_PROGS[prog].scale }); break; }
+    }
+  });
+  return out;
+})();
+const WORLD_LOOP_BY = new Map(WORLD_LOOP.map(e => [e.style + ':' + e.seed, e]));
+WORLD.bank = null;
+if (typeof libSong === 'function') {
+  const worldLibSong0 = libSong;
+  libSong = function (style, seed) { // eslint-disable-line no-func-assign
+    const prev = WORLD.bank; WORLD.bank = WORLD_LOOP_BY.get(style + ':' + seed) || null;
+    try { const p = worldLibSong0(style, seed); if (p && typeof p === 'object') delete p.wmicro; return p; } finally { WORLD.bank = prev; } // a loop sounds in its preview as it will in the set (no quarter tones)
+  };
+}
+// the percussion lane of a library song: the kit of its table entry
+if (typeof genStyleSounds === 'function') {
+  const worldBankSounds0 = genStyleSounds;
+  genStyleSounds = function (P, st, rng) { // eslint-disable-line no-func-assign
+    worldBankSounds0(P, st, rng);
+    const b = WORLD.bank; if (!b || !st || !st.world || !b.kit || !KITS[b.kit]) return;
+    const br = P.tracks[WORLD_T.BREAK]; br.kit = b.kit; br.pads = makePads(b.kit);
+  };
+}
+// the bank: rhythms per kit (8-bar rows), then the riffs of the style's melodic lanes
+const WORLD_BANK_DRUMS = {
+  w_darbuka: [['maqsum', { K: '9.......8.......', S: '..8...7.....8...', G: '.3..4.3...4.3.4.', T: '5.3.5.3.5.3.5.3.', 'S~x': 'x:................................|..........................678999' }],
+    ['baladi', { K: '9.8.....9.......', S: '......8.....8...', G: '....4.....4.3.4.', T: '5353535353535353' }],
+    ['saidi', { K: '9.....8.9.......', TOM: '9.....8.9.......', S: '..8.........8...', R: '..6...6...6...6.', G: '....4.....4...4.' }],
+    ['malfuf', { K: '9.......9.......', S: '...8..8....8..8.', G: '.3...3...3...3.3', T: '6363636363636363' }],
+    ['ayoub', { K: '9...8...9...8...', G: '...5.......5....', S: '......8.......8.', FL: '9.......9.......', T: '5.3.5.3.5.3.5.3.' }],
+    ['chiftetelli', { K: '9...............9...8...........', S: '......8...8.............8.......', G: '..3.....3.....3.....3.....3...3.', Z: '9...............................', T: '5.3.5.3.5.3.5.3.' }]],
+  w_riq: [['riq-maqsum', { K: '9.......8.......', S: '..8...7.....8...', G: '.4..5.4...5.4.5.', T: '..4...4...4...4.', C: '................|............9...' }],
+    ['riq-baladi', { K: '9.8.....9.......', S: '......8.....8...', G: '..4.5.....5.4.5.', T: '..4...4...4...4.' }],
+    ['riq-malfuf', { K: '9.......9.......', S: '...8..8....8..8.', G: '.4...4...4...4.4' }],
+    ['bendir-ayoub', { TOM: '9...8...9...8...', M: '...5.......5....', FLM: '......7.......7.', T: '5.3.5.3.5.3.5.3.' }],
+    ['riq-rolls', { K: '9...............', O: '....9.......9...', S: '..8...8...8.8.8.', C: '...............9' }],
+    ['frame-saidi', { TOM: '9.....8.9.......', S: '..8.........8...', G: '....4.....4...4.', K2: '9.......9.......', R: '..5...5...5...5.' }]],
+  w_west: [['kuku', { K: '9.......8.......', S: '......9.......9.', G: '..7.7.....7.7...', R: '9.6.9.6.9.6.9.6.', DD: '9...........8...', SB: '....8..8....8...', KK: '..7...7...7...7.', T: '5.3.5.3.5.3.5.3.' }],
+    ['djole', { 'R~e': 'e:9.7.97.7.7.', 'K~e': 'e:9.....8.....', 'S~e': 'e:...9.....9..', 'G~e': 'e:.7.7...7.7.', 'DD~e': 'e:9.....9..9..', 'SB~e': 'e:..8...8.....', 'T~e': 'e:535353535353' }],
+    ['dunun', { DD: '9.....8.....9...', DDM: '..6.......6.....', SB: '....8..8....8...', SBM: '.5..........5...', KK: '..7...7...7...7.', R: '9.6.9.6.9.6.9.6.' }],
+    ['djembe-call', { S: '9..9..9.9..9..9.|9.9.9.9.99999999', K: '9...............|9...............', G: '................|..5...5.........' }],
+    ['bell-shekere', { R: '9.6.9.6.9.6.9.6.', RM: '..5.......5.....', T: '5353535353535353', H: '....7.......7...', AH: '9..6..9...6.6...', AL: '...6......6.....' }],
+    ['afrobeat-perc', { K: '9.....8...9.....', S: '....8.......8...', G: '...6..6....6..6.', T: '5.4.5.4.5.4.5.4.', AH: '..6...6...6...6.' }]],
+  w_talk: [['talk-groove', { K: '9.......8.......', S: '....7.......7...', TOM: '..........6.....|......6.........', R: '9.6.6.9.6..6.6..', T: '5.4.5.4.5.4.5.4.' }],
+    ['talk-groove-b', { K: '9.....8.........|9.......8..8....', S: '....8.......8.8.', TOM: '..........7.....', M: '..............7.|.....6..........', G: '..5...5.....5...', H: '5353535353535353' }],
+    ['bells-shekere', { R: '9.6.6.9.6..6.6..', RL: '..6.......6.....', CB: '....7.......7...', T: '5353535353535353', H: '..5...5...5...5.' }],
+    ['udu-claves', { U: '9.....7...9.....', CL: '9..9..9...9.9...', LG: '....7.......7...', T: '4.3.4.3.4.3.4.3.' }],
+    ['talking-call', { C: '9...............|................', TOM: '....8...8.......|9...9...9.9.9...', S: '..........6.6...|............9999', K: '................|9...............' }],
+    ['amapiano-perc', { CL: '..6.....6..6....', LG: '9.....7...8.....', T: '5353535353535353', R: '...6..6.....6...', G: '......5.......5.' }]],
+};
+const WORLD_KIT_WORD = { w_darbuka: 'darbuka', w_riq: 'riq', w_west: 'djembe', w_talk: 'talking drum' };
+// melodic bank: [scene (1-6), lane, role, label, bars, maker(P, C, rng) -> notes, opt]
+const WORLD_BANK_MEL = {
+  mideast: [[1, 'LEAD', 'lead', 'oud riff', 4, (P, C, rng) => { const lad = wLadder(P, 52, 79); return wOrnament(wRiff(P, C, lad, rng, { fam: 'maqam', bars: 8, center: 62 + wMod(genKey(P) - 62, 12), v: 104 }), lad, rng, 'oud'); }],
+    [2, 'LEAD', 'lead', 'oud riff B', 4, (P, C, rng) => { const lad = wLadder(P, 52, 79); return wOrnament(wRiff(P, C, lad, rng, { fam: 'maqam', bars: 8, center: 62 + wMod(genKey(P) - 62, 12), v: 100, seq: 1 }), lad, rng, 'oud'); }],
+    [1, 'LEAD', 'lead', 'mizmar riff', 4, null, { presetName: ['Mizmar'] }],
+    [3, 'LEAD', 'lead', 'oud halftime phrase', 4, (P, C, rng) => { const lad = wLadder(P, 52, 79); return wOrnament(wRiff(P, C, lad, rng, { fam: 'maqam', cell: 'x---x---x.x.x---x-------x.x.x---', bars: 8, slow: 2, center: 62 + wMod(genKey(P) - 62, 12), v: 96 }), lad, rng, 'oud'); }],
+    [1, 'STAB', 'lead', 'ney phrase', 4, (P, C, rng) => { const lad = wLadder(P, 57, 84); return wOrnament(wLong(lad, 69 + wMod(genKey(P) - 69, 12), rng, 8, 86, { lens: [8, 12, 6] }), lad, rng, 'ney'); }],
+    [2, 'STAB', 'lead', 'ney calls', 4, (P, C, rng) => { const lad = wLadder(P, 57, 84); return wOrnament(wLong(lad, 69 + wMod(genKey(P) - 69, 12), rng, 8, 90, { lens: [4, 6, 2] }), lad, rng, 'ney'); }]],
+  desert: [[1, 'LEAD', 'lead', 'ney hook', 4, (P, C, rng) => { const lad = wLadder(P, 62, 88); return wOrnament(wRiff(P, C, lad, rng, { fam: 'maqam', bars: 8, slow: 2, center: 69 + wMod(genKey(P) - 69, 12), v: 100, legato: true }), lad, rng, 'ney'); }],
+    [2, 'LEAD', 'lead', 'ney hook B', 4, (P, C, rng) => { const lad = wLadder(P, 62, 88); return wOrnament(wRiff(P, C, lad, rng, { fam: 'maqam', bars: 8, slow: 2, center: 69 + wMod(genKey(P) - 69, 12), v: 98, seq: 1, legato: true }), lad, rng, 'ney'); }],
+    [1, 'STAB', 'arp', 'qanun runs', 4, (P, C, rng) => wRiff(P, C, wLadder(P, 57, 84), rng, { fam: 'maqam', cell: 'x.x.x.x.x.x.x.x.x.x.x.x.xxxxxxxx', shape: [0, 1, 2, 3, 4, 3, 2, 1], bars: 8, center: 64 + wMod(genKey(P) - 64, 12), v: 92, seq: 1 })],
+    [2, 'STAB', 'lead', 'qanun tremolo', 4, (P, C, rng) => wLong(wLadder(P, 57, 84), 64 + wMod(genKey(P) - 64, 12), rng, 8, 84, { lens: [8, 12, 16] })],
+    [1, 'PAD', 'pad', 'strings bed', 4, (P, C) => wPad(P, C, [50, 76], 80, { drone: 38 + wMod(genKey(P) - 38, 12) })]],
+  afrodnb: [[1, 'LEAD', 'lead', 'kora ostinato', 4, (P, C, rng) => wKora(P, C, rng, 8, 92, false)],
+    [2, 'LEAD', 'lead', 'kora runs', 4, (P, C, rng) => wKora(P, C, rng, 8, 94, true)],
+    [2, 'LEAD', 'lead', 'ngoni runs', 4, null, { presetName: ['Ngoni'] }],
+    [1, 'STAB', 'arp', 'balafon interlock', 4, (P, C, rng) => wBalafon(P, C, rng, 8, 86, false)],
+    [2, 'STAB', 'arp', 'balafon 16ths', 2, (P, C, rng) => wBalafon(P, C, rng, 8, 86, true)],
+    [1, 'STAB', 'arp', 'kalimba interlock', 4, null, { presetName: ['Kalimba'] }],
+    [2, 'STAB', 'arp', 'buzz balafon 16ths', 2, null, { presetName: ['Balafon Buzz'] }],
+    [1, 'PAD', 'perc', 'talking drum line', 4, (P, C, rng) => wTalk(P, rng, 8, 100, true)],
+    [2, 'PAD', 'perc', 'talking drum calls', 4, (P, C, rng) => wTalk(P, rng, 8, 92, false)]],
+  afrohouse: [[1, 'LEAD', 'lead', 'kora riff', 4, (P, C, rng) => wRiff(P, C, wLadder(P, 60, 86, wPent(P)), rng, { fam: 'afro', bars: 8, center: 64 + wMod(genKey(P) - 64, 12), v: 96 })],
+    [2, 'LEAD', 'lead', 'kora ostinato', 4, (P, C, rng) => wKora(P, C, rng, 8, 90, false)],
+    [1, 'STAB', 'chords', 'marimba chords', 4, (P, C, rng) => wMarimba(P, C, rng, 8, 88, false)],
+    [2, 'STAB', 'arp', 'marimba arp', 4, (P, C, rng) => wMarimba(P, C, rng, 8, 86, true)],
+    [2, 'STAB', 'arp', 'mbira arp', 4, null, { presetName: ['Mbira'] }],
+    [1, 'STAB', 'chords', 'balafon chords', 4, null, { presetName: ['Balafon'] }],
+    [1, 'BASS', 'bass', 'log drum', 4, (P, C, rng) => wLog(P, C, rng, 8, 100, false)],
+    [2, 'BASS', 'bass', 'log drum busy', 4, (P, C, rng) => wLog(P, C, rng, 8, 100, true)]],
+};
+function worldBank(P, st, b) {
+  const rng = genRng((b.seed * 7919 + 17) >>> 0), C = wChords(P, 128), kitRows = WORLD_BANK_DRUMS[b.kit] || [], mel = WORLD_BANK_MEL[st.world] || [];
+  const base = P.scenes.length;
+  for (let k = 0; k < 6; k++) P.scenes.push({ name: 'LOOPS ' + (k + 1) });
+  const put = (n, lane, notes, name) => { const tr = P.tracks[WORLD_T[lane]]; if (!tr) return; tr.clips[base + n - 1] = { name: name.toUpperCase().slice(0, 24), bars: 8, notes: dedupe(notes.filter(x => x.s >= 0 && x.s < 128)) }; };
+  kitRows.forEach(([word, rows], k) => put(k + 1, 'BREAK', wRows(b.kit, rows, 8), word.replace(/-/g, ' ')));
+  mel.forEach(([n, lane, role, word, bars, make]) => { if (make) put(n, lane, make(P, C, rng), word); });
+}
+if (typeof genSongClips === 'function') {
+  const worldBankClips0 = genSongClips;
+  genSongClips = function (P, st, rng) { // eslint-disable-line no-func-assign
+    const r = worldBankClips0(P, st, rng);
+    if (st && st.world && WORLD.bank && P.scenes.length + 6 <= MAX_SCENES) worldBank(P, st, WORLD.bank);
+    return r;
+  };
+}
+// the recipes
+const WORLD_RECIPES = (() => {
+  const out = [], ids = new Set();
+  WORLD_LOOP.forEach(e => {
+    const st = GEN_STYLES[e.style], w = st.world, mode = (GEN_SCALES[e.scale] || { name: e.scale }).name.replace(/^Maqam /, '').toLowerCase();
+    const add = (id, r) => { if (ids.has(id) || !LIB_ID_RE.test(id) || id.length > 48) return; ids.add(id); out.push(Object.assign({ id, style: e.style, seed: e.seed, off: 0 }, r)); };
+    (WORLD_BANK_DRUMS[e.kit] || []).forEach(([word], k) => add(`world-${word}-${e.bpm}`, { role: 'perc', src: `LOOPS ${k + 1}:BREAK`, bars: word === 'chiftetelli' || word === 'djembe-call' || word === 'talking-call' ? 4 : 2,
+      energy: .7, name: `${WORLD_KIT_WORD[e.kit]} ${word.replace(/-/g, ' ')} ${e.bpm}`.replace(/^(\w+) \1 /, '$1 ') }));
+    (WORLD_BANK_MEL[w] || []).forEach(([n, lane, role, word, bars, , opt]) => {
+      const slug = word.replace(/[^a-z0-9]+/g, '-').replace(/-+$/, '');
+      add(`world-${slug}-${e.prog.replace(/^w[ma]-/, '').replace(/-/g, '')}${e.bpm}`, { role, src: `LOOPS ${n}:${lane}`, bars, energy: lane === 'PAD' ? .5 : .8,
+        name: `${word} ${mode} ${e.bpm}`.slice(0, 40), opt: opt ? Object.assign({}, opt) : {} });
+    });
+  });
+  return out;
+})();
+// the world styles' songs in the library's style list (their plan recipes too: beats, bass, chords... of the generated songs)
+if (typeof LIB_SEEDS === 'object' && LIB_SEEDS) ['wmideastdub', 'wdesertdnb', 'wafrodnb', 'wafrohouse'].forEach(st => {
+  if (wHas(LIB_SEEDS, st) || !wHas(GEN_STYLES, st)) return;
+  const seeds = WORLD_LOOP.filter(e => e.style === st).map(e => e.seed).slice(0, 2); if (seeds.length === 2) LIB_SEEDS[st] = seeds;
+});
+if (typeof libRegisterRecipes === 'function') {
+  WORLD.reg = libRegisterRecipes(WORLD_RECIPES);
+  if (WORLD.reg && WORLD.reg.rejected && WORLD.reg.rejected.length) console.warn('[dnb808] world loops rejected:', WORLD.reg.rejected.slice(0, 5));
+} else if (typeof libRecipes === 'function' && typeof LIB === 'object') {
+  // an older loop library: the recipes join its catalogue, libBuild reads a 'LOOPS n' scene and the presetName option
+  const worldRecipes0 = libRecipes;
+  libRecipes = function () { // eslint-disable-line no-func-assign
+    if (LIB.recipes && LIB.worldIn) return LIB.recipes;
+    const out = worldRecipes0();
+    WORLD_RECIPES.forEach(e => {
+      if (out.some(r => r.id === e.id)) return;
+      const r = Object.assign({ kind: 'builtin', bpm: GEN_STYLES[e.style].bpm, key: NOTE_NAMES[WORLD_LOOP_BY.get(e.style + ':' + e.seed).key] + (MINOR_LIKE.includes(WORLD_LOOP_BY.get(e.style + ':' + e.seed).scale) ? 'm' : ''),
+        scale: WORLD_LOOP_BY.get(e.style + ':' + e.seed).scale, ext: true }, e, { opt: Object.assign({}, e.opt) });
+      r.words = `${r.name} ${r.style} ${GEN_STYLES[r.style].name} ${LIB_ROLES[r.role] || r.role} ${r.role} ${r.bpm} ${r.key} ${r.bars} bar${r.bars > 1 ? 's' : ''} built-in world`.toLowerCase();
+      out.push(r);
+    });
+    LIB.byId = new Map(out.map(r => [r.id, r])); LIB.worldIn = true; LIB.recipes = out;
+    return out;
+  };
+  if (typeof libBuild === 'function') {
+    const worldBuild0 = libBuild;
+    libBuild = function (r) { // eslint-disable-line no-func-assign
+      const where = r && typeof r.src === 'string' ? r.src.split(':')[0] : '';
+      if (!(r && r.ext && /^LOOPS [1-6]$/.test(where))) return worldBuild0(r);
+      const P0 = libSong(r.style, r.seed), R = clone(P0), t = LIB_T[r.src.split(':')[1]], tr = R.tracks[t], op = r.opt || {}, L = r.bars * 16;
+      if (Array.isArray(op.presetName) && tr.type === 'synth') { const n = op.presetName.find(x => genHas(SYNTH_PRESETS, x)); if (n) tr.synth = makeSynth(n); }
+      const row = R.scenes.findIndex(x => x && x.name === where), c = row >= 0 ? tr.clips[row] : null;
+      const notes = c ? c.notes.filter(n => n.s < L).map(n => Object.assign({}, n, { l: Math.min(n.l, L - n.s) })) : [];
+      return { R, t, clip: { name: r.name.toUpperCase().slice(0, 24), bars: r.bars, notes }, key: NOTE_NAMES[R.key] + (MINOR_LIKE.includes(R.scale) ? 'm' : ''), scale: R.scale, bpm: R.bpm };
+    };
+  }
+}
+
+// ---------- UI: the World device, credits, the sounds list ----------
+const WORLD_MODEL_INFO = {
+  oud: 'Oud: the Arab short-necked lute, fretless. A Karplus-Strong string with a plectrum (risha) attack and the body and nasal resonance. GLIDE + MONO slide between notes; SCOOP bends into each note',
+  kora: 'Kora: the 21-string harp-lute of the Mande griots. A bright, long-ringing string over a calabash body: ostinatos (kumbengo) and runs (birimintingo)',
+  ngoni: 'Ngoni: the West African lute, ancestor of the banjo. Short, bright, percussive plucks',
+  qanun: 'Qanun: the Arab zither, plucked with picks on both hands. TREMOLO repeats each note (the held notes shimmer); 0 = single plucks',
+  ney: 'Ney: the end-blown reed flute of Arab and Turkish music. Breath noise, a delayed vibrato and a soft attack that finds the pitch',
+  mizmar: 'Mizmar: the Egyptian double-reed shawm of the Saidi wedding bands. Loud, nasal and buzzing',
+  balafon: 'Balafon: the West African xylophone with gourd resonators. BUZZ is the rattle of the membranes on the gourds (the sampled Balafon presets of the Orchestra engine have none)',
+  talkdrum: 'Talking drum: an hourglass drum whose pitch the player bends by squeezing the cords. TALK bends each note over its length; a note\'s bend (b) and glide also play',
+  logdrum: 'Log drum: the pitched, punchy bass of amapiano. Play it like a bass; DECAY sets how long it rings',
+};
+function worldDevice(i) {
+  const tr = P.tracks[i], s = tr.synth, ap = () => E && E.applyTrack(i), m = s.model;
+  const d = device('WORLD', tr.color, headerControls(i), 'World: synthesized African and Middle-Eastern instruments (oud, kora, ngoni, qanun, ney, mizmar, balafon, talking drum, log drum). The sampled balafon, kalimba, mbira and marimba are presets of the Orchestra engine');
+  const K = (key, o) => bindKnob(s, key, Object.assign({}, o, { def: WORLD_BASE[key] }), ap);
+  const pc = v => Math.round(v * 100) + '%', fS2 = v => (v < 1 ? Math.round(v * 1000) + ' ms' : v.toFixed(2) + ' s');
+  const plucked = wHas(WORLD_PLUCK, m) || m === 'balafon', wind = m === 'ney' || m === 'mizmar', drum = m === 'talkdrum' || m === 'logdrum';
+  const modelSel = selectCtl('MODEL', WORLD_MODELS, m, v => { s.model = v; ap(); if (E && E.warmTrack) E.warmTrack(i); renderDetail(); }, WORLD_MODEL_INFO[m] || 'The instrument');
+  const row1 = [modelSel, K('level', { label: 'LEVEL', min: 0, max: 1.5, fmt: pc, info: 'Output level' }),
+    K('vel', { label: 'VELOCITY', min: 0, max: 1, fmt: pc, info: 'How much a softer note is quieter (plucked models also pick a softer, darker layer)' }),
+    K('tone', { label: 'TONE', min: -1, max: 1, bipolar: true, fmt: v => (v > 0 ? '+' : '') + Math.round(v * 100) + '%', info: 'Darker (left) or brighter (right): a low-pass after the instrument' })];
+  const row2 = [];
+  if (plucked) row2.push(K('bright', { label: 'BRIGHT', min: 0, max: 1, fmt: pc, info: 'The pluck: soft and round (left) or hard and bright (right). Changes the rendered notes' }),
+    K('body', { label: 'BODY', min: 0, max: 1, fmt: pc, info: 'The body\'s resonances (the oud\'s nasal 1.2 kHz, the kora\'s calabash)' }),
+    K('decay', { label: 'DECAY', min: 0, max: 1, fmt: pc, info: 'How long the string or the bar rings' }));
+  if (m === 'qanun') row2.push(K('trem', { label: 'TREMOLO', min: 0, max: 1, fmt: v => (v < .01 ? 'OFF' : Math.round(8 + 10 * v) + ' Hz'), info: 'Tremolo picking: the note repeats 8-18 times a second while it is held' }));
+  if (m === 'balafon') row2.push(K('buzz', { label: 'BUZZ', min: 0, max: 1, fmt: pc, info: 'The buzzing membranes on the gourds' }));
+  if (wind) row2.push(K('breath', { label: 'BREATH', min: 0, max: 1, fmt: pc, info: 'Breath noise around the note' }), K('vib', { label: 'VIBRATO', min: 0, max: 1, fmt: pc, info: 'The vibrato that comes in after the attack' }));
+  if (drum) row2.push(K('decay', { label: 'DECAY', min: 0, max: 1, fmt: pc, info: 'How long the drum rings' }), K('body', { label: 'BODY', min: 0, max: 1, fmt: pc, info: 'Saturation of the log drum' }));
+  if (m === 'talkdrum') row2.push(K('talk', { label: 'TALK', min: -12, max: 12, bipolar: true, fmt: v => (v > 0 ? '+' : '') + v.toFixed(1) + ' st', info: 'The squeeze: each note bends up (right) or down (left) by this much over its length' }));
+  if (!drum) row2.push(K('scoop', { label: 'SCOOP', min: 0, max: 1, fmt: pc, info: 'Each note slides in from below (up to 2 semitones): the oud and ney ornament' }));
+  const row3 = [K('a', { label: 'ATTACK', min: .001, max: 2, log: true, fmt: fS2, info: 'Fade-in of a note' }),
+    K('r', { label: 'RELEASE', min: .02, max: 4, log: true, fmt: fS2, info: 'Fade-out after the note ends (the finger damps the string)' }),
+    K('glide', { label: 'GLIDE', min: 0, max: .3, fmt: fS2, info: 'Slide from the last note (fretless): with MONO for legato lines' }),
+    K('width', { label: 'WIDTH', min: 0, max: 1, fmt: pc, info: 'Low notes left, high notes right' }),
+    K('lc', { label: 'LOW CUT', min: 20, max: 1000, log: true, fmt: v => (v < 25 ? 'OFF' : Math.round(v) + ' Hz'), info: 'High-pass: keeps the instrument out of the bass' }),
+    toggleCtl('MONO', s.mono, v => { s.mono = v; }, 'Mono: a new note cuts the previous one (legato, slides)')];
+  d.body.append(kgroupRows(WORLD_MODELS.find(x => x[0] === m)[1], [row1, row2, row3]));
+  // the set's quarter tones (maqam)
+  const g = el('div', 'kgroup'), st = el('div', 'orch-stat');
+  const has = wHas(WORLD_MICRO, P.scale), word = has ? `${GEN_SCALES[P.scale].name}: ${Object.entries(WORLD_MICRO[P.scale]).map(([pc, c]) => `degree ${SCALES[P.scale].indexOf(+pc) + 1} (${NOTE_NAMES[wMod((P.key | 0) + +pc, 12)]}) ${c > 0 ? '+' : ''}${c}¢`).join(', ')}`
+    : 'The set\'s scale has no quarter tones (choose Bayati, Rast, Saba or Sikah in the scale menu)';
+  st.textContent = word + ` · rendered notes ${WORLD.cache.size}, ${Math.round(WORLD.bytes / 1048576)} / ${Math.round(WORLD.cap / 1048576)} MB`;
+  g.append(el('div', 'kgroup-t', 'Maqam'), toggleCtl('QUARTER TONES', P.wmicro === true, v => { if (v) P.wmicro = true; else delete P.wmicro; }, 'Quarter tones of the maqam for the whole set: the World engine plays them exactly, the other engines bend each note. Off: 12-TET (the nearest semitone)'), st);
+  d.body.append(g);
+  if (E && E.warmTrack) E.warmTrack(i);
+  return d.el;
+}
+if (typeof synthDevice === 'function') {
+  const worldSynthDevice0 = synthDevice;
+  synthDevice = function (i) { return P.tracks[i].synth.engine === 'world' ? worldDevice(i) : worldSynthDevice0(i); }; // eslint-disable-line no-func-assign
+}
+// credits: every source of the world sounds
+if (typeof SAMPLE_CREDITS === 'object' && Array.isArray(SAMPLE_CREDITS)) SAMPLE_CREDITS.push(
+  'World (balafon, kalimba, mbira dzaVadzimu, marimba, cowbells; with the VCSL darbuka, frame drums, congas, bongos, shakers and tambourine of the orchestral kits): VCSL by Versilian Studios LLC, CC0 1.0 - https://github.com/sgossner/VCSL - trimmed, normalized, MP3',
+  'World engine (oud, kora, ngoni, qanun, ney, mizmar, buzzing balafon, talking drum, log drum) and the synthesized world drums (darbuka strokes and rolls, riq, zills, tabl baladi, djembe, dunun, shekere, iron bells, udu): synthesized in the app, no samples',
+);
+if (typeof libSoundsHtml === 'function') {
+  const worldSoundsHtml0 = libSoundsHtml;
+  libSoundsHtml = function (link) { // eslint-disable-line no-func-assign
+    let h = worldSoundsHtml0(link);
+    const names = Object.keys(WORLD_KIT_DEFS).map(k => WORLD_KIT_DEFS[k].name);
+    names.forEach(n => { h = h.split(', ' + esc(n)).join('').split(esc(n) + ', ').join(''); });
+    return h + `<tr><td style="vertical-align:top">World</td><td class="mi-name">The world kits (${esc(names.join(', '))}) mix VCSL samples (CC0, credited above) with synthesized drums. The World engine and the world drum voices are synthesized. The sampled balafon, kalimba, mbira and marimba are Orchestra presets and load the first time you use them.</td></tr>`;
+  };
+}
+// tests and the Download-all button: every world sample file
+function worldPreloadAll() {
+  return Promise.all(WORLD_SMP_IDS.map(id => orchInstLoad(id).then(m => (m ? Promise.all(m.zones.flatMap(z => z.f).concat(Object.values(m.elements).flatMap(L => L.flatMap(l => l.f))).map(f => orchRaw(id + '/' + f))) : null))));
+}
 
 // ===================== 9. MIDI IMPORT =====================
 // Reads a Standard MIDI File (format 0 or 1, PPQ timing) and turns it into a new set:
