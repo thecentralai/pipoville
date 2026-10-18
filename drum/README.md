@@ -779,6 +779,12 @@ reference tracks. Inspired-by only: every note and progression is original.
 | Emotive UK 130 | 130 | Fred again.. |
 | Afro / Middle-Eastern bass fusion | 140 | Dog Blood and the fusion tracks of the playlist |
 
+UK rave clash 174 also follows techniques from two tutorials the owner shared: Rave Fifth Lead (root and fifth saws, a
+retriggered dotted-8th filter LFO), Jump Wob Mid and Jump Wob Mid Hi (the higher change-up), Nasal Sub, Rave Reese Step, Rave
+Chord Stab, Bass Flick, Top Bass Ping, Wail Vox Pad and a 16-pad Rave Clash Kit (layered clap, noise layer, two hats, ride, skip
+hits). The sub holds the root from beat 1 while the wob enters on beat 2, the bass pauses and comes back higher halfway through
+each 16-bar drop half, and the build stacks two claps over a kick that ends four-on-the-floor.
+
 Each style has its arrangement template (intro, builds, drops, switch-ups, DJ intro and outro), its drums, bass rhythms,
 harmony families, sounds and growl feel, loops in the loop library and a song template in TEMPLATES.
 

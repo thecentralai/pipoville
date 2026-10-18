@@ -21425,6 +21425,62 @@ const pfV = v => Math.max(1, Math.min(127, Math.round(v)));
 // ---------- S-1: dotted and 1/32 rates on the classic and Polar LFO menus (BEATS already has them) ----------
 if (typeof LFO_RATES !== 'undefined' && Array.isArray(LFO_RATES) && typeof BEATS === 'object') ['1/32', '1/4D', '1/8D', '3/16'].forEach(r => { if (pfHas(BEATS, r) && !LFO_RATES.includes(r)) LFO_RATES.push(r); });
 
+// ---------- the rave bass tutorials (owner's notes, research5/user_tutorials): presets and the rave kit, technique only ----------
+// Generic names; every value is set by ear from the technique notes, nothing is copied from a project file.
+const PF_RAVE_PRESETS = {
+  // the 2009+ dancefloor lead: two saws a 5th apart, LP with a retriggered 1/8-dotted LFO on the cutoff AND the drive, chorus, reverb
+  'Rave Fifth Lead': { engine: 'wtpro', level: .34, mono: true, glide: .02, o1table: 'Basic Shapes', o1pos: .66, o1voices: 3, o1det: .18, o1vol: .8,
+    o2table: 'Basic Shapes', o2pos: .66, o2semi: 7, o2voices: 3, o2det: .18, o2vol: .72, f1type: 'lp24', f1cut: 900, f1res: .28, f1drive: .2,
+    e1a: .004, e1d: .4, e1s: .75, e1r: .25, l1rate: '1/8D', l1mode: 'retrig', l1pts: [[0, 1, 0], [.5, .25, 0], [1, 1, 0]],
+    mods: [{ s: 'lfo1', d: 'f1cut', a: .45, b: false }, { s: 'lfo1', d: 'f1drive', a: .35, b: false }],
+    fxOrder: ['dist', 'eq', 'comp', 'ott', 'chorus', 'phaser', 'delay', 'reverb'], xdOn: true, xdMode: 'tube', xdDrive: 4, xdMix: .35,
+    xcOn: true, xcRate: .5, xcDepth: .7, xcDelay: 14, xcMix: .5, xrOn: true, xrSize: 2.4, xrMix: .22, xeOn: true, xeLc: 180 },
+  // the jump-up wob (a MID bass): a short-bass table + osc B +19 st unison 6 wide, FM A <- B, ladder LP, ONE 1/4 LFO on the cutoff and
+  // both oscillator levels; chorus BEFORE the distortion, soft drive (macro 1 moves it), upper mids up, a gentle LP, a little reverb
+  'Jump Wob Mid': { engine: 'wtpro', level: .3, mono: true, glide: .02, lowMono: 160, o1table: 'Growl', o1pos: .3, o1vol: .85, o1warp: 'fm', o1wsrc: 'other', o1wamt: .3,
+    o2table: 'Basic Shapes', o2pos: .66, o2oct: 1, o2semi: 7, o2voices: 6, o2det: .3, o2width: 1, o2vol: .55, f1type: 'ladder', f1cut: 1300, f1res: .3, f1drive: .25,
+    e1a: .002, e1d: .18, e1s: .6, e1r: .06, l1rate: '1/4', l1mode: 'retrig', l1pts: [[0, 1, 0], [.35, .55, -.3], [1, 0, 0]],
+    mods: [{ s: 'lfo1', d: 'f1cut', a: .6, b: false }, { s: 'lfo1', d: 'o1vol', a: .45, b: false }, { s: 'lfo1', d: 'o2vol', a: .45, b: false }, { s: 'mac1', d: 'f1drive', a: .4, b: false }],
+    fxOrder: ['chorus', 'dist', 'eq', 'comp', 'ott', 'phaser', 'delay', 'reverb'], xcOn: true, xcRate: .8, xcDepth: .5, xcDelay: 9, xcMix: .45,
+    xdOn: true, xdMode: 'tube', xdDrive: 9, xdMix: .65, xeOn: true, xeLc: 140, xeMF: 2600, xeMG: 4, xeMQ: .9, xeHc: 9000, xkOn: true, xkThr: -14, xkRatio: 6, xkAtt: .002, xkRel: .08, xrOn: true, xrSize: 1.2, xrMix: .08 },
+  // the change-up: osc B one more octave up and a longer decay
+  'Jump Wob Mid Hi': { engine: 'wtpro', level: .28, mono: true, glide: .02, lowMono: 160, o1table: 'Growl', o1pos: .35, o1vol: .8, o1warp: 'fm', o1wsrc: 'other', o1wamt: .35,
+    o2table: 'Basic Shapes', o2pos: .66, o2oct: 2, o2semi: 7, o2voices: 6, o2det: .3, o2width: 1, o2vol: .55, f1type: 'ladder', f1cut: 1700, f1res: .3, f1drive: .3,
+    e1a: .002, e1d: .45, e1s: .7, e1r: .2, l1rate: '1/4', l1mode: 'retrig', l1pts: [[0, 1, 0], [.5, .6, -.3], [1, .1, 0]],
+    mods: [{ s: 'lfo1', d: 'f1cut', a: .55, b: false }, { s: 'lfo1', d: 'o1vol', a: .4, b: false }, { s: 'lfo1', d: 'o2vol', a: .4, b: false }, { s: 'mac1', d: 'f1drive', a: .4, b: false }],
+    fxOrder: ['chorus', 'dist', 'eq', 'comp', 'ott', 'phaser', 'delay', 'reverb'], xcOn: true, xcRate: .8, xcDepth: .5, xcDelay: 9, xcMix: .45,
+    xdOn: true, xdMode: 'tube', xdDrive: 9, xdMix: .65, xeOn: true, xeLc: 160, xeMF: 2800, xeMG: 4, xeMQ: .9, xeHc: 10000, xkOn: true, xkThr: -14, xkRatio: 6, xkAtt: .002, xkRel: .08, xrOn: true, xrSize: 1.4, xrMix: .1 },
+  // the sub: a sine + a nasal table on the same note (no 5th), LP, light distortion with the dry kept
+  'Nasal Sub': { engine: 'wtpro', level: .32, mono: true, glide: .02, lowMono: 400, o1table: 'Basic Shapes', o1pos: 0, o1vol: .9, o2table: 'Hollow', o2pos: .4, o2vol: .3,
+    f1type: 'lp24', f1cut: 240, f1res: .1, e1a: .003, e1d: .2, e1s: 1, e1r: .07, xdOn: true, xdMode: 'tube', xdDrive: 4, xdMix: .3 },
+  // a reese step layer: saws in unison 6 a few cents apart (the beating follows the note), filter drive, chorus
+  'Rave Reese Step': { engine: 'polar', level: .5, mono: true, glide: .03, o1voices: 6, o1det: .35, o1st: .5, o1fine: -15, o1vol: .7, o2fine: 15, o2vol: .65, o2voices: 3, o2det: .3,
+    fAcut: 950, fAres: .25, fAdrive: .55, fAdtype: 'soft', fBcut: 600, sA: .9, sB: .9, rA: .12, rB: .12, l1wave: 'triangle', l1rate: '1/2', l1dest: 'cut', l1amt: .15 },
+  // the chord stab: a triangle + a saw a major 3rd up (parallel major triads), the cutoff opening on every note, legato and glide, crunch
+  'Rave Chord Stab': { engine: 'polar', level: .42, mono: true, glide: .06, o1wave: 'triangle', o1vol: .8, o2wave: 'sawtooth', o2semi: 4, o2vol: .65, o2voices: 3, o2det: .2,
+    fAcut: 700, fAres: .3, fAdrive: .45, fAdtype: 'hard', aA: .003, dA: .35, sA: .6, rA: .15, m1a: .001, m1d: .22, m1s: .1, m1dest: 'cut', m1amt: .55, l1wave: 'triangle', l1rate: '1/8', l1dest: 'mixB', l1amt: .2 },
+  // a bass flick between phrases: a square +9 st and a saw three octaves down, filter + drive
+  'Bass Flick': { engine: 'polar', level: .45, mono: true, glide: .01, o1wave: 'square', o1semi: 9, o1vol: .7, o2wave: 'sawtooth', o2oct: -3, o2vol: .6,
+    fAcut: 1600, fAres: .35, fAdrive: .7, fAdtype: 'hard', aA: .002, dA: .18, sA: 0, rA: .08, m1d: .12, m1dest: 'cut', m1amt: .5 },
+  // the top bass: one simple voice, one LFO on many parameters, heavy distortion, widened by a ping-pong echo with the lows cut
+  'Top Bass Ping': { engine: 'wtpro', level: .26, mono: true, glide: .02, lowMono: 200, o1table: 'Basic Shapes', o1pos: .5, o1vol: .85, f1type: 'lp24', f1cut: 900, f1res: .35, f1drive: .3,
+    e1a: .002, e1d: .2, e1s: .7, e1r: .06, l1rate: '1/8', l1mode: 'retrig', l1pts: [[0, 0, 0], [.6, 1, .3], [1, .4, 0]],
+    mods: [{ s: 'lfo1', d: 'f1cut', a: .6, b: false }, { s: 'lfo1', d: 'o1pos', a: .3, b: false }, { s: 'lfo1', d: 'f1drive', a: .4, b: false }],
+    xdOn: true, xdMode: 'hard', xdDrive: 16, xdMix: .9, xyOn: true, xyTime: '1/32', xyFb: .2, xyMix: .45, xyPing: true, xyLc: 300, xeOn: true, xeLc: 150 },
+  // the vocal-like pad: a formant wail with glide between notes, filtered both ends, drowned in reverb, played low
+  'Wail Vox Pad': { engine: 'spectra', level: .4, mono: false, legato: false, glide: .14, sA: 'saw', sB: 'pulse', morph: .25, width: .6, p1type: 'formant', p1freq: 900, p1res: .8, p1amt: .35,
+    a: .35, d: .5, s: .9, r: 1.4, l1rate: '2/1', l1wave: 'tri', l1mode: 'song', mods: [{ s: 'lfo1', d: 'p1freq', a: .25 }, { s: 'lfo1', d: 'p1amt', a: .2 }],
+    xeOn: true, xeLc: 280, xeHc: 6500, xrOn: true, xrSize: 4, xrMix: .55, xrPre: .04 },
+};
+if (typeof SYNTH_PRESETS === 'object' && SYNTH_PRESETS) Object.entries(PF_RAVE_PRESETS).forEach(([n, v]) => { if (!pfHas(SYNTH_PRESETS, n)) SYNTH_PRESETS[n] = v; });
+// the rave kit: the clap is the snare (layered: a snappy one and a lower wide one), a noise layer for the first kick of a phrase
+// and the drop downbeat, two closed hats (one panned, one digital), a live open hat and ride, a crunchy top, a rim for the lazy skip hit
+if (typeof KITS === 'object' && KITS && !pfHas(KITS, 'pf_rave')) KITS.pf_rave = { name: 'Rave Clash Kit', pads: [
+  ['KICK', 'pkick', { level: .8, duck: true }], ['SNARE', 'psnare', { level: .7 }], ['CLAP', 'pclap', { level: 1, tune: 1 }], ['CLAP WIDE', 'clap', { level: .5, tune: -2, pan: -.3, decay: .7 }],
+  ['C-HAT', 'pchat', { level: .5, pan: .12 }], ['HAT 2', 'chat', { level: .32, pan: -.3, tune: 4, decay: .6 }], ['O-HAT', 'pohat', { level: .32, pan: .1 }], ['RIDE', 'pride', { level: .3, pan: -.2 }],
+  ['TOPS', 'ptops', { level: .3, pan: .25 }], ['GHOST', 'pghost', { level: .6 }], ['NOISE', 'crash', { level: .38, tune: -7, decay: .45 }], ['RIM', 'rim', { level: .5, tune: 2 }],
+  ['SKIP', 'rim', { level: .5, tune: -4 }], ['TOM', 'tom', { level: .6 }], ['CRASH', 'crash', { level: .4 }], ['SHAKER', 'shaker', { level: .3, pan: .2 }]] }; // 16 pads (the rack pads a kit to 16)
+
 // ---------- harmony families (GEN_PROGS: scale degrees on the scale the family needs) ----------
 // one entry per profile family; 'deg' repeats a chord to hold it (per = bars per chord). Borrowed colours are written on the
 // scale that holds them (bII = phrygian, the major V = harmonic minor, the major IV = dorian): no note leaves its own scale.
@@ -21610,7 +21666,7 @@ const PF = {
     sw2: { S1: .3, S2: .2, S3: .1, S4: .1, S5: .05, S7: .1, S8: .05, S12: .1 },
     rhythm: { bass: ['wobble'], sub: ['kick'], stab: ['hits', 'push'], pad: ['bar'], lead: ['motif', 'hook'] }, harm: { pad: 'power', stab: 'power' },
     presets: { bass: ['TP Talker FM', 'SP Talking Bass', 'PRO Talking Bass', 'Jump-Up Talker FM'], sub: ['Sub Pure Mono', 'Sub Sine'], stab: ['Polar Rave Stab', 'Rave Stab'], pad: ['Polar Pad Wide', 'PRO Silk Pad'], lead: ['TP Rave Hoover', 'Polar Rave Hoover', 'SP Hoover'] },
-    kits: { DRUMS: 'pro', BREAK: 'breaks' },
+    kits: { DRUMS: 'pf_rave', BREAK: 'breaks' }, rave: true,
     fx: { BASS: { dist: true, distMode: 'hard', distDrive: 6.9, distMix: .55, ott: true, ottDepth: .5, eqHp: 120 }, PAD: { eqHp: 180 } },
     duck: { sub: [10, 10, .5], bass: [4, 5, .35], snare: [3, .35] }, master: ['club', -4.5, 'drop', 120],
     auto: { long: ['Long groove breathe', 'Long groove A', 'Long groove call'], k: 1, vw: ['aeio', 'uaua', 'ouae'] },
@@ -21621,8 +21677,8 @@ const PF = {
     genre: 'jumpup', bpm: 174, range: [172, 176], swing: { hats: 53, perc: 57, ghost: 53 }, keys: { 5: 3, 6: 2, 7: 2, 9: 2, 2: 1.5 },
     progs: { 'pf-rc-clash': 3, 'pf-rc-anthem': 2 }, gdrums: ['twostep', 'roller'], switchBeat: 'halftime',
     drums: {
-      intro: { K: 'X...............', H: '..x...x...x...x.', M: 'x..x..x.x..x..x.' },
-      intro2: { K: 'X.........x.....', S: '....X.......X...', H: '..x...x...x...x.' },
+      intro: { K: 'X...............', M: 'x..x..x.x..x..x.', R: 'x.x.x.x.x.x.x.x.' },
+      intro2: { K: 'X.........x.....', S: '....X.......X...', M: 'x..x..x.x..x..x.', R: 'x.x.x.x.x.x.x.x.' },
       build: { K: 'X.........x.....', S: '....X.......X...' },
       drop: { K: 'X.........x.....', S: '....X.......X...', C: '....x.......x...', H: '..x...x...x...x.', G: '..g....g.g....g.', T: 'gggggggggggggggg' },
       dropB: { K: 'X........xx.....', S: '....X.......X..x', H: '..x...x...x...x.', T: 'gggggggggggggggg' },
@@ -21630,10 +21686,10 @@ const PF = {
       switchUp: { K: 'X.............x.', S: '........X.......', M: 'x..x..x...x.x...', H: '..x...x...x...x.' },
       verse: { K: 'X.............x.', S: '........X.......', M: 'x..x..x...x.x...', H: '..x...x...x...x.' },
     },
-    fill: 'rave', buildMode: 'roll1', silence: 'beat',
+    fill: 'rave', buildMode: 'rave', silence: 'beat',
     bass: { drop: [['FOGHORN_A', 'x..x..x...x.....'], ['FOGHORN_B', 'x.....x.x...x.x.']], dropB: [['CLASH_SPLIT', 'xxxx......xxxx..|......x..x....x.'], ['SUB_ROLL', 'xxxx..xx..xxxx..']], sw: [['HALFTIME', 'x.............x.']], verse: 'x.............x.', fill: 'x.x.x.x.xxxxxxxx' },
-    pw: { R: .7, 5: .15, O: .1, b2: .05 }, bassLo: 40, noOnset: [4, 12], borrowBass: [],
-    tpl: { main: [['INTRO (DJ)', 16, 3, ['dj', 'mcHype', 'riserBars13to16', 'noSub']], ['BUILD / MC HYPE', 16, 6, ['build', 'topline', 'kickAtBar9', 'snareRollLastBar']], ['DROP 1 (A,A,B,A\')', 32, 9, ['drop', 'mcOnTop']],
+    pw: { R: .7, 5: .15, O: .1, b2: .05 }, bassLo: 40, noOnset: [], borrowBass: [], // the wob starts on beat 2, with the snare (the tutorial's jump-up rule)
+    tpl: { main: [['INTRO (lead + sub)', 16, 3, ['intro', 'leadSub', 'cutBuild', 'drumBreak']], ['BUILD / MC HYPE', 16, 6, ['build', 'topline', 'kickAtBar9', 'snareRollLastBar']], ['DROP 1 (A,A,B,A\')', 32, 9, ['drop', 'mcOnTop']],
       ['BREAK', 16, 4, ['breakdown', 'toplineOverPad', 'subDrone']], ['BUILD 2', 16, 7, ['build', 'mcCallResponse', 'risingFilter']], ['DROP 2 (new bass)', 32, 10, ['drop', 'switch2', 'newPhraseEvery8']], ['OUTRO (DJ)', 16, 4, ['dj', 'drumsAndSub']]],
       popVocal176: [['INTRO', 8, 3, ['noSub']], ['VERSE', 16, 4, ['verse']], ['PRE', 8, 6, ['build', 'silenceLastBeat']], ['DROP/CHORUS', 16, 9, ['drop']], ['VERSE 2', 16, 5, ['verse']], ['PRE 2', 8, 7, ['build', 'silenceLastBeat']], ['DROP 2', 16, 9, ['drop', 'switch2']], ['BRIDGE', 8, 4, ['breakdown']], ['FINAL DROP', 16, 10, ['drop', 'switch1']], ['OUTRO', 8, 4, ['outro']]],
       industrial130: [['DJ INTRO', 16, 4, ['dj', 'noSub']], ['BUILD', 16, 6, ['build', 'silenceLastBeat']], ['DROP 1', 32, 10, ['drop']], ['SHORT BREAK', 8, 5, ['breakdown', 'short']], ['RE-BUILD', 8, 7, ['build', 'silenceLastBeat']], ['DROP 2', 32, 10, ['drop', 'switch2']], ['DJ OUTRO', 16, 4, ['dj', 'drumsAndSub']]] },
@@ -21641,11 +21697,11 @@ const PF = {
       afro: { w: .15, tpl: 'main', progs: { 'pf-rc-afro': 1 }, swingHat: 57, keys: { 5: 1, 7: 1, 2: 1 } }, pop: { w: .2, tpl: 'popVocal176', bpm: 176, progs: { 'pf-rc-pop': 2, 'pf-rc-pop2': 1 } } },
     sw2: { S1: .3, S2: .2, S3: .1, S4: .1, S5: .05, S7: .1, S8: .05, S12: .1 },
     rhythm: { bass: ['twostep'], sub: ['kick'], stab: ['anthem', 'stabs'], pad: ['hold'], lead: ['motif', 'hook'] }, harm: { pad: 'triad', stab: 'triad' },
-    presets: { bass: ['TP FM Donk', 'Tidal Jump Up Morph', 'Polar Switch Reese', 'Rolling Reese'], sub: ['Sub Pure Mono', 'Sub Sine'], stab: ['Polar Rave Stab', 'Supersaw Rave Stab'], pad: ['Strings Sustain', 'Polar Dark Pad'], lead: ['PRO Rave Lead', 'Festival Hoover 16', 'Polar Rave Hoover'] },
-    kits: { DRUMS: 'pro', BREAK: 'jungle' },
+    presets: { bass: ['Jump Wob Mid', 'TP FM Donk', 'Polar Switch Reese'], sub: ['Nasal Sub', 'Sub Pure Mono'], stab: ['Rave Chord Stab', 'Polar Rave Stab'], pad: ['Wail Vox Pad', 'Strings Sustain'], lead: ['Rave Fifth Lead', 'PRO Rave Lead'] },
+    kits: { DRUMS: 'pf_rave', BREAK: 'jungle' }, rave: true,
     fx: { BASS: { dist: true, distMode: 'hard', distDrive: 6.9, distMix: .5, ott: true, ottDepth: .5, eqHp: 120, eqB1F: 225, eqB1G: -3, eqB1Q: 1, eqB2F: 3000, eqB2G: 2.5, eqB2Q: 1 }, STAB: { eqHp: 300, width: true, widthAmt: 1.4, widthMono: 200 } },
     duck: { sub: [12, 15, .65], bass: [5, 1, .45], snare: [2.5, .45] }, master: ['club', -4.5, 'drop', 120],
-    auto: { long: ['Long groove A', 'Long groove breathe', 'Long groove call'], k: .9, vw: ['uaio', 'aeou'] },
+    auto: { long: null, k: .5 }, // the wob carries its own 1/4 LFO: the generator adds only a slow filter drift
   },
   liquid174: {
     name: 'Liquid / melodic 174', short: 'Liquid', by: 'Etherwood',
@@ -21762,7 +21818,7 @@ const PF = {
       cairoHalftime174: [['TAQSIM', 16, 2, ['noSub']], ['BUILD', 16, 5, ['build', 'silenceLastBeat']], ['DROP A', 32, 9, ['drop']], ['BREAK', 16, 4, ['breakdown']], ['BUILD', 8, 7, ['build', 'silenceLastBeat']], ['DROP B', 32, 10, ['drop', 'switch2']], ['OUTRO', 16, 3, ['outro']]],
       afroDnb174: [['INTRO (perc)', 16, 2, ['noSub']], ['BUILD', 16, 6, ['build', 'silenceLastBeat']], ['DROP', 32, 9, ['drop']], ['BREAK', 16, 4, ['breakdown']], ['DROP 2', 32, 10, ['drop', 'switch2']], ['OUTRO', 16, 2, ['outro']]],
       afroHouse122: [['INTRO', 32, 2, ['dj', 'noSub']], ['BUILD', 16, 5, ['build']], ['MAIN', 32, 8, ['drop']], ['BREAK (no kick)', 16, 4, ['breakdown']], ['MAIN 2', 32, 9, ['drop', 'switch2']], ['OUTRO', 32, 3, ['dj', 'noSub']]],
-      afroFusion105: [['INTRO', 8, 3, ['noSub']], ['VERSE', 16, 5, ['verse']], ['PRE', 4, 6, ['build']], ['HOOK', 8, 8, ['drop']], ['VERSE 2', 16, 5, ['verse']], ['HOOK', 8, 8, ['drop']], ['BRIDGE', 8, 4, ['breakdown']], ['FINAL HOOK', 8, 9, ['drop', 'switch1']], ['OUTRO', 4, 2, ['outro']]] },
+      afroFusion105: [['INTRO', 8, 3, ['noSub']], ['VERSE', 16, 5, ['verse']], ['PRE', 8, 6, ['build']], ['HOOK', 8, 8, ['drop']], ['VERSE 2', 16, 5, ['verse']], ['HOOK', 8, 8, ['drop']], ['BRIDGE', 8, 4, ['breakdown']], ['FINAL HOOK', 8, 9, ['drop', 'switch1']], ['OUTRO', 8, 2, ['outro']]] },
     variants: {
       saidi140: { w: .4, tpl: 'main', bpm: 140, world: 'mideast', swingHat: 52, progs: { 'pf-afm-hijaz': 3, 'pf-afm-hijaz-iv': 1.5, 'pf-afm-kurd': 1.5 }, kits: { DRUMS: 'pro', BREAK: 'w_darbuka' } },
       cairo174: { w: .2, tpl: 'cairoHalftime174', bpm: 174, world: 'desert', swingHat: 50, genre: 'neuro', gdrums: ['twostep'], progs: { 'pf-afm-hijaz': 2, 'pf-afm-kurd': 2, 'wm-bayati': 1 }, kits: { DRUMS: 'pro', BREAK: 'w_darbuka' },
@@ -21790,8 +21846,8 @@ const PF_VAR_PRESETS = {
     { bass: ['SP Rolling Reese', 'TP Reese Phaser', 'PRO Velvet Reese'], stab: ['EP Tremolo', 'Dark Piano'], pad: ['Strings Sustain', 'PRO Velvet Dark Pad'], lead: ['PRO Silk Lead', 'SP Liquid Lead'] },
     null,
     { bass: ['SP Metal Comb Bass', 'TP Metal RM Bass', 'SP Resample Stack', 'Neuro Metal Bass'], stab: ['Polar Rave Stab', 'SP FM Bell'], lead: ['TP Supersaw Lead', 'PRO Rave Lead'] }],
-  mcjump175: { roller: { bass: ['TP FM Donk', 'Tidal Jump Up Morph', 'Rolling Reese'] }, stripped: { bass: ['TP Deep Sub', 'Sub Square Grit'] } },
-  raveclash174: { pop: { stab: ['Grand Piano', 'PRO Liquid Keys'], lead: ['PRO Vocal Lead', 'SP Liquid Lead'], bass: ['Rolling Reese', 'Polar Switch Reese'] }, afro: { stab: ['Polar Rave Stab', 'Marimba Warm'] }, industrial: { bass: ['TP Metal RM Bass', 'SP Metal Comb Bass', 'TP FM Donk'], stab: ['SP FM Bell'] } },
+  mcjump175: { roller: { bass: ['TP FM Donk', 'Rave Reese Step', 'Tidal Jump Up Morph'] }, stripped: { bass: ['TP Deep Sub', 'Sub Square Grit'] } },
+  raveclash174: { pop: { stab: ['Grand Piano', 'PRO Liquid Keys'], lead: ['PRO Vocal Lead', 'SP Liquid Lead'], bass: ['Rolling Reese', 'Polar Switch Reese'] }, afro: { stab: ['Polar Rave Stab', 'Marimba Warm'] }, industrial: { bass: ['Rave Reese Step', 'TP Metal RM Bass', 'SP Metal Comb Bass'], stab: ['SP FM Bell'] } },
   liquid174: { dancefloor: { bass: ['TP Neuro Reese', 'PRO Smooth Growl'], lead: ['TP Supersaw Lead', 'PRO Rave Lead'], stab: ['Polar Supersaw Stab', 'PRO Liquid Keys'] }, future: { bass: ['SP Wobble 1/8', 'SP Talking Bass'], lead: ['PRO Vocal Lead', 'SP Liquid Lead'] } },
   emotive130: { flip140: { bass: ['TP Wobble 1/8', 'SP Wobble 1/4T', 'PRO Clean Wobble'], stab: ['Soft Piano', 'Dark Piano'] } },
   afromideast: {
@@ -21820,7 +21876,7 @@ const ARR_TEMPLATES_PF = (() => {
       ['BREAK', 16, 2, ['breakdown']], ['BUILD 2', 8, 8, ['build', 'fakeDrop']], ['DROP A3', 16, 10, ['drop', 'switch1']], ['DROP B3', 16, 10, ['drop', 'switch2']], ['OUTRO', 32, 3, ['dj', 'noSub']]] },
     dubstep: { bpm: 140, sections: [['INTRO', 16, 3, ['halftime', 'noSub8']], ['BUILD 1', 8, 7, ['build', 'roll4', 'silenceLastBar']], ['DROP 1', 16, 10, ['drop', 'callResp1']], ['MID', 16, 2, ['breakdown']],
       ['BUILD 2', 8, 8, ['build', 'fakeDrop']], ['DROP 2', 16, 10, ['drop', 'switch2']], ['DROP 2B', 16, 10, ['drop', 'riddimTriplet8']], ['OUTRO', 16, 3, ['outro', 'noSub8']]] },
-    ukbass_140: { bpm: 140, sections: [['INTRO', 16, 3, ['dj']], ['DROP 1', 32, 8, ['drop', 'holdBack']], ['BREAK', 8, 3, ['breakdown', 'short']], ['BUILD', 4, 6, ['build', 'silenceLastBeat']], ['DROP 2', 32, 9, ['drop', 'switch2']], ['OUTRO', 16, 3, ['dj', 'noSub']]] },
+    ukbass_140: { bpm: 140, sections: [['INTRO', 16, 3, ['dj']], ['DROP 1', 32, 8, ['drop', 'holdBack']], ['BREAK', 8, 3, ['breakdown', 'short']], ['BUILD', 8, 6, ['build', 'silenceLastBeat']], ['DROP 2', 32, 9, ['drop', 'switch2']], ['OUTRO', 16, 3, ['dj', 'noSub']]] },
   };
   // dnb_club_3drop: dnb_club with a third drop after DROP 2B
   const c = out.dnb_club.sections.slice(), at = c.findIndex(x => x[0] === 'DROP 2B') + 1;
@@ -21973,6 +22029,13 @@ function pfBuildDrums(tr, v, rng, silence) {
   } else if (mode === 'tekka') { // darbuka build: kicks, then the tek-ka roll in the last 2 beats
     for (let s = 96; s < 120; s += 2) put(s, S, 70 + (s - 96));
     for (let k = 0; k < 8; k++) put(120 + k * .5, S, 70 + 5 * k);
+  } else if (mode === 'rave') { // two claps and a kick that builds to four on the floor, a single-snare turnaround at the end
+    const WIDE = tr.pads.findIndex(pd => pd && pd.name === 'CLAP WIDE');
+    for (let s = 0; s < 128; s++) { const b = s >> 4, i = s & 15;
+      if ((b < 4 && i % 8 === 0) || (b >= 4 && b < 7 && i % 4 === 0) || (b === 7 && i < 12 && i % 4 === 0)) put(s, K, 96 + b * 3);
+      if (b < 6 && (i === 4 || i === 12)) { put(s, C, 92 + b * 3); put(s, WIDE, 70); }
+      if (b === 6 && i % 2 === 0) { put(s, C, 80 + i * 2); put(s, WIDE, 60 + i); } }
+    put(124, S, 0); put(108, S, 112); // the turnaround: one snare on the last beat but one, then the gap
   } else if (mode === 'roll1') { // a one-bar snare roll on the last bar (vel 40 -> 120)
     for (let s = 96; s < 112; s += 2) put(s, S, 60 + (s - 96) * 2);
     for (let s = 112; s < 128; s++) put(s, S, 40 + 80 * (s - 112) / 15);
@@ -22142,7 +22205,50 @@ function pfClips(P, st, rng) {
     const r = genClip(P, t, 8, { seed: rng.int(4294967296), s: row('dropB'), ctx, reg: R.reg.pad, tie: true });
     setClip('dropB', 'PAD', genRamp(genGrid(r.notes), 128, .7, .7));
   }
+  if (p.rave) pfRaveClips(P, st, v, C, rng, { setClip, row, tr, groove });
   return v;
+}
+// ---------- the rave tutorials in the generator (raveclash174; the drum moves in mcjump175 too) ----------
+// drums: the noise layer on the first kick of each 4 bars, the ride every 4 bars, the open hat at the phrase end, the wide clap under
+// the snare, a lazy late skip hit, the ghost shuffle every second bar of the second half, double-time humanised hats before the change
+// bass (raveclash): the sub holds the root from beat 1, the wob starts on beat 2; phrase 2 leaves space, phrase 3 moves to the
+// neighbour root and back; the 8-bar change-up (the DROP A 2 / DROP B 2 rows): a beat of pause, then the same wobs higher and longer
+function pfRaveClips(P, st, v, C, rng, h) {
+  const D = h.tr('DRUMS'), kit = genKitMap(D), byName = n => D.pads.findIndex(pd => pd && pd.name === n), pad = r => genPadFor(kit, r);
+  const NOISE = byName('NOISE'), SKIP = byName('SKIP'), WIDE = byName('CLAP WIDE'), HAT2 = byName('HAT 2'), O = pad('O'), R = pad('R'), G = pad('G'), H = pad('H'), S = pad('S'), C2 = pad('C');
+  const add = (c, s, p, vv) => { if (p >= 0 && s < 128) c.notes.push({ s: genQt(s), p, l: 1, v: pfV(vv) }); };
+  ['drop', 'dropB', 'sw'].forEach(key => {
+    const c = D.clips[h.row(key)]; if (!c) return;
+    [0, 64].forEach(b => { add(c, b, NOISE, b ? 78 : 104); add(c, b, R, 92); }); // the noise layer, the ride every 4 bars
+    [48, 112].forEach(b => { c.notes = c.notes.filter(n => !(n.p === H && n.s >= b + 14 && n.s < b + 16)); add(c, b + 14, O, 96); }); // the open hat at the phrase end
+    c.notes.filter(n => (n.p === S || n.p === C2) && n.v >= 100).forEach(n => add(c, n.s + .125, WIDE, 72)); // the wide clap, a hair late
+    if (key !== 'sw') [16, 80].forEach(b => { add(c, b + 10 + 1 / 3, SKIP, 74); add(c, b + 11 + 1 / 3, SKIP, 52); }); // the lazy skip hits behind the grid
+    for (let b = key === 'dropB' ? 1 : 5; b < 8; b += 2) { add(c, b * 16 + 7, G, 44); add(c, b * 16 + 9, G, 50); } // the break shuffle
+    if (key === 'dropB') for (let b = 0; b < 8; b++) [3, 7, 11, 15].forEach(x => add(c, b * 16 + x, HAT2, 40 + rng.int(9))); // the skippier top loop of the second half
+    if (key === 'drop') { c.notes = c.notes.filter(n => !(n.p === H && n.s >= 112)); for (let x = 0; x < 16; x++) add(c, 112 + x + (x % 2 ? .15 : 0), H, x % 2 ? 56 : 84); } // double-time hats
+    c.notes = dedupe(c.notes);
+  });
+  if (v.id !== 'raveclash174') return;
+  // the bass: the sub on the root from beat 1 (held), the wob from beat 2
+  const B = h.tr('BASS'), SB = h.tr('SUB'), key = genKey(P), sc = SCALES[genScaleId(P)] || SCALES.minor, inSc = pc => sc.includes(pfMod(pc - key, 12));
+  const subBars = () => { const out = []; for (let b = 0; b < 8; b++) { const r = genRootIn(C.pedal ? C.segs[0].ch.root : C.at(b * 16).root, 28); out.push({ s: b * 16, p: r, l: 16, v: 110 }); } return out; };
+  const neighbour = n => { const up = n.p + 1; if (inSc(up)) return up; for (let d = 1; d <= 3; d++) if (inSc(n.p - d)) return n.p - d; return n.p; };
+  const wob = (gA, gSpace) => {
+    const notes = pfBassNotes(P, v, C, [gA, gSpace, gA, gA], 8, rng, { noOnset: [], noDive: true });
+    return notes.map(n => (n.s >= 64 && n.s < 96 ? Object.assign({}, n, { p: neighbour(n) }) : n)); // phrase 3: the neighbour root, and back
+  };
+  if (B.type === 'synth') {
+    const a = wob('....X-x.x.X-.x.x', '....X-....X-....'), b = wob('....X.x.X.x.X-..', '....X-......X-..');
+    h.setClip('drop', 'BASS', a); h.setClip('dropB', 'BASS', b);
+    const hi = notes => notes.filter(n => n.s >= 4).map(n => Object.assign({}, n, { p: n.p + 12 <= 64 ? n.p + 12 : n.p, l: Math.min(n.l * 1.6, 4) })); // the change-up after a beat of pause
+    h.setClip('drop2', 'BASS', hi(a)); h.setClip('dropB2', 'BASS', hi(b));
+  }
+  if (SB.type === 'synth') ['drop', 'dropB', 'drop2', 'dropB2'].forEach(k => h.setClip(k, 'SUB', subBars()));
+  // the intro: the lead's hook over long sub roots (the LEAD and SUB rows of INTRO)
+  const L = PF_T.LEAD, ctx = genContext(P, h.row('intro'), L, 128, { harm: false, energy: .55 }), RG = genSecRule('intro', v.genre);
+  const r = genClip(P, L, 8, { seed: rng.int(4294967296), s: h.row('intro'), ctx, rhythm: 'songhook', form: 'full', reg: RG.reg.lead, lane: { rhythm: 'auto' } });
+  h.setClip('intro', 'LEAD', genRamp(genGrid(r.notes), 128, .8, .95), { groove: genFeel(st, h.groove, 'LEAD') });
+  if (SB.type === 'synth') h.setClip('intro', 'SUB', pfSubNotes(P, C, [], 8, 'long'));
 }
 if (typeof genSongClips === 'function') {
   const pfClips0 = genSongClips;
@@ -22173,7 +22279,9 @@ function pfLayout(P, st) {
     const m = blocks.length;
     blocks.forEach(([b, len], k) => {
       const last = k === m - 1, P2 = (lane, key, c0) => put(lane, key, b, len, c0);
-      if (sec === 'intro') {
+      if (sec === 'intro' && tg('leadSub')) { // the lead and the sub, the cutoff rising (automation), a drum break in the last 2 bars
+        P2('LEAD', 'intro'); P2('SUB', 'intro'); if (k === m - 1 && len >= 4) { put('DRUMS', 'intro2', b + len - 2, 2, 6); put('BREAK', 'drop', b + len - 2, 2, 0); }
+      } else if (sec === 'intro') {
         const h = Math.max(1, m >> 1), first = k < h || m === 1;
         if (first) { P2('BREAK', 'intro'); P2('STAB', 'intro'); if (!tg('noDrums')) P2('DRUMS', tg('kickFromBar1') ? 'intro2' : 'intro'); }
         else { P2('DRUMS', 'intro2'); P2('BREAK', 'intro2'); P2('STAB', 'intro2'); P2('LEAD', 'intro2'); if (v.st.world) P2('PAD', 'intro2'); }
@@ -22189,7 +22297,8 @@ function pfLayout(P, st) {
         const swAt = nb >= 4 ? 2 : nb >= 2 ? nb - 1 : -1;
         const swBlock = sec === 'switch' || (B && feel && (ft.includes('switch2') || ft.includes('switch1')) && kk === swAt);
         if (swBlock) { ['DRUMS', 'SUB', 'BASS', 'STAB'].forEach(l => P2(l, 'sw') || P2(l, kd)); if (kk >= 1) P2('LEAD', 'dropB'); return; } // a lane without a switch clip (the world lanes) keeps the drop's
-        P2('DRUMS', kd); P2('SUB', kd); if (!(PF[v.id].bassDrop2Only && !B)) P2('BASS', kd); // jungle: the reese only in drop 2
+        const kd2 = B ? 'dropB2' : 'drop2', alt = v.id === 'raveclash174' && kk % 2 === 1 && has('BASS', kd2); // the 8-bar change-up of each 16-bar half
+        P2('DRUMS', kd); P2('SUB', alt ? kd2 : kd); if (!(PF[v.id].bassDrop2Only && !B)) P2('BASS', alt ? kd2 : kd); // jungle: the reese only in drop 2
         if (!(v.genre === 'rollers' && (kk === 4 || kk === 5))) P2('BREAK', kd);
         if (!lastRun) P2('STAB', kd);
         if (B && has('PAD', 'dropB') && kk >= 1) P2('PAD', 'dropB');
@@ -22290,6 +22399,9 @@ function pfAuto(p, v) {
   if (B && B.type === 'synth' && B.fx && B.fx.ftype === 'highpass') { const d = autoDefault(B, 'tfreq'), pts = [[0, d, 2]]; builds.forEach(x => { const e = (x.a + x.bars) * 16; pts.push([e - 64, d, 0], [e - 1, Math.max(d, hz(300)), 0], [e, d, 2]); }); if (builds.length) lane(B, 'tfreq', pts); }
   if (LD) { const d = autoDefault(LD, 'sendA'), pts = [[0, d, 2]]; builds.forEach(x => { const e = (x.a + x.bars) * 16; pts.push([e - 16, d, 0], [e - 1, pfCl(d * 2.5, 0, 1), 0], [e, d, 2]); }); if (builds.length) lane(LD, 'sendA', pts); }
   if (D && D.fx && D.fx.ftype === 'highpass' && (v.genre === 'neuro' || v.genre === 'jumpup')) { const d = autoDefault(D, 'tfreq'), pts = [[0, d, 2]]; builds.forEach(x => { const e = (x.a + x.bars) * 16; pts.push([e - 32, d, 0], [e - 1, Math.max(d, hz(400)), 0], [e, d, 2]); }); if (builds.length) lane(D, 'tfreq', pts); }
+  const intro = v.sections.find(x => x.tags.includes('leadSub'));
+  if (intro && LD && LD.type === 'synth' && autoImpl(LD, 'cut')) { const d = autoDefault(LD, 'cut'), e = (intro.a + intro.bars) * 16; lane(LD, 'cut', [[0, pfCl(d - .3, .05, 1), 0], [e - 1, pfCl(d + .08, .05, 1), 0], [e, d, 2]]); }
+  if (PF[v.id].rave && D) { const d1 = v.sections.find(x => x.sec === 'drop'), sa = autoDefault(D, 'sendA'); if (d1) lane(D, 'sendA', [[0, pfCl(Math.max(sa, .32), 0, 1), 2], [d1.a * 16, pfCl(sa * .4, 0, 1), 2]]); } // the drum reverb: wet intro and build, dry drop
   const flip = v.id === 'mcjump175' || v.switches.includes('S1') || v.tpl.some(x => x.tags.includes('switchEvery2') || x.tags.includes('switchEvery4'));
   if (flip && B && B.type === 'synth' && autoImpl(B, 'mac2')) {
     const pts = [[0, autoDefault(B, 'mac2'), 2]], every = v.tpl.some(x => x.tags.includes('switchEvery2')) ? 2 : 4;
@@ -22328,11 +22440,11 @@ if (typeof genSong === 'function') {
 // the variant in a set name: one or two words
 function pfVarWord(v) {
   const W = { vocalDub: 'vocal dub', garageHybrid: 'garage', club128: 'club', radio96: 'radio', popVocal176: 'pop', industrial130: 'industrial', radio: 'radio', popJungle96: 'pop', rollerDJ: 'roller',
-    ukgMelodic: 'melodic', flip140: 'flip', cairoHalftime174: 'Cairo', afroDnb174: 'afro DnB', afroHouse122: 'afro house', afroFusion105: 'afro-fusion', saidi140: 'Saidi', cairo174: 'Cairo' };
+    ukgMelodic: 'melodic', flip140: 'flip', cairoHalftime174: 'Cairo', afroDnb174: 'afro DnB', afroHouse122: 'afro house', afroFusion105: 'afro-fusion', saidi140: 'Saidi', cairo174: 'Cairo', clash: '', liquid: '', emotive: '' };
   if (v.id === 'neuro174') return 'I' + v.intensity;
   if (v.id === 'riddim145') return v.flavor;
   if (v.id === 'mcjump175') return v.flavor + (v.tplId !== 'main' ? ' ' + W[v.tplId] : '');
-  if (p0(v.flavor)) return W[v.flavor] || v.flavor;
+  if (p0(v.flavor)) return pfHas(W, v.flavor) ? W[v.flavor] : v.flavor;
   return v.tplId !== 'main' ? W[v.tplId] || '' : '';
   function p0(x) { return typeof x === 'string' && x.length > 0; }
 }
