@@ -788,6 +788,21 @@ each 16-bar drop half, and the build stacks two claps over a kick that ends four
 Each style has its arrangement template (intro, builds, drops, switch-ups, DJ intro and outro), its drums, bass rhythms,
 harmony families, sounds and growl feel, loops in the loop library and a song template in TEMPLATES.
 
+## Whole sound bank and a different arrangement on every GENERATE
+
+- GENERATE SONG has two more choices. SOUNDS: "Style only" or "Whole bank" (default for new songs): every style draws a
+  coherent set of sounds from the whole bank (205 presets of all engines, the kits and the loops) by role, character and
+  genre, with one sub, one mid-bass family per drop and a CPU budget. The older styles (festival, darkrave, jump-up,
+  neurofunk, techroller, brostep, liquid, jungle, future bass, halftime DnB) get modern kits, ducking and master targets.
+  VARIATION: Subtle, Normal or Wild: the arrangement changes with the seed (7 shapes; intro 8, 16 or 32 bars; 2 or 3 drops;
+  build types; drop entries; switch-ups; bass-out bars; single-snare turnarounds; silences; DJ or short outros). Drops stay on
+  the 16-bar grid and the same seed and choices always give the same song
+- With a vocal pack loaded in this browser (Load pack...), GENERATE places your vocals in the vocal moments, moved to the
+  set's tempo and key: a pre-echo stutter before the drop, tags on the drop, a phrase in the breakdown. Without a pack it uses
+  the synthetic vocal chops
+- A white-noise burst on the first downbeat of each drop, echo throws only at transitions, and a drum reverb send that changes
+  per section
+
 ## Shortcuts
 
 | Key | Action |

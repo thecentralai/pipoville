@@ -22557,6 +22557,913 @@ if (typeof libTemplateMake === 'function') {
     return res;
   };
 }
+// ===================== 3x. THE SOUND PALETTE AND ARRANGEMENT VARIATION (wave 5) =====================
+// GENERATE SONG draws on the whole bank and varies the form. Two options of the GENERATE SONG dialog, kept in the set (P.gen.pal):
+// - Sounds: 'style' (the style's own presets and kits, as before) or 'bank' (default for a new song): a coherent set of sounds
+//   drawn with the song's seed from the PALETTE, a tagged catalogue of every preset (all engines), kit and loop recipe: a role
+//   (sub, mid bass, growl, reese, wob, lead, pluck, stab, keys, pad...), character tags (dark, bright, gritty, clean, wide,
+//   vintage, modern, cinematic, ethnic...), genre weights, a CPU cost and a register. Each style declares a profile (tag
+//   weights, the roles each lane may take, tags it never takes, kit weights); the draw keeps one sub, one mid-bass family,
+//   no two lanes of one family, and a CPU budget so playback stays real time. Vocals: the user's vocal packs (section 3c)
+//   when this browser has them, else the synthetic vox chops, on the vocal moments of the form (a pre-echo stutter into the
+//   drops, a tag on the drop, the vocal cut). Loops: sometimes a library loop (section 3q) plays the tops of a drop.
+//   The ten first styles (festival ... halfdnb) get modern profiles, the mix targets of research5/t6_mix (duck depths per
+//   genre, the master's loudness, mono low end, -1 dBTP) and the hats' swing on the clips (kick and snare straight).
+// - Variation: 'subtle' (the style's own form, aligned), 'normal' (default) or 'wild': the seed picks one of several forms and
+//   mutates it: intro 8/16/32, two or three drops, breakdown length, build type (riser and roll, filter build, last-bar
+//   silence, vocal cut, fake drop, halftime build), drop entry (full, delayed bass, hold-back, no sub for 8), switch-ups in the
+//   later drops (new bass rhythm, 8 halftime bars, a new element, double-time hats), mid-drop stops and the outro (DJ or
+//   short). Section lengths stay multiples of 8 (4 in a profile template), every drop starts on a 16-bar boundary and a build
+//   always leads into a drop (research5/t5_arrange 4, 5 and 8.7).
+// genSong(id, o) without o.variation / o.sounds (the loop library, the templates, the tests, old code) is exactly as before;
+// the dialog, the browser's Styles list and genSong(id, { variation, sounds, seed }) take the new path. The same seed and the
+// same options make the same set (live and export play that set). A set saved before this section loads unchanged.
+// Hooks (wrappers, no other section edited): genSong, genSongGo, genSongOpen, genStyleSounds, genSongClips, genSongLayout,
+// genHouseSounds, genHouseLayout, pfVariant (section 3w), normalizeProject (P.gen.pal).
+
+const palHas = (o, k) => o != null && typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
+const palCl = (v, a, b) => Math.min(b, Math.max(a, v));
+const PAL_VARS = ['subtle', 'normal', 'wild'], PAL_SNDS = ['style', 'bank'];
+const PAL_VAR_NAME = { subtle: 'Subtle', normal: 'Normal', wild: 'Wild' }, PAL_SND_NAME = { style: 'Style only', bank: 'Whole bank' };
+const PAL_T = { DRUMS: 0, BREAK: 1, BASS: 2, SUB: 3, STAB: 4, PAD: 5, LEAD: 6, FX: 7 }, PAL_LANES = ['DRUMS', 'BREAK', 'BASS', 'SUB', 'STAB', 'PAD', 'LEAD', 'FX'];
+const PAL = { req: null, cur: null, cat: null, catKey: '', pref: { v: 'normal', s: 'bank' }, vox: null, voxAt: 0, last: null };
+try { const v = localStorage.getItem('dnb808.palVar'), s = localStorage.getItem('dnb808.palSnd'); if (PAL_VARS.includes(v)) PAL.pref.v = v; if (PAL_SNDS.includes(s)) PAL.pref.s = s; } catch (e) { /* private mode */ }
+const PAL_OLD = ['festival', 'darkrave', 'neurofunk', 'techroller', 'brostep', 'liquid', 'jungle', 'jumpup', 'futurebass', 'halfdnb'];
+// the CPU budget of the five synth lanes, in units of 10 ms of render per second of audio (palCost x the lane's factor): a drawn set
+// stays under the larger of this floor and 1.1 x the style's own default set (the build's own sounds already play at that cost)
+const PAL_BUDGET = 25;
+// measured (review3/wave5/palette/test/cpu.mjs): ms of offline render per second of audio, the preset alone playing 3-note chords on
+// the 8ths (poly) or 16ths (mono) at 174 BPM, minus an empty lane; presets that did not render in the run are fitted per engine
+const PAL_CPU_MS = {"Reese Classic":30,"Reese Soft":30,"Neuro Growl":30,"Wobble 1/4":30,"Sub Sine":30,"Sub Growl":30,"Rave Stab":30,"Hoover":30,"Warm Pad":183,"Pluck":32,"Jump Up":30,"Liquid Keys":32,"Polar Init":30,"Polar Supersaw Stab":488,"Polar Reese":170,"Polar Hoover":203,"Polar Pluck":251,"Polar Pad Wide":2515,"Polar Sub":30,"Tidal Init":65,"Tidal Growl Wobble":224,"Tidal Talking Bass":30,"Tidal Neuro Stepper":163,"Tidal Jump Up Morph":30,"Tidal Gate Pad":1169,"Tidal Scream Lead":165,"Polar Rave Hoover":390,"Tidal Talker Gate":283,"Tidal FM Growl":185,"Tidal Donk":30,"Polar Rave Stab":900,"Sub Pure Mono":30,"Polar Switch Reese":371,"Polar Dark Pad":3530,"Polar Hook Pluck":491,"Neuro Reese Wide":976,"Festival Hoover 16":1547,"Jump-Up Talker FM":871,"Growl Formant":590,"Supersaw Rave Stab":2254,"Sub Square Grit":720,"Neuro Metal Bass":979,"Rolling Reese":944,"Tidal Pro Init":45,"TP Neuro Reese":941,"TP Growl Mod":907,"TP Rave Hoover":342,"TP Supersaw Lead":1844,"TP Talker FM":707,"TP Deep Sub":132,"TP Glass Pluck":818,"TP Air Pad":4325,"TP Riser Sweep":2788,"TP Sync Screech":1302,"TP Metal RM Bass":561,"TP FM Donk":343,"TP Wobble 1/8":992,"TP Quantize Grit":665,"TP Reese Phaser":771,"PRO Silk Pad":1323,"PRO Velvet Dark Pad":1067,"PRO Glass Halo Pad":1217,"PRO Evolving Strings":1386,"PRO Air Atmos":801,"PRO Choir Drift":962,"PRO Silk Lead":896,"PRO Rave Lead":1386,"PRO Smooth Hoover":1056,"PRO Glide Lead":801,"PRO Bell Lead":790,"PRO Vocal Lead":439,"PRO Clean Wobble":701,"PRO Smooth Growl":1283,"PRO Velvet Reese":653,"PRO Neuro Clean":925,"PRO Liquid Sub":85,"PRO Talking Bass":947,"PRO Soft Pluck":434,"PRO Liquid Keys":746,"PRO Glass Keys":1133,"PRO Riser 4 Bars":2950,"PRO Down Sweep":2824,"Grand Piano":689,"Soft Piano":520,"Dark Piano":725,"EP Warm":751,"EP Tremolo":896,"Wurli Bite":805,"Strings Soft":1408,"Choir Pad":1948,"Log Drum Deep":30,"Log Drum Pluck":30,"Log Drum Bend":30,"Marimba Warm":30,"Marimba Wood":30,"Kalimba Tine":88,"Kalimba Soft":30,"Breath Flute":30,"Airy Flute":30,"Bamboo Flute":30,"Chant Pad Aah":624,"Chant Pad Ooh":1118,"House Piano Bright":46,"Afro EP Warm":143,"Swede Saw Chords":1642,"Swede Saw Lead":950,"Swede Wash Chords":3364,"House Pluck Saw":384,"Afro Plug Lead":750,"House Offbeat Bass":30,"House Rolling Bass":30,"Afro Sine Bass":30,"Afro Filter Bass":30,"Deep House Pad":1120,"Afro Dusk Pad":1067,"Swede Air Pad":1067,"Spectra Init":840,"SP Clean Growl":906,"SP Dark Growl":906,"SP Talking Bass":840,"SP Yoi Growl":840,"SP Neuro Stepper":885,"SP Wobble 1/8":840,"SP Wobble 1/4T":840,"SP Neuro Reese":1020,"SP Rolling Reese":906,"SP Metal Comb Bass":840,"SP Resample Stack":951,"SP Sub-Aware Mid":885,"SP Deep Sub":840,"SP Razor Lead":1065,"SP Scream Lead":996,"SP Liquid Lead":996,"SP Hoover":1176,"SP FM Bell":930,"SP Glass Pluck":996,"SP Spectral Pad":1110,"Concert Grand":398,"Grand Light":398,"Strings Sustain":398,"Strings Spiccato":344,"Strings Tremolo":808,"Strings Pizzicato":196,"Low Strings Ostinato":135,"Violins Sustain":396,"Celli Sustain":383,"Horns":334,"Horns Staccato":50,"Low Brass":611,"Brass Ensemble":725,"Brass Staccato":298,"Trumpet":451,"Braam":1325,"Woodwinds":362,"Flute":245,"Flute Staccato":84,"Oboe":318,"Clarinet":418,"Bassoon":380,"Choir Aah":675,"Choir Ooh":683,"Harp":701,"Celesta":456,"Glockenspiel":441,"Tubular Bells":414,"Hand Chimes":641,"Glass Pad":576,"Timpani":262,"Timpani Roll":541,"Epic Tutti":1041,"Strings + Choir":986,"Octave Strings Lead":753,"Balafon":385,"Balafon Hard Mallet":218,"Kalimba":398,"Mbira":284,"Marimba":221,"Balafon + Marimba":174,"Mbira + Kalimba":544,"Oud":152,"Oud Fretless Slide":127,"Oud Bright Riff":45,"Kora":529,"Kora Soft":1274,"Ngoni":651,"Qanun":950,"Qanun Tremolo":1867,"Ney":1633,"Ney Breathy":1538,"Mizmar":1776,"Balafon Buzz":1170,"Talking Drum":1475,"Talking Drum Talk Up":2450,"Talking Drum Talk Down":2380,"Log Drum Thump":1274,"Log Drum Thump Deep":1274,"Rave Fifth Lead":1004,"Jump Wob Mid":1098,"Jump Wob Mid Hi":1098,"Nasal Sub":707,"Rave Reese Step":499,"Rave Chord Stab":371,"Bass Flick":321,"Top Bass Ping":749,"Wail Vox Pad":885};
+
+// ---------- the catalogue ----------
+// role of a preset: engine-specific names first, then the name rules (first match)
+const PAL_ORCH_ROLE = [['stab', /spiccato|pizzicato|staccato/i], ['fx', /braam|timpani|low brass|ostinato|celli|bassoon/i], ['pad', /sustain|choir|tutti|tremolo|glass pad/i],
+  ['keys', /grand/i], ['pluck', /harp|celesta|glock|bells|chimes|kalimba|mbira|marimba|balafon/i], ['lead', /horn|brass|trumpet|flute|oboe|clarinet|woodwind|lead/i]];
+const PAL_ROLE_RULES = [['fx', /\binit\b|riser|sweep/i], ['sub', /^sub |\bsub$|deep sub|liquid sub|nasal sub|polar sub|sub square|sub growl/i], ['growl', /growl|yoi/i],
+  ['reese', /reese/i], ['wob', /wob/i], ['midbass', /talk|donk|stepper|metal|neuro clean|jump.?up|resample|quantize|flick|top bass|comb|sub-aware|rm bass|morph|grit\b|mid\b/i],
+  ['bass', /bass|log drum/i], ['lead', /hoover|lead|screech|scream|fifth|flute|ney|mizmar|oud fretless/i], ['stab', /stab|chord/i],
+  ['keys', /keys|piano|\bep\b|wurli|grand|rhodes/i], ['pluck', /pluck|bell|celesta|glock|harp|kalimba|marimba|mbira|balafon|chime|tine|oud|kora|ngoni|qanun/i],
+  ['pad', /pad|atmos|choir|strings|wash|halo|drift|tutti|air/i], ['perc', /talking drum/i]];
+const PAL_TAG_RULES = [['dark', /dark|velvet|neuro|metal|growl|deep|dusk|switch|low/i], ['bright', /bright|glass|air|halo|silk|supersaw|swede|bell|glock|celesta|sky|light/i],
+  ['gritty', /grit|growl|metal|scream|razor|quantize|screech|\bfm\b|\brm\b|comb|talk|donk|yoi|resample|wob|stepper|flick/i], ['clean', /clean|sine|pure|soft|silk|liquid|smooth|warm/i],
+  ['wide', /wide|supersaw|saw|wash|16|ensemble|tutti|halo|atmos|strings/i], ['rave', /rave|hoover|fifth|donk|jump|clash|festival/i], ['soul', /keys|\bep\b|piano|wurli|liquid|rhodes|choir|soft/i],
+  ['house', /house|swede|afro|offbeat|rolling bass|plug|chant|deep house/i], ['ethnic', /oud|kora|ngoni|qanun|ney|mizmar|balafon|kalimba|mbira|marimba|talking|log drum|afro|bamboo|tine/i],
+  ['vocal', /vocal|vox|choir|chant|wail|formant|talk/i], ['cinematic', /strings|brass|horn|choir|tutti|braam|timpani|celli|violin|harp|epic|trumpet|woodwind|oboe|clarinet|bassoon|flute|concert/i]];
+const PAL_ENG_COST = { classic: 1, polar: 1.4, tidal: 1.8, wtpro: 2.4, spectra: 2.8, keys: 1.1, orch: 1.3, world: 1.3 };
+const PAL_LANE_POLY = { BASS: 1, SUB: 1, STAB: 1, PAD: .5, LEAD: 1 };
+const PAL_LANE_ROLES = { SUB: ['sub'], BASS: ['reese', 'growl', 'wob', 'midbass', 'bass'], STAB: ['stab', 'keys', 'pluck'], PAD: ['pad'], LEAD: ['lead', 'pluck'] };
+const PAL_REG = { sub: [28, 39], reese: [40, 51], growl: [40, 51], wob: [40, 51], midbass: [40, 51], bass: [36, 51], stab: [53, 69], keys: [53, 72], pluck: [60, 86], pad: [52, 69], lead: [71, 86], fx: [48, 84], perc: [48, 72] };
+// the kits the generator can read (genKitMap): role and tags. Orchestral and world kits stay with their own styles
+const PAL_KITS = { pro: ['drums', ['modern', 'clean']], pf_rave: ['drums', ['modern', 'rave', 'gritty']], drums: ['drums', ['vintage']], acoustic: ['drums', ['soul', 'vintage']],
+  breaks: ['break', ['vintage', 'gritty']], jungle: ['break', ['vintage', 'rave']], afro: ['drums', ['house', 'ethnic']], swedish: ['drums', ['house', 'bright']],
+  afroperc: ['perc', ['ethnic', 'house']], fx: ['fx', ['rave']], housefx: ['fx', ['house']], vox: ['vox', ['vocal']], orch_epic: ['orchperc', ['cinematic']], orch_taiko: ['orchperc', ['cinematic', 'ethnic']],
+  orch_world: ['worldperc', ['ethnic']], orch_fx: ['fx', ['cinematic']], w_darbuka: ['worldperc', ['ethnic']], w_riq: ['worldperc', ['ethnic']], w_west: ['worldperc', ['ethnic']],
+  w_talk: ['worldperc', ['ethnic']], w_afrohouse: ['drums', ['ethnic', 'house']] };
+function palCost(name) {
+  if (typeof name === 'string' && palHas(PAL_CPU_MS, name)) return Math.round(PAL_CPU_MS[name]) / 100;
+  const p = (typeof SYNTH_PRESETS === 'object' && SYNTH_PRESETS[name]) || {}, e = p.engine || 'classic';
+  const v = [p.o1voices, p.o2voices, p.voices, p.uni].reduce((a, x) => a + (Number.isFinite(+x) && +x > 1 ? +x - 1 : 0), 0);
+  const fx = ['xdOn', 'xrOn', 'xcOn', 'xyOn', 'xkOn', 'xpOn'].filter(k => p[k]).length;
+  return Math.round(((PAL_ENG_COST[e] || 1.5) * (1 + .08 * Math.min(v, 20)) + .15 * fx) * 100) / 100;
+}
+function palRole(name, p) {
+  const e = p.engine || 'classic';
+  if (e === 'orch') { for (const [r, re] of PAL_ORCH_ROLE) if (re.test(name)) return r; return 'pad'; }
+  for (const [r, re] of PAL_ROLE_RULES) if (re.test(name)) return r;
+  return e === 'world' ? 'pluck' : 'lead';
+}
+// -> { presets: [{ name, engine, role, tags, genres, styles, cost, poly, reg }], kits: [{ id, role, tags }], loops: [{ id, role, style, genre }] }
+function palCatalog() {
+  const n = typeof SYNTH_PRESETS === 'object' ? Object.keys(SYNTH_PRESETS).length : 0, key = n + ':' + (typeof GEN_STYLES === 'object' ? Object.keys(GEN_STYLES).length : 0);
+  if (PAL.cat && PAL.catKey === key) return PAL.cat;
+  const uses = {};
+  Object.entries(GEN_STYLES).forEach(([id, st]) => [st.presets, st.prefer, st.pick].forEach(o => Object.values(o || {}).forEach(l => (Array.isArray(l) ? l : []).forEach(nm => {
+    const u = uses[nm] || (uses[nm] = { styles: new Set(), genres: {} }); u.styles.add(id); u.genres[st.genre] = (u.genres[st.genre] || 0) + 1;
+  }))));
+  const presets = Object.entries(SYNTH_PRESETS || {}).map(([name, p]) => {
+    const e = p.engine || 'classic', role = palRole(name, p), tags = new Set();
+    PAL_TAG_RULES.forEach(([t, re]) => { if (re.test(name)) tags.add(t); });
+    if (e === 'classic') tags.add('vintage');
+    if (e === 'wtpro' || e === 'spectra' || /^(PRO|TP|SP) /.test(name) || /^(Rave |Jump Wob|Nasal|Top Bass|Bass Flick|Wail)/.test(name)) tags.add('modern');
+    if (e === 'orch') tags.add('cinematic'); if (e === 'world') tags.add('ethnic'); if (e === 'keys') tags.add('organic');
+    const u = uses[name] || { styles: new Set(), genres: {} };
+    return { name, engine: e, role, tags: [...tags], genres: u.genres, styles: [...u.styles], cost: palCost(name), poly: !p.mono, reg: PAL_REG[role] || [48, 72] };
+  });
+  const kits = Object.keys(typeof KITS === 'object' ? KITS : {}).map(id => ({ id, role: palHas(PAL_KITS, id) ? PAL_KITS[id][0] : 'drums', tags: palHas(PAL_KITS, id) ? PAL_KITS[id][1].slice() : [] }));
+  let loops = [];
+  try { if (typeof libRecipes === 'function') loops = libRecipes().map(r => ({ id: r.id, role: r.role, style: r.style, genre: GEN_STYLES[r.style] ? GEN_STYLES[r.style].genre : '', src: r.src, bars: r.bars })); } catch (e) { loops = []; }
+  PAL.cat = { presets, by: new Map(presets.map(x => [x.name, x])), kits, loops };
+  PAL.catKey = key;
+  return PAL.cat;
+}
+
+// ---------- the style profiles ----------
+// aff: tag weights; own: the weight of the style's own presets; roles: the roles a lane may take; never: tags it never takes;
+// kits: DRUMS / BREAK kit weights (the ten first styles); mix: the modern targets (duck dB per genre table, master, mono, hats swing %)
+const PAL_GENRE = {
+  jumpup: { rave: 1, gritty: .8, bright: .5, modern: .8, wide: .4, vintage: -.4, house: -.6, ethnic: -.8 },
+  neuro: { dark: 1, gritty: 1, modern: 1, cinematic: .3, clean: -.3, house: -1, ethnic: -.6, soul: -.4 },
+  rollers: { dark: .8, clean: .4, modern: .6, soul: .3, vintage: .1, house: -1, ethnic: -.6, rave: -.2 },
+  liquid: { soul: 1.2, clean: 1, bright: .6, wide: .4, organic: .4, gritty: -1.2, dark: -.3, rave: -.6, house: -.4 },
+  future: { bright: 1, wide: 1, vocal: .6, clean: .4, modern: .8, dark: -.4, vintage: -.4 },
+  afro: { ethnic: 1, house: 1.2, soul: .8, clean: .5, organic: .6, gritty: -1.5, rave: -1, cinematic: -.4 },
+  swedish: { house: 1.2, bright: 1, wide: .8, rave: .3, gritty: -1.5, dark: -.6, ethnic: -.6 },
+};
+const PAL_PROFILE = {
+  festival: { aff: { rave: 1.3, bright: .8, wide: .8, modern: 1.2, cinematic: .5, gritty: .5, vintage: -.8, ethnic: -1 }, own: 1, never: ['ethnic', 'house'],
+    roles: { BASS: ['midbass', 'wob', 'reese', 'growl'], LEAD: ['lead'], PAD: ['pad'] }, kits: { DRUMS: { pro: 1, pf_rave: 1.6 }, BREAK: { jungle: 1, breaks: .7 } },
+    mix: { duck: 'dnb', master: ['club', -5.5], mono: 120, hats: 53 } },
+  darkrave: { aff: { dark: 1.3, rave: 1, gritty: .8, modern: 1, cinematic: .7, wide: .4, vintage: -.6, bright: -.3 }, own: 1, never: ['ethnic', 'house'],
+    roles: { BASS: ['reese', 'growl', 'midbass'], LEAD: ['lead'], STAB: ['stab', 'keys'] }, kits: { DRUMS: { pro: 1, pf_rave: 1.4 }, BREAK: { jungle: 1, breaks: .8 } },
+    mix: { duck: 'dnb', master: ['club', -6], mono: 120, hats: 52 } },
+  neurofunk: { aff: { dark: 1.2, gritty: 1.3, modern: 1.4, clean: .2, vintage: -1, rave: -.5, bright: -.2 }, own: 1, never: ['ethnic', 'house', 'soul'],
+    roles: { BASS: ['midbass', 'growl', 'reese'], LEAD: ['lead', 'pluck'], STAB: ['stab', 'pluck', 'keys'] }, kits: { DRUMS: { pro: 1.2, pf_rave: .6 }, BREAK: { breaks: 1, jungle: .6 } },
+    mix: { duck: 'dnb', master: ['club', -6], mono: 120, hats: 51 } },
+  techroller: { aff: { dark: 1, clean: .6, modern: 1, soul: .3, gritty: .2, vintage: -.4, rave: -.6, wide: -.2 }, own: 1, never: ['ethnic', 'house', 'cinematic'],
+    roles: { BASS: ['reese', 'midbass'], LEAD: ['pluck', 'lead'], STAB: ['keys', 'pluck', 'stab'] }, kits: { DRUMS: { pro: 1.2, drums: .3 }, BREAK: { jungle: 1, breaks: .8 } },
+    mix: { duck: 'dnb', master: ['club', -7], mono: 120, hats: 53 } },
+  brostep: { aff: { gritty: 1.4, dark: .8, modern: 1.3, vocal: .5, rave: .2, vintage: -1, clean: -.5, soul: -.6 }, own: 1, never: ['ethnic', 'house', 'soul'],
+    roles: { BASS: ['growl', 'wob', 'midbass'], LEAD: ['lead'] }, kits: { DRUMS: { pro: 1, pf_rave: 1.2 }, BREAK: { breaks: 1 } },
+    mix: { duck: 'dubstep', master: ['club', -6], mono: 140, hats: 54 } },
+  liquid: { aff: { soul: 1.3, clean: 1.1, bright: .7, wide: .5, organic: .5, modern: .6, gritty: -1.5, rave: -.8, dark: -.3 }, own: 1.2, never: ['gritty', 'house'],
+    roles: { BASS: ['reese', 'bass'], LEAD: ['lead', 'pluck'], STAB: ['keys', 'pluck', 'stab'] }, kits: { DRUMS: { pro: 1, acoustic: .8 }, BREAK: { acoustic: 1, breaks: .6 } },
+    mix: { duck: 'liquid', master: ['stream', -8], mono: 120, hats: 56 } },
+  jungle: { aff: { vintage: .6, dark: .7, rave: .4, clean: .3, modern: .4, soul: .3, gritty: .2 }, own: 1.1, never: ['house', 'cinematic'],
+    roles: { BASS: ['reese', 'bass', 'midbass'], LEAD: ['pluck', 'lead'], STAB: ['keys', 'stab', 'pluck'] }, kits: { DRUMS: { breaks: 1, pro: .5 }, BREAK: { jungle: 1.5, breaks: .5 } },
+    mix: { duck: 'dnb', master: ['club', -7.5], mono: 120, hats: 57 } },
+  jumpup: { aff: { rave: 1.2, gritty: 1, modern: 1.2, bright: .3, vocal: .3, vintage: -.6, dark: .2 }, own: 1, never: ['ethnic', 'house', 'soul', 'cinematic'],
+    roles: { BASS: ['wob', 'midbass', 'growl'], LEAD: ['lead', 'pluck'], STAB: ['stab', 'pluck'] }, kits: { DRUMS: { pro: 1, pf_rave: 1.8 }, BREAK: { breaks: 1, jungle: .6 } },
+    mix: { duck: 'dnb', master: ['club', -5.5], mono: 120, hats: 54 } },
+  futurebass: { aff: { bright: 1.3, wide: 1.2, vocal: .8, modern: 1, clean: .5, soul: .3, dark: -.6, vintage: -.6 }, own: 1, never: ['ethnic', 'cinematic'],
+    roles: { BASS: ['reese', 'bass', 'wob'], LEAD: ['lead', 'pluck'], STAB: ['stab', 'keys'] }, kits: { DRUMS: { pro: 1, acoustic: .4 }, BREAK: { acoustic: 1, breaks: .5 } },
+    mix: { duck: 'future', master: ['stream', -7], mono: 120, hats: 0 } },
+  halfdnb: { aff: { dark: 1.2, gritty: 1.2, modern: 1.3, cinematic: .4, vintage: -.8, rave: -.3, bright: -.3 }, own: 1, never: ['ethnic', 'house', 'soul'],
+    roles: { BASS: ['growl', 'midbass', 'reese'], LEAD: ['lead'] }, kits: { DRUMS: { pro: 1.2, pf_rave: .7 }, BREAK: { breaks: 1, jungle: .5 } },
+    mix: { duck: 'dnb', master: ['club', -6], mono: 120, hats: 52 } },
+};
+// t6_mix I-2 (duck depth dB, hold ms, release in 8ths) for the sub, the mid bass, the pads/keys and the lead
+const PAL_DUCK = { dnb: { SUB: [12, 15, .65], BASS: [4, 10, .6], PAD: [4, 0, 1.1], STAB: [4, 0, 1.1], LEAD: [1.5, 0, .6] },
+  dubstep: { SUB: [15, 20, .85], BASS: [6, 10, .7], PAD: [6, 0, 1.3], STAB: [6, 0, 1.3], LEAD: [2, 0, .7] },
+  liquid: { SUB: [9, 15, .65], BASS: [3, 10, .6], PAD: [4, 0, 1.1], STAB: [3, 0, 1.1], LEAD: [1.5, 0, .6] }, future: null };
+const palDuckSc = d => palCl((1 - Math.pow(10, -d / 20)) / .92, 0, 1);
+// a style's profile: its own (above), else one derived from its genre and its own presets (they weigh more: the identity stays)
+function palProfile(st) {
+  if (palHas(PAL_PROFILE, st.id)) return PAL_PROFILE[st.id];
+  const cat = palCatalog(), roles = {};
+  ['BASS', 'STAB', 'PAD', 'LEAD'].forEach(ln => {
+    const own = palOwn(st, ln).map(n => cat.by.get(n)).filter(Boolean).map(e => e.role).filter(r => PAL_LANE_ROLES[ln].includes(r));
+    if (own.length) roles[ln] = [...new Set(own.concat(ln === 'BASS' ? [] : PAL_LANE_ROLES[ln]))];
+  });
+  const house = !!st.house, never = house ? ['gritty', 'cinematic'] : st.world || st.cine ? [] : ['house'];
+  return { aff: Object.assign({}, PAL_GENRE[st.genre] || PAL_GENRE.neuro), own: house || st.world || st.cine || st.prof ? 2.2 : 1.5, never, roles, kits: null, mix: null };
+}
+const palRoleOf = ln => ({ BASS: 'bass', SUB: 'sub', STAB: 'stab', PAD: 'pad', LEAD: 'lead' })[ln];
+function palOwn(st, ln) {
+  const r = palRoleOf(ln), l = [].concat((st.prefer && st.prefer[r]) || [], (st.pick && st.pick[r]) || [], (st.presets && st.presets[r]) || []);
+  return l.filter(n => typeof n === 'string' && palHas(SYNTH_PRESETS, n));
+}
+// the lanes a cinematic or world style writes for its own instruments: they keep the style's sound
+function palOwned(st) {
+  const s = new Set();
+  try { if (st.cine && typeof CINE_LANES === 'object' && CINE_LANES[st.cine]) CINE_LANES[st.cine].forEach(n => s.add(n)); } catch (e) { /* no cinema section */ }
+  try { if (st.world && typeof WORLD_LANES === 'object' && WORLD_LANES[st.world]) WORLD_LANES[st.world].forEach(n => s.add(n)); } catch (e) { /* no world section */ }
+  return s;
+}
+// weighted pick: [[item, weight]]
+function palW(rng, list) { const tot = list.reduce((a, x) => a + Math.max(0, x[1]), 0); if (!(tot > 0)) return list.length ? list[0][0] : null; let r = rng() * tot; for (const [x, w] of list) { r -= Math.max(0, w); if (r <= 0) return x; } return list[list.length - 1][0]; }
+const palFam = role => (role === 'reese' || role === 'growl' || role === 'wob' || role === 'midbass' || role === 'bass' ? 'midbass' : role);
+
+// ---------- the sound draw ----------
+// -> { picks: { LANE: name }, cost, kept: [lanes], kits: { DRUMS, BREAK } }; tr.synth set on every drawn lane
+function palDrawSounds(P, st, cur) {
+  const cat = palCatalog(), prof = palProfile(st), rng = genRng((cur.seed ^ 0x51ed270b) >>> 0), owned = palOwned(st), out = { picks: {}, cost: 0, kept: [], kits: {} };
+  const used = new Set(), fams = {}, never = new Set(prof.never || []);
+  const wild = cur.v === 'wild' ? 1.25 : cur.v === 'subtle' ? .8 : 1;
+  ['SUB', 'BASS', 'LEAD', 'STAB', 'PAD'].forEach(ln => {
+    const tr = P.tracks[PAL_T[ln]]; if (!tr || tr.type !== 'synth') return;
+    const was = tr.synth && tr.synth.preset;
+    if (owned.has(ln)) { out.kept.push(ln); if (was) { used.add(was); out.picks[ln] = was; } return; }
+    const roles = (prof.roles && prof.roles[ln]) || PAL_LANE_ROLES[ln], own = new Set(palOwn(st, ln));
+    const cands = cat.presets.filter(e => palHas(SYNTH_PRESETS, e.name) && roles.includes(e.role) && !used.has(e.name) && !e.tags.some(t => never.has(t) && !own.has(e.name))
+      && ((ln !== 'STAB' && ln !== 'PAD') || e.poly || own.has(e.name)) && !(ln === 'BASS' && e.role === 'sub'));
+    if (!cands.length) { if (was) { used.add(was); out.picks[ln] = was; } return; }
+    const score = e => (own.has(e.name) ? prof.own : 0) + e.tags.reduce((a, t) => a + ((prof.aff && prof.aff[t]) || 0), 0) * wild
+      + (e.genres[st.genre] ? .5 * Math.min(1, e.genres[st.genre] / 3) : 0) - (fams[palFam(e.role)] && ln !== 'SUB' ? .8 : 0) + (e.name === was ? .4 : 0) - .04 * e.cost * (PAL_LANE_POLY[ln] || 1);
+    const ranked = cands.map(e => [e, score(e)]).sort((a, b) => b[1] - a[1] || (a[0].name < b[0].name ? -1 : 1)).slice(0, 12);
+    const top = ranked[0][1], pick = palW(rng, ranked.map(([e, s]) => [e, Math.exp(1.6 * (s - top))]));
+    used.add(pick.name); fams[palFam(pick.role)] = (fams[palFam(pick.role)] || 0) + 1; out.picks[ln] = pick.name;
+    if (pick.name !== was) tr.synth = makeSynth(pick.name);
+  });
+  // the CPU budget: the dearest drawn lane steps down to the cheapest of its roles until the set fits
+  const costOf = () => Object.entries(out.picks).reduce((a, [ln, n]) => a + palCost(n) * (PAL_LANE_POLY[ln] || 1), 0);
+  const own0 = ['SUB', 'BASS', 'LEAD', 'STAB', 'PAD'].reduce((a, ln) => { const n = palOwn(st, ln)[0]; return a + (n ? palCost(n) * PAL_LANE_POLY[ln] : 0); }, 0);
+  out.budget = Math.round(Math.max(PAL_BUDGET, own0 * 1.1) * 10) / 10;
+  for (let k = 0; k < 8 && costOf() > out.budget; k++) {
+    const ln = Object.keys(out.picks).filter(l => !owned.has(l)).sort((a, b) => palCost(out.picks[b]) * PAL_LANE_POLY[b] - palCost(out.picks[a]) * PAL_LANE_POLY[a])[0]; if (!ln) break;
+    const roles = (prof.roles && prof.roles[ln]) || PAL_LANE_ROLES[ln], have = new Set(Object.values(out.picks));
+    const alt = cat.presets.filter(e => palHas(SYNTH_PRESETS, e.name) && roles.includes(e.role) && !have.has(e.name) && e.cost < palCost(out.picks[ln]) && ((ln !== 'STAB' && ln !== 'PAD') || e.poly) && !e.tags.some(t => never.has(t)))
+      .sort((a, b) => a.cost - b.cost || (a.name < b.name ? -1 : 1));
+    if (!alt.length) break;
+    const e = alt[Math.min(alt.length - 1, rng.int(Math.min(3, alt.length)))]; out.picks[ln] = e.name; P.tracks[PAL_T[ln]].synth = makeSynth(e.name);
+  }
+  out.cost = Math.round(costOf() * 10) / 10;
+  return out;
+}
+// the kits of the ten first styles (the others keep theirs: their writers and pad settings belong to them)
+function palDrawKits(P, st, cur, prof) {
+  const rng = genRng((cur.seed ^ 0x2c1b3c6d) >>> 0), sampler = typeof samplerOn === 'function' && samplerOn(), out = {};
+  const ok = k => KITS[k] && (KITS[k].pads.every(x => x[1] !== 'smp') || sampler);
+  ['DRUMS', 'BREAK'].forEach(ln => {
+    const w = prof.kits && prof.kits[ln]; if (!w) return;
+    const tr = P.tracks[PAL_T[ln]], list = Object.entries(w).filter(([k]) => ok(k)); if (!list.length) return;
+    const k = palW(rng, list); out[ln] = k;
+    if (ln === 'BREAK' && k === 'jungle') { if (tr.kit !== raveBreakKit()) { tr.kit = raveBreakKit(); tr.pads = raveBreakPads(); } return; }
+    if (tr.kit === k) return;
+    tr.kit = k; tr.pads = makePads(k);
+    if (ln === 'DRUMS') {
+      const kick = tr.pads.find(pd => /kick/.test(pd.voice)); if (kick) { kick.tune = clamp(mod(P.key - 5 + 6, 12) - 6 - 3, -9, 3); kick.level = clamp(+kick.level * 1.25, 0, 1.5); }
+      const gm = GEN_GENRE_MIX[st.genre] || GEN_GENRE_MIX.neuro;
+      if (gm.snareDuck) tr.pads.forEach(pd => { if (/snare/.test(pd.voice) && !/ghost/i.test(String(pd.name))) pd.duck = true; });
+      tr.pads.forEach(pd => { if (/hat|ride|tops/.test(String(pd.voice)) && +pd.level > .45) pd.level = .4; });
+    }
+  });
+  return out;
+}
+// the modern mix of the ten first styles: duck depths per genre, the master target, the low end mono, the hats' swing
+function palModernMix(P, st, prof) {
+  const m = prof && prof.mix; if (!m) return;
+  const e8 = 30 / (P.bpm || 174), D = PAL_DUCK[m.duck];
+  if (D) Object.entries(D).forEach(([ln, [d, h, r]]) => { const tr = P.tracks[PAL_T[ln]]; if (!tr || !tr.fx) return; Object.assign(tr.fx, { sc: Math.round(palDuckSc(d) * 1000) / 1000, scRel: Math.round(palCl(r * e8, .02, 1) * 1000) / 1000 }); if (h) tr.fx.scHold = Math.max(.012, h / 1000); });
+  P.tracks.forEach(t => { if (t.fx && typeof fxSanitize === 'function') fxSanitize(t.fx); });
+  const [mid, target] = m.master;
+  if (typeof masterProFix === 'function' && typeof MASTER_PRESETS === 'object' && MASTER_PRESETS[mid])
+    P.master.pro = masterProFix(Object.assign(clone(MASTER_PRESETS[mid].set), { gain: mid === 'club' ? -2.5 : -1.5, on: true, preset: mid, target, scope: 'drop', mono: m.mono, ceil: -1 }));
+  if (m.hats) { P.swing = 0; const pads = tr => (Array.isArray(tr.pads) ? tr.pads : []); [P.tracks[0], P.tracks[1]].forEach(tr => pads(tr).forEach(pd => { if (/kick|snare|clap/.test(String(pd.voice)) && !/ghost/i.test(String(pd.name))) pd.swing = 0; })); }
+}
+
+// ---------- the vocals: the user's packs (prefetched: the draw is synchronous), else the synthetic chops ----------
+function palVoxFetch() {
+  const now = Date.now(); if (now - PAL.voxAt < 3000) return; PAL.voxAt = now;
+  try {
+    if (typeof voxIndex !== 'function') return;
+    voxIndex().then(idx => {
+      const files = []; (Array.isArray(idx) ? idx : []).forEach(pk => (pk.files || []).forEach(f => { if (f && typeof f.id === 'string' && /^user:[0-9a-f]{8,64}$/i.test(f.id) && typeof voxIsVocal === 'function' && voxIsVocal(f.name)) files.push({ id: f.id, name: String(f.name).slice(0, 60), dur: +f.dur || 0, key: String(f.key || '') }); }));
+      PAL.vox = files.sort((a, b) => (a.id < b.id ? -1 : 1)).slice(0, 64);
+      if (typeof smpUserLoad === 'function') PAL.vox.reduce((ch, f) => ch.then(() => (SMP.bufs.has(f.id) ? null : smpUserLoad(f.id))).catch(() => null), Promise.resolve()).then(() => { PAL.voxReady = true; });
+    }).catch(() => { /* no store */ });
+  } catch (e) { /* no vocals section */ }
+}
+// genre words of a vocal file name (the BPM in the name weighs most: 170-176 DnB, 140-150 dubstep, 120-128 house)
+const PAL_VOX_GENRE = { jumpup: /mc|multiplex|shout|hey|yo\b|fire|boom|rave|stadium|chant|crowd|get.da/i, neuro: /mc|riddim|dub|blackout|drop|shout|dark|fury/i,
+  rollers: /jungal|ragga|mc|roll|oldskool|badklaat|dub/i, liquid: /phrase|hook|beautiful|mystery|days|heart|feel|alive|call|ocean|fading|soul|female/i,
+  future: /chop|female|hook|alive|love|lights|classy|ocean/i, afro: /tuimbe|kemah|onu|chant|hoha|choral|group|backing|afro/i, swedish: /hook|lights|alive|chorus|men|spoken|siren|female/i };
+const palVoxShot = f => (f.dur > 0 && f.dur < 2.5) || /shout|one.?shot|\bhey\b|_yo\b|\byo\b/i.test(f.name);
+// semitones that move a vocal's key onto the set: a minor file over a major set goes to the relative minor, and the reverse
+const palVoxSemis = (k, P) => { if (!k) return 0; const mi = typeof MINOR_LIKE === 'object' && MINOR_LIKE.includes(P.scale);
+  return mod((k.minor === mi ? P.key : mi ? P.key + 3 : P.key - 3) - k.root + 6, 12) - 6; };
+function palVoxScore(f, P, st) {
+  const bpm = +P.bpm || 174, fb = typeof voxNameBpm === 'function' ? voxNameBpm(f.name) : 0;
+  let s = 0;
+  if (fb > 0) { const d = Math.min(...[1, 2, .5].map(k => Math.abs(Math.log2(fb * k / bpm)))); s += d < .03 ? 3 : d < .08 ? 2 : d < .2 ? .5 : -1; }
+  const re = PAL_VOX_GENRE[st.genre]; if (re && re.test(f.name)) s += 2;
+  try { const k = typeof voxNameKey === 'function' ? voxNameKey(f.name) : null; if (k) { const minor = typeof MINOR_LIKE === 'object' && MINOR_LIKE.includes(P.scale); s += k.minor === minor ? .8 : -.3; const sh = Math.abs(mod(P.key - k.root + 6, 12) - 6); s -= sh * .12; } } catch (e) { /* no key */ }
+  return s;
+}
+// the warp: the first bars of a phrase stretched to the set's tempo and moved to its key (the WSOLA and resampler of 3c),
+// kept as a new user sample (this session at once, this browser's store after) -> { id, dur } or null
+function palVoxFit(f, P) {
+  try {
+    if (typeof SMP !== 'object' || !SMP.bufs || !SMP.bufs.has(f.id) || typeof voxStretch !== 'function' || typeof voxResample !== 'function') return null;
+    const buf = SMP.bufs.get(f.id), sr = buf.sampleRate, fb = typeof voxNameBpm === 'function' ? voxNameBpm(f.name) : 0, bpm = +P.bpm || 174;
+    const k = typeof voxNameKey === 'function' ? voxNameKey(f.name) : null, semis = palVoxSemis(k, P);
+    let T = 1; if (fb > 0) { const c = [1, 2, .5].map(m => fb * m).sort((x, y) => Math.abs(Math.log2(x / bpm)) - Math.abs(Math.log2(y / bpm)))[0]; T = c / bpm; }
+    if (Math.abs(T - 1) < .005 && !semis) return null;
+    const maxS = Math.min(buf.length, Math.round(sr * (fb > 0 ? 8 * 60 / fb : 4))), chs = [0, 1].map(c => buf.getChannelData(Math.min(c, buf.numberOfChannels - 1)).slice(0, maxS));
+    const r = Math.pow(2, semis / 12), st = voxStretch(chs, T * r, sr), res = voxResample(st, r, sr);
+    let h = 2166136261; const key = f.id + ':' + bpm + ':' + semis; for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 16777619) >>> 0;
+    const id = 'user:' + h.toString(16).padStart(8, '0') + 'fa11ed' + (semis + 12).toString(16).padStart(2, '0');
+    if (!SMP.bufs.has(id)) {
+      const b = new AudioBuffer({ length: res[0].length, numberOfChannels: 2, sampleRate: sr }); b.copyToChannel(res[0], 0); b.copyToChannel(res[1] || res[0], 1);
+      const name = (String(f.name).replace(/\.[a-z0-9]{2,4}$/i, '') + ' ' + bpm + 'bpm').slice(0, 60);
+      smpAdd(id, b, { name, kind: 'user', slices: typeof smpOnsets === 'function' ? smpOnsets(b) : [], credit: '', url: '' }); SMP.state.set(id, 'ok'); SMP.jobs.set(id, Promise.resolve());
+      if (typeof voxWav === 'function' && typeof smpDbPut === 'function') voxWav(res, sr).then(bytes => smpDbPut(id, { name, type: 'audio/wav', size: bytes.byteLength, bytes, added: Date.now() })).catch(() => { /* kept for this session */ });
+    }
+    return { id, dur: res[0].length / sr, semis, T };
+  } catch (e) { return null; }
+}
+// the FX lane's two vox pads become the user's shout and phrase (matched to the style, warped) -> 'user' | 'synth' | ''
+function palVoxPads(P, cur, st) {
+  const fx = P.tracks[PAL_T.FX], kit = fx && fx.type === 'drums' ? genKitMap(fx) : null;
+  if (!kit || !((kit.roles.vox && kit.roles.vox.length) || (kit.roles.hey && kit.roles.hey.length))) return '';
+  const hey = (kit.roles.hey || [])[0], aah = (kit.roles.vox || []).slice(-1)[0];
+  cur.voxPads = [hey, aah];
+  const files = Array.isArray(PAL.vox) && PAL.voxReady ? PAL.vox.filter(f => SMP.bufs.has(f.id)) : []; // only decoded files: an undecoded phrase would play unwarped
+  if (!files.length || cur.s !== 'bank' || typeof PAD_BASE !== 'object' || typeof SAMPLE_PAD !== 'object') return 'synth';
+  const rng = genRng((cur.seed ^ 0x7f4a7c15) >>> 0), shots = files.filter(palVoxShot), phr = files.filter(f => !palVoxShot(f));
+  const best = list => { const sc = list.map(f => [f, palVoxScore(f, P, st) + rng() * 2]).sort((x, y) => y[1] - x[1]); return sc.length ? sc[0][0] : null; };
+  const beat = 60 / (+P.bpm || 174);
+  const pad = (f, level, chop) => {
+    const fit = chop ? null : palVoxFit(f, P); let tune = 0;
+    if (!fit) { try { const k = typeof voxNameKey === 'function' ? voxNameKey(f.name) : null; if (k) tune = palVoxSemis(k, P); } catch (e) { tune = 0; } }
+    const dur = fit ? fit.dur : f.dur, end = dur > 0 ? palCl((chop ? 4 : 8) * beat / dur, .02, 1) : 1; // a shout plays at most a bar, a phrase its first 2 bars
+    cur.voxFiles.push({ src: f.id, id: fit ? fit.id : f.id, name: f.name, warped: !!fit, semis: fit ? fit.semis : tune });
+    return Object.assign({ name: String(f.name).replace(/\.[a-z0-9]{2,4}$/i, '').replace(/^[A-Z0-9]+_/, '').toUpperCase().slice(0, 8) || 'VOX', voice: 'smp' }, PAD_BASE, SAMPLE_PAD,
+      { sample: fit ? fit.id : f.id, slice: -1, start: 0, end: Math.round(end * 1000) / 1000, rev: false, choke: 0, vx: chop ? 'shot' : 'chop', level, tune, decay: chop ? 1 : 4 });
+  };
+  cur.voxFiles = [];
+  const a = best(shots) || best(files), b = best(phr.filter(f => f !== a)) || a;
+  if (hey != null) fx.pads[hey] = pad(a, .62, true); if (aah != null && aah !== hey) fx.pads[aah] = pad(b, .5, false);
+  return 'user';
+}
+
+// ---------- the arrangement forms ----------
+// the family of a style's form: 'pf' (a profile template, section 3w), 'afro' / 'swe' (house), 'dnb' (the generator's layout,
+// with the cinematic and world lanes on top)
+function palFamily(st) {
+  if (st.prof && typeof PF === 'object' && palHas(PF, st.prof)) return 'pf';
+  if (st.house === 'afro') return 'afro'; if (st.house) return 'swe';
+  return 'dnb';
+}
+const palIsDrop = s => s === 'drop' || s === 'drop2' || s === 'switch' || s === 'groove' || s === 'groove2' || s === 'groove3';
+const palIsBuild = s => s === 'build' || s === 'build2';
+// every drop that follows a non-drop starts on a 16-bar boundary: the section before it (a build) grows or shrinks by 8
+function palAlign(secs) {
+  for (let pass = 0; pass < 8; pass++) {
+    let at = 0, ok = true;
+    for (let i = 0; i < secs.length; i++) {
+      const x = secs[i], prev = secs[i - 1];
+      if (palIsDrop(x.sec) && !(prev && palIsDrop(prev.sec)) && at % 16) {
+        ok = false;
+        const y = secs[i - 1] || secs[0], step = at % 8 === 0 ? 8 : 16 - (at % 16);
+        if (y.bars <= 8 || y.bars + step <= 16) y.bars += step; else y.bars -= (16 - step);
+        break;
+      }
+      at += x.bars;
+    }
+    if (ok) return secs;
+  }
+  return secs;
+}
+const palBars = secs => secs.reduce((a, x) => a + x.bars, 0);
+// the tags of a form (ptags: applied on the timeline by this section)
+function palTagForm(secs, cur, o) {
+  const r = cur.rngA, v = cur.v, W = v === 'wild', S = v === 'subtle', house = o.house, fake = { n: 0 };
+  let dropNo = 0, prev = '';
+  const builds = [];
+  secs.forEach((x, i) => {
+    x.ptags = x.ptags || [];
+    const nx = secs[i + 1], isD = palIsDrop(x.sec), first = isD && !palIsDrop(prev);
+    if (first) dropNo++;
+    x.dropNo = isD ? dropNo : 0;
+    if (palIsBuild(x.sec) && nx && palIsDrop(nx.sec)) builds.push(x);
+    if (first && (!S || r() < .15)) { // the drop's entry
+      const e = palW(r, [['full', S ? 0 : 3], ['delayBass', x.bars >= 16 ? 1.4 : 0], ['holdBack', x.bars >= 16 ? 1.6 : 0], ['noSub8', x.bars >= 16 ? .7 : 0], ['bassOut', x.bars >= 16 && !house && !S ? 1.3 : 0]]);
+      if (e && e !== 'full') x.ptags.push(e);
+    }
+    if (isD && !S && !house && dropNo >= 2 && x.sec !== 'switch' && x.bars >= 16 && first) { // the switch-ups of the later drops
+      const n = W ? 2 : 1, pool = [['newBass', 2], ['halftime8', x.bars >= 24 && o.half ? 1.5 : 0], ['newElement', 1.4], ['doubleHats', 1.3]];
+      for (let k = 0; k < n; k++) { const t = palW(r, pool.filter(p => !x.ptags.includes(p[0]))); if (t && !x.ptags.includes(t)) x.ptags.push(t); }
+    }
+    if (isD && x.bars >= 32 && !S && r() < (W ? .45 : .2)) x.ptags.push('stopMid');
+    if (x.sec === 'outro') x.ptags.push(x.bars >= 32 ? 'dj' : 'short');
+    if (x.sec === 'intro' && x.bars >= 32) x.ptags.push('dj');
+    prev = x.sec;
+  });
+  // the builds: one type each, no two in a row the same (subtle: the riser and roll, now and then a silent last bar)
+  let last = '';
+  builds.forEach((x, k) => {
+    let t;
+    if (S) t = k > 0 && r() < .3 ? 'silenceLastBar' : 'riser';
+    else {
+      const pool = [['riser', 3], ['filterBuild', 2], ['silenceLastBar', 2], ['vocalCut', o.vox ? 1.6 : 0], ['fakeDrop', !fake.n && x.bars >= 8 && !house && k > 0 ? (W ? 2 : 1) : 0], ['halftimeBuild', !house && x.bars >= 8 ? (W ? 1.5 : 1) : 0], ['turnaround', !house ? 1.3 : 0], ['clapBuild', !house && x.bars >= 8 ? 1.5 : 0]];
+      t = palW(r, pool.map(p => [p[0], p[0] === last ? p[1] * .2 : p[1]]));
+    }
+    if (t === 'fakeDrop') fake.n++;
+    last = t;
+    x.ptags.push(t === 'riser' ? 'riserRoll' : t);
+    if (t === 'riser' || t === 'filterBuild') x.ptags.push('silenceLastBeat');
+  });
+  return secs;
+}
+// the generator's own form (dnb family): the style's, or one of the skeletons below with seeded lengths
+function palFormDnb(st, cur) {
+  const r = cur.rngA, v = cur.v, base = genSongArr(st).map(([sec, bars]) => ({ sec, bars }));
+  const heavy = st.genre === 'neuro' || st.genre === 'jumpup', soft = st.genre === 'liquid' || st.genre === 'future', dj = st.genre === 'rollers' || st.genre === 'liquid';
+  const swOk = heavy || !!st.switchBeat;
+  let secs, tpl = 'own';
+  if (v === 'subtle') secs = base;
+  if (!secs) {
+    const W = v === 'wild';
+    tpl = palW(r, [['own', W ? .6 : 1.2], ['classic', 2], ['switch', swOk ? (W ? 2 : 1.5) : 0], ['three', W ? 2.6 : 1.2], ['ab', swOk ? (W ? 1.6 : .8) : 0], ['early', soft ? 1.4 : .9], ['long', dj ? .8 : .4]]);
+    const I = () => palW(r, [[8, W ? 1 : .5], [16, 2], [32, dj ? 2.5 : 1.2]]), B = () => palW(r, [[8, 2.5], [16, 1]]);
+    const D = () => palW(r, [[16, W ? 1 : .8], [32, 3], [48, W ? .8 : .35]]), K = () => palW(r, [[8, W ? 1 : .4], [16, 2.2], [32, soft || dj ? 1.6 : .6]]);
+    const O = () => palW(r, [[8, W ? .8 : .4], [16, 2], [32, dj ? 2 : 1]]), SW = () => palW(r, [[8, 1], [16, 1.4]]);
+    const s = (sec, bars) => ({ sec, bars });
+    if (tpl === 'own') secs = base.map(x => s(x.sec, x.sec === 'intro' ? I() : x.sec === 'breakdown' ? K() : x.sec === 'outro' ? O() : x.sec === 'switch' ? SW() : x.bars));
+    else if (tpl === 'classic') secs = [s('intro', I()), s('build', B()), s('drop', D()), s('breakdown', K()), s('build', B()), s('drop2', D()), s('outro', O())];
+    else if (tpl === 'switch') secs = [s('intro', I()), s('build', B()), s('drop', D()), s('breakdown', K()), s('build', 8), s('drop2', palW(r, [[16, 1], [32, 2]])), s('switch', SW()), s('outro', O())];
+    else if (tpl === 'three') secs = [s('intro', I()), s('build', B()), s('drop', palW(r, [[16, 1], [32, 2]])), s('breakdown', K()), s('build', 8), s('drop2', palW(r, [[16, 1.2], [32, 2]])),
+      s('breakdown', palW(r, [[8, 2], [16, 1]])), s('build', 8), s('drop2', palW(r, [[16, 1.4], [32, 1]])), s('outro', O())];
+    else if (tpl === 'ab') secs = [s('intro', I()), s('build', B()), s('drop', 16), s('switch', 16), s('breakdown', K()), s('build', B()), s('drop2', D()), s('outro', O())];
+    else if (tpl === 'early') secs = [s('intro', 8), s('build', 8), s('drop', D()), s('breakdown', K()), s('build', 8), s('drop2', D()), s('outro', palW(r, [[8, 1], [16, 2]]))];
+    else secs = [s('intro', 32), s('build', 16), s('drop', palW(r, [[32, 2], [48, W ? 1 : .6]])), s('breakdown', palW(r, [[16, 1.4], [32, 2]])), s('build', 8), s('drop2', palW(r, [[32, 2], [48, .8]])), s('outro', palW(r, [[16, 1], [32, 2]]))];
+  }
+  secs = secs.map(x => ({ sec: x.sec, bars: x.bars }));
+  palAlign(secs);
+  while (palBars(secs) > 352) { const big = secs.filter(x => (x.sec === 'intro' || x.sec === 'outro' || x.sec === 'breakdown') && x.bars >= 32)[0]; if (!big) break; big.bars -= 16; palAlign(secs); }
+  cur.tpl = tpl;
+  return palTagForm(secs, cur, { house: false, half: true, vox: true });
+}
+// a house form: the style's, with seeded lengths, an optional third groove (afro: the bridge and groove 3; swe: a second breakdown)
+function palFormHouse(st, cur, fam) {
+  const r = cur.rngA, v = cur.v, W = v === 'wild', base = (Array.isArray(st.arr) ? st.arr : []).map(([sec, bars]) => ({ sec, bars }));
+  let secs = base.map(x => ({ sec: x.sec, bars: x.bars })), tpl = 'own';
+  if (v !== 'subtle') {
+    const L = (x, list) => { x.bars = palW(r, list); };
+    secs.forEach(x => {
+      if (x.sec === 'intro') L(x, [[16, 1], [32, 2]]); else if (x.sec === 'intro2') L(x, [[8, .6], [16, 2]]);
+      else if (x.sec === 'breakdown') L(x, [[16, 2], [32, 1]]); else if (x.sec === 'bridge') L(x, [[8, .6], [16, 2]]);
+      else if (/groove|drop/.test(x.sec)) L(x, [[32, 2], [48, W ? 1 : .6], [16, W ? .8 : .7]]); else if (x.sec === 'outro') L(x, [[16, 1.5], [32, 2]]); else if (x.sec === 'build2') L(x, [[8, 1], [16, 1]]);
+    });
+    if (fam === 'afro') {
+      const third = secs.some(x => x.sec === 'groove3');
+      if (third && r() < (W ? .3 : .45)) { secs = secs.filter(x => x.sec !== 'bridge' && x.sec !== 'groove3'); tpl = 'two'; }
+      else if (!third && r() < (W ? .7 : .45)) { const at = secs.findIndex(x => x.sec === 'outro'); secs.splice(at < 0 ? secs.length : at, 0, { sec: 'bridge', bars: 16 }, { sec: 'build', bars: 8 }, { sec: 'groove3', bars: 32 }); tpl = 'three'; }
+    } else if (r() < (W ? .65 : .4)) { const at = secs.findIndex(x => x.sec === 'outro'); secs.splice(at < 0 ? secs.length : at, 0, { sec: 'breakdown', bars: 16 }, { sec: 'build2', bars: 8 }, { sec: 'drop2', bars: 32 }); tpl = 'three'; }
+  }
+  palAlign(secs);
+  cur.tpl = tpl;
+  return palTagForm(secs, cur, { house: true, half: false, vox: false });
+}
+// a profile template (section 3w): its sections keep their labels, tags and energies; the lengths move, a third drop may come
+function palFormPf(v, cur) {
+  const r = cur.rngA, W = cur.v === 'wild', tpl = v.tpl.map(x => Object.assign({}, x, { tags: x.tags.slice() }));
+  let tplId = 'own';
+  if (cur.v !== 'subtle') {
+    tpl.forEach((x, i) => {
+      const first = i === 0;
+      if (x.sec === 'intro' && x.bars >= 8 && !x.tags.includes('leadSub')) x.bars = palW(r, [[8, first ? .6 : 1], [16, 2], [32, x.tags.includes('dj') ? 2.5 : .8]]);
+      else if (x.sec === 'breakdown' && x.bars >= 8) x.bars = palW(r, [[8, x.tags.includes('short') ? 2 : .6], [16, 2], [32, W ? .8 : .4]]);
+      else if (x.sec === 'outro' && x.bars >= 8) x.bars = palW(r, [[8, .6], [16, 2], [32, x.tags.includes('dj') ? 2 : .6]]);
+      else if (x.sec === 'drop' && x.bars >= 16) x.bars = palW(r, [[16, x.bars === 16 ? 2 : .8], [32, x.bars >= 32 ? 2 : .8]]);
+    });
+    const drops = tpl.map((x, i) => (x.sec === 'drop' && !(tpl[i - 1] && (tpl[i - 1].sec === 'drop' || tpl[i - 1].sec === 'switch')) ? i : -1)).filter(i => i >= 0);
+    if (drops.length === 2 && r() < (W ? .6 : .35)) { // a third drop after the second drop's run
+      let at = drops[1]; while (at + 1 < tpl.length && (tpl[at + 1].sec === 'drop' || tpl[at + 1].sec === 'switch')) at++;
+      const e = tpl[drops[1]].energy;
+      tpl.splice(at + 1, 0, { label: 'BREAK 3', bars: 8, energy: 3, tags: ['breakdown', 'short'], sec: 'breakdown' }, { label: 'BUILD 3', bars: 8, energy: 8, tags: ['build'], sec: 'build' },
+        { label: 'DROP 3', bars: 16, energy: Math.max(9.5, e), tags: ['drop', 'switch2'], sec: 'drop' });
+      tplId = 'three';
+    } else if (drops.length >= 3 && r() < .4) { // two drops: the last drop and its build and breakdown leave
+      const d = drops[drops.length - 1]; let a = d; while (a > 0 && tpl[a - 1].sec !== 'drop' && tpl[a - 1].sec !== 'switch') a--;
+      let b = d; while (b + 1 < tpl.length && (tpl[b + 1].sec === 'drop' || tpl[b + 1].sec === 'switch')) b++;
+      tpl.splice(a, b - a + 1); tplId = 'two';
+    }
+  }
+  const secs = tpl.map(x => ({ sec: x.sec === 'verse' ? 'verse' : x.sec, bars: x.bars, ref: x }));
+  palAlign(secs); secs.forEach(x => { x.ref.bars = x.bars; });
+  cur.tpl = tplId;
+  palTagForm(secs, cur, { house: false, half: true, vox: true });
+  // the tags 3w reads itself go on its template; the others stay ptags (this section applies them)
+  secs.forEach(x => {
+    const mine = [];
+    x.ptags.forEach(t => {
+      if (t === 'silenceLastBar' || t === 'fakeDrop' || t === 'holdBack') { if (!x.ref.tags.includes(t)) x.ref.tags.push(t); } else mine.push(t);
+      if (t === 'silenceLastBar' || t === 'fakeDrop' || t === 'holdBack') mine.push(t + '@pf');
+    });
+    x.ptags = mine;
+  });
+  return { tpl, secs };
+}
+// pfVariant (3w) picks the profile's variant and template from the seed: a song of this section moves the template's form
+if (typeof pfVariant === 'function') {
+  const palPfVariant0 = pfVariant;
+  pfVariant = function (id, seed, o) { // eslint-disable-line no-func-assign
+    const v = palPfVariant0(id, seed, o);
+    const cur = PAL.cur;
+    if (!cur || cur.id !== id || cur.fam !== 'pf' || cur.pfDone || !v || !Array.isArray(v.tpl)) return v;
+    const f = palFormPf(v, cur);
+    v.tpl = f.tpl; v.st = Object.assign({}, v.st, { arr: v.tpl.map(x => [pfBaseSec(x.sec), x.bars]) });
+    cur.secs = f.secs; cur.pfDone = true;
+    return v;
+  };
+}
+
+// ---------- the clips the tags need (the SWITCH-UPS scene: one more row) ----------
+function palTrickRow(P, cur) {
+  if (cur.trick != null) return cur.trick;
+  cur.trick = -1;
+  const n = P.scenes.length; if (n >= MAX_SCENES) return -1;
+  P.scenes.push({ name: 'SWITCH-UPS' }); P.tracks.forEach(tr => { while (tr.clips.length < P.scenes.length) tr.clips.push(null); });
+  cur.trick = n;
+  return n;
+}
+// another named row of tricks (one per need: the drum tricks of the builds, the bass-out bars)
+function palNamedRow(P, cur, name) {
+  cur.rows = cur.rows || {}; if (palHas(cur.rows, name)) return cur.rows[name];
+  cur.rows[name] = -1; const n = P.scenes.length; if (n >= MAX_SCENES) return -1;
+  P.scenes.push({ name }); P.tracks.forEach(tr => { while (tr.clips.length < P.scenes.length) tr.clips.push(null); });
+  cur.rows[name] = n; return n;
+}
+const palRowOf = k => (palHas(GEN_SONG_ROWS, k) ? GEN_SONG_ROWS[k][0] : -1);
+function palClip(name, notes, groove) { const c = { name: String(name).toUpperCase().slice(0, 24), bars: 8, notes: dedupe(genGrid(notes.filter(n => n.s >= 0 && n.s < 128))) }; if (groove) c.groove = clone(groove); return c; }
+function palClips(P, st, cur) {
+  const secs = cur.secs || [], tags = new Set([].concat(...secs.map(x => x.ptags || []))), groove = (P.gen && P.gen.groove) || 'straight', rng = genRng((cur.seed ^ 0x3a8f05c5) >>> 0);
+  const T = PAL_T, R = genSecRule('drop', st.genre), dropB = palRowOf('dropB'), sw = palRowOf('sw');
+  if (tags.has('vocalCut') && !cur.voxMode) cur.voxMode = 'late';
+  const make = (row, name, gen, e = .95) => { const t = T[name], ctx = genContext(P, row, t, 128, { harm: false, energy: e }); return genClip(P, t, 8, Object.assign({ seed: rng.int(4294967296), s: row, ctx }, gen)); };
+  // halftime: the SWITCH row (made by the heavy genres already; the others get one)
+  const needSw = tags.has('halftime8') || secs.some(x => x.sec === 'switch');
+  if (needSw && sw >= 0 && !P.tracks[T.DRUMS].clips[sw]) {
+    const trip = !!st.trip || groove === 'triplet', swBeat = genHas(GEN_DRUM, st.switchBeat) && st.switchBeat !== 'twostep' ? st.switchBeat : 'halftime';
+    const put = (name, r) => { P.tracks[T[name]].clips[sw] = palClip('SWITCH ' + name, r.notes, genFeel(st, groove, name)); };
+    put('DRUMS', make(sw, 'DRUMS', { style: swBeat, lane: { dens: 'mid', fill: 'phrase' }, trip }));
+    if (P.tracks[T.SUB].type === 'synth') put('SUB', make(sw, 'SUB', { rhythm: 'long', reg: R.reg.sub }));
+    if (P.tracks[T.BASS].type === 'synth') put('BASS', make(sw, 'BASS', { rhythm: st.bpm < 150 ? 'tripgrowl' : 'halfroll', reg: R.reg.bass }));
+    if (P.tracks[T.STAB].type === 'synth' && P.tracks[T.STAB].clips[palRowOf('drop')]) put('STAB', make(sw, 'STAB', { rhythm: 'stabs', reg: R.reg.stab, tie: true, lane: { voice: 'open' } }));
+  }
+  const tr = n => P.tracks[T[n]];
+  // a new bass rhythm on the same patch (t5 S2)
+  if (tags.has('newBass') && tr('BASS').type === 'synth') {
+    const row = palTrickRow(P, cur), was = (tr('BASS').clips[dropB] || tr('BASS').clips[palRowOf('drop')] || { notes: [] }).notes;
+    const rh = (st.rhythm && st.rhythm.bass || []).concat(['stepper', 'roller', 'twostep', 'kick', 'wobble', 'halfroll']).filter(x => genHas(GEN_RHY.bass, x));
+    let res = null;
+    for (const x of rh.slice().sort(() => 0).filter((x, i, l) => l.indexOf(x) === i)) { const r2 = make(dropB, 'BASS', { rhythm: x, reg: R.reg.bass, dry: true }); if (r2.notes.length && JSON.stringify(r2.notes) !== JSON.stringify(was)) { res = r2; if (rng() < .6) break; } }
+    if (row >= 0 && res) { tr('BASS').clips[row] = palClip('NEW BASS', res.notes, genFeel(st, groove, 'BASS')); cur.made.newBass = row; }
+  }
+  // double-time hats over drop B's beat (t5 S4)
+  if (tags.has('doubleHats') && tr('DRUMS').clips[dropB]) {
+    const row = palTrickRow(P, cur), src = tr('DRUMS').clips[dropB], kit = genKitMap(tr('DRUMS')), h = genPadFor(kit, 'H'), o = genPadFor(kit, 'O');
+    if (row >= 0 && h >= 0) {
+      const have = new Set(src.notes.filter(n => n.p === h).map(n => Math.round(n.s * 4)));
+      const add = []; for (let s = 0; s < 128; s++) if (!have.has(s * 4)) add.push({ s, p: h, l: 1, v: s % 2 ? 46 + (s % 4 === 3 ? 10 : 0) : 70 });
+      if (o >= 0) for (let b = 0; b < 8; b++) add.push({ s: b * 16 + 14, p: o, l: 2, v: 74 });
+      tr('DRUMS').clips[row] = palClip('DOUBLE HATS', src.notes.concat(add), src.groove); cur.made.doubleHats = row;
+    }
+  }
+  // the loop layer (a library loop of another style on the BREAK lane, the same kit)
+  if (cur.loopWant) palLoopLayer(P, st, cur);
+  const kitD = genKitMap(tr('DRUMS')), pd = r => genPadFor(kitD, r), K = pd('K'), Sn = pd('S'), C = kitD.roles.C && kitD.roles.C.length ? kitD.roles.C[0] : -1, H = pd('H'), O = pd('O');
+  const put = (l, b, s, p, v, len = 1) => { if (p >= 0) l.push({ s: b * 16 + s, p, l: len, v: palCl(Math.round(v), 1, 127) }); };
+  // the drum tricks of a build (8 bars): claps (and the snare) in quarters for 3 bars, 8ths for 2, 16ths for 1, a quiet kick on the
+  // beats (the held-back kick of a build), then one bar of the drop's beat and the single-snare turnaround
+  if ((tags.has('clapBuild') || tags.has('turnaround')) && Sn >= 0) {
+    const row = palNamedRow(P, cur, 'BUILD TRICKS'), n = [], drop = (tr('DRUMS').clips[palRowOf('drop')] || { notes: [] }).notes;
+    if (row >= 0) {
+      for (let b = 0; b < 6; b++) {
+        const step = b < 3 ? 4 : b < 5 ? 2 : 1;
+        for (let s = 0; s < 16; s += step) { const x = (b * 16 + s) / 96; put(n, b, s, C >= 0 ? C : Sn, 58 + 60 * x); if (C >= 0 && step < 4) put(n, b, s, Sn, 40 + 50 * x); }
+        [0, 8].forEach(s => put(n, b, s, K, 46 + 4 * b)); if (H >= 0) [2, 6, 10, 14].forEach(s => put(n, b, s, H, 44));
+      }
+      drop.filter(x => x.s < 16).forEach(x => n.push(Object.assign({}, x, { s: x.s + 96 })));
+      put(n, 7, 12, Sn, 120); if (C >= 0) put(n, 7, 12, C, 112);
+      tr('DRUMS').clips[row] = palClip('BUILD TRICKS', n, (tr('DRUMS').clips[palRowOf('drop')] || {}).groove); cur.made.buildTricks = row;
+    }
+  }
+  // the bass-out (bars 7-8 of the first drop block): double-time hats alone (the off-beats a little late and softer), stopping on
+  // beat 4 of the second bar, and one snare and clap on its step 12
+  if (tags.has('bassOut') && H >= 0) {
+    const row = palNamedRow(P, cur, 'BASS-OUT'), n = [];
+    if (row >= 0) {
+      for (let s = 0; s < 28; s++) n.push({ s: s % 2 ? s + 8 / 48 : s, p: H, l: 1, v: s % 2 ? 52 : 84 });
+      put(n, 1, 12, Sn, 118); if (C >= 0) put(n, 1, 12, C, 110); if (O >= 0) put(n, 0, 8, O, 70);
+      tr('DRUMS').clips[row] = palClip('BASS-OUT', n); cur.made.bassOut = row;
+    }
+  }
+  // the FX tricks: the pre-echo stutter, the drop tag, the vocal cut, the breakdown phrase, the white-noise burst on a drop's first
+  // downbeat (5 short hits, the last fading, about 12 dB under the snare), the turnaround swell, the bass-out riser
+  {
+    const fx = tr('FX'), kit = genKitMap(fx), fills = fx.clips[palRowOf('fills')], vp = cur.voxPads || [(kit.roles.hey || [])[0], (kit.roles.vox || []).slice(-1)[0]];
+    const hey = vp[0], vx = vp[1], chop = cur.voxMode ? (hey != null ? hey : vx) : null, noise = (kit.roles.CR || [])[0];
+    if (fills && cur.v !== 'subtle') {
+      const row = palTrickRow(P, cur);
+      if (row >= 0) {
+        const bar = k => fills.notes.filter(x => x.s >= k * 16 && x.s < k * 16 + 16).map(x => Object.assign({}, x, { s: x.s - k * 16 }));
+        const at = (b, l) => l.filter(x => x.p != null).map(x => Object.assign({}, x, { s: x.s + b * 16 }));
+        const v = (p, s, l, vel) => (p == null ? [] : [{ s, p, l, v: vel }]);
+        const burst = noise == null ? [] : [0, 2, 4, 6, 8].map((s, k) => ({ s, p: noise, l: 2, v: [44, 40, 36, 32, 22][k] }));
+        const pre = chop == null ? [] : [[8, 38], [10, 46], [12, 54]].map(([s, vel]) => ({ s, p: chop, l: 1, v: vel })).concat([{ s: 14, p: chop, l: 2, v: 63 }]); // the pre-echo: the tag's first 2 steps, 2 steps early, -5 dB
+        const ph = vx != null && chop != null ? vx : chop;
+        const notes = [].concat(at(0, bar(GEN_XFILL.swell).concat(pre)), at(1, bar(GEN_XFILL.impact).concat(v(chop, 0, 2, 112), burst)),
+          at(2, bar(GEN_XFILL.swell).concat(v(ph, 0, 8, 100), pre)), at(3, bar(GEN_XFILL.impSwell).concat(v(chop, 0, 2, 112), burst)),
+          at(4, bar(GEN_XFILL.downer).concat(v(ph, 0, 16, 96))), at(5, bar(GEN_XFILL.impact).concat(burst)),
+          at(6, bar(GEN_XFILL.swell)), at(7, bar(GEN_XFILL.riser)));
+        fx.clips[row] = palClip(chop != null ? 'VOX AND FX TRICKS' : 'FX TRICKS', notes); cur.made.fx = row; if (chop != null) cur.made.vox = row;
+      }
+    }
+  }
+}
+// a loop of the library under the drop: a 'top' or 'perc' recipe on the BREAK lane of another style with this lane's kit
+function palLoopLayer(P, st, cur) {
+  const brk = P.tracks[PAL_T.BREAK]; if (!brk || brk.type !== 'drums' || typeof libRecipes !== 'function' || typeof libBuild !== 'function') return;
+  const rng = genRng((cur.seed ^ 0x6b43a9b5) >>> 0), kit = brk.kit;
+  const cand = libRecipes().filter(r => (r.role === 'top' || r.role === 'perc') && /:BREAK$/.test(r.src) && r.style !== st.id && GEN_STYLES[r.style] && !GEN_STYLES[r.style].house
+    && Math.abs((r.bpm || 174) - P.bpm) <= 12).sort((a, b) => (a.id < b.id ? -1 : 1));
+  const list = []; for (let k = 0; k < cand.length && list.length < 6; k++) { const r = cand[(k * 7 + rng.int(cand.length)) % cand.length]; if (!list.includes(r)) list.push(r); }
+  const saved = PAL.cur; PAL.cur = null; // the library song is an old-path song
+  try {
+    for (const r of list.slice(0, 3)) {
+      let b; try { b = libBuild(r); } catch (e) { continue; }
+      const src = b && b.R && b.R.tracks[b.t];
+      if (!src || src.kit !== kit || !Array.isArray(src.pads) || src.pads.length !== brk.pads.length || src.pads.some((pd, i) => pd.voice !== brk.pads[i].voice)) continue;
+      const L = b.clip.bars * 16; if (!(L > 0) || !b.clip.notes.length) continue;
+      const notes = []; for (let s0 = 0; s0 < 128; s0 += L) b.clip.notes.forEach(n => { if (n.s + s0 < 128) notes.push(Object.assign({}, n, { s: n.s + s0, v: palCl(Math.round(n.v * .9), 1, 127) })); });
+      PAL.cur = saved;
+      const row = palTrickRow(P, cur); if (row < 0) return;
+      brk.clips[row] = palClip('LOOP ' + r.name, notes, b.clip.groove); cur.made.loop = row; cur.loopId = r.id;
+      return;
+    }
+  } finally { PAL.cur = saved; }
+}
+
+// ---------- the tags on the timeline ----------
+function palTimeline(P, bars) {
+  return P.tracks.map((tr, t) => {
+    if (t >= PAL_LANES.length || (tr.type !== 'drums' && tr.type !== 'synth')) return null;
+    const tl = Array(bars).fill(null);
+    (tr.arr || []).forEach(e => { for (let i = 0; i < e.len; i++) { const b = e.start + i; if (b >= 0 && b < bars) tl[b] = [e.slot, Math.floor((e.off || 0) / 16) + i]; } });
+    return tl;
+  });
+}
+function palWrite(P, TL, bars) {
+  P.tracks.forEach((tr, t) => {
+    const tl = TL[t]; if (!tl) return;
+    const out = []; let e = null;
+    for (let b = 0; b <= bars; b++) {
+      const x = b < bars ? tl[b] : null, cb = x && tr.clips[x[0]] ? tr.clips[x[0]].bars || 8 : 8;
+      if (e && x && x[0] === e.slot && x[1] === e.c + e.len && x[1] < cb) { e.len++; continue; }
+      if (e) { out.push({ start: e.start, slot: e.slot, len: e.len, off: (e.c % (tr.clips[e.slot] ? tr.clips[e.slot].bars || 8 : 8)) * 16 }); e = null; }
+      if (x && tr.clips[x[0]]) e = { start: b, slot: x[0], c: x[1], len: 1 };
+    }
+    tr.arr = out;
+  });
+}
+// plan: [[sec, first bar, bars]] of the layout; cur.secs: the form with its ptags (the same order)
+function palApplyTags(P, plan, cur, fam) {
+  const secs = cur.secs || []; if (!Array.isArray(plan) || plan.length !== secs.length) return;
+  const bars = plan.reduce((a, x) => a + x[2], 0), TL = palTimeline(P, bars), T = PAL_T, house = fam === 'afro' || fam === 'swe';
+  const fillsRow = house ? 15 : palRowOf('fills'), dropRow = house ? null : palRowOf('drop'), bd = palRowOf('bdown'), swRow = palRowOf('sw');
+  const has = (t, row) => row != null && row >= 0 && !!(P.tracks[t] && P.tracks[t].clips[row]);
+  const set = (t, b, v) => { if (TL[t] && b >= 0 && b < bars) TL[t][b] = v; };
+  const mute = (t, b) => set(t, b, null);
+  const muteAll = (b, keep = [T.FX]) => TL.forEach((tl, t) => { if (tl && !keep.includes(t)) mute(t, b); });
+  const dfill = (b, k) => { if (TL[T.DRUMS] && TL[T.DRUMS][b] !== undefined && has(T.DRUMS, fillsRow)) set(T.DRUMS, b, [fillsRow, house ? GEN_HDFILL[k] : GEN_DFILL[k]]); };
+  const route = (t, row, a, n) => { if (!has(t, row)) return false; for (let i = 0; i < n; i++) set(t, a + i, [row, i % (P.tracks[t].clips[row].bars || 8)]); return true; };
+  const applied = [];
+  plan.forEach(([, a, n], i) => {
+    const x = secs[i], tg = x.ptags || [], e = a + n;
+    tg.forEach(t => {
+      let ok = true;
+      if (t === 'silenceLastBar') muteAll(e - 1);
+      else if (t === 'vocalCut') { muteAll(e - 1); if (cur.made.vox != null) set(T.FX, e - 1, [cur.made.vox, 2]); else ok = !!TL[T.FX]; }
+      else if (t === 'fakeDrop') {
+        if (n < 8 || house || !has(T.DRUMS, dropRow)) ok = false;
+        else { muteAll(e - 2); muteAll(e - 1); [T.DRUMS, T.BASS, T.SUB].forEach(k => { if (has(k, dropRow)) set(k, e - 2, [dropRow, 0]); }); dfill(e - 1, 'rollB'); }
+      } else if (t === 'halftimeBuild') { if (n >= 8 && has(T.DRUMS, bd)) route(T.DRUMS, bd, e - 8, 6); else ok = false; }
+      else if (t === 'delayBass') { for (let b = a; b < a + 8 && b < e; b++) mute(T.BASS, b); }
+      else if (t === 'holdBack') { for (let b = a; b < a + Math.min(16, n >> 1); b++) mute(T.LEAD, b); }
+      else if (t === 'noSub8') { for (let b = a; b < a + 8 && b < e; b++) mute(T.SUB, b); }
+      else if (t === 'newBass') { const h = n >= 32 ? 16 : 8; if (cur.made.newBass != null) route(T.BASS, cur.made.newBass, a + h, Math.max(0, n - h - (n >= 32 ? 8 : 0))); else ok = false; }
+      else if (t === 'halftime8') {
+        if (n >= 24 && has(T.DRUMS, swRow)) { const at = a + 8; ['DRUMS', 'SUB', 'BASS'].forEach(k => route(T[k], swRow, at, 8)); if (!route(T.STAB, swRow, at, 8)) for (let b = at; b < at + 8; b++) mute(T.STAB, b); }
+        else ok = false;
+      } else if (t === 'doubleHats') { if (cur.made.doubleHats != null) route(T.DRUMS, cur.made.doubleHats, a + (n >= 32 ? 16 : 8), n >= 32 ? 8 : n - 8); else ok = false; }
+      else if (t === 'newElement') {
+        if (cur.made.loop != null) { const h = n >> 1; for (let b = a; b < a + h; b++) mute(T.BREAK, b); route(T.BREAK, cur.made.loop, a + h, n - h); }
+        else if (!house && has(T.PAD, bd) && !TL[T.PAD].slice(a, e).some(Boolean)) route(T.PAD, bd, a + (n >> 1), n >> 1);
+        else ok = false;
+      } else if (t === 'stopMid') { const b = a + 15; muteAll(b); dfill(b, 'stop'); }
+      else if (t === 'bassOut') {
+        if (cur.made.bassOut == null || n < 16) ok = false;
+        else { [a + 6, a + 7].forEach((b, k) => { TL.forEach((tl, q) => { if (tl && q !== T.BASS && q !== T.FX) mute(q, b); }); set(T.DRUMS, b, [cur.made.bassOut, k]); }); if (cur.made.fx != null) set(T.FX, a + 6, [cur.made.fx, 7]); }
+      } else if (t === 'turnaround') { if (cur.made.buildTricks != null) { muteAll(e - 1); set(T.DRUMS, e - 1, [cur.made.buildTricks, 7]); if (cur.made.fx != null) set(T.FX, e - 1, [cur.made.fx, 6]); } else ok = false; }
+      else if (t === 'clapBuild') { if (cur.made.buildTricks != null && n >= 8) route(T.DRUMS, cur.made.buildTricks, e - 8, 8); else ok = false; }
+      else ok = /@pf$/.test(t) || ['riserRoll', 'silenceLastBeat', 'filterBuild', 'dj', 'short'].includes(t);
+      if (ok) applied.push(t.replace('@pf', ''));
+      else x.ptags = x.ptags.filter(y => y !== t);
+    });
+    // the loop layer: the tops of every later drop (without the newElement entry: the whole drop)
+    if (cur.made.loop != null && palIsDrop(x.sec) && x.dropNo >= 2 && !tg.includes('newElement')) route(T.BREAK, cur.made.loop, a, n);
+    // the white-noise burst on the first downbeat of each drop (only there)
+    const firstDrop = palIsDrop(x.sec) && !(i > 0 && palIsDrop(secs[i - 1].sec));
+    if (cur.made.fx != null && firstDrop && !house) { const q = TL[T.FX] && TL[T.FX][a]; if (!(q && q[0] === cur.made.fx && (q[1] === 1 || q[1] === 3))) set(T.FX, a, [cur.made.fx, 5]); applied.push('noiseBurst'); }
+    // the vocal moments: the pre-echo stutter in the last bar of a build, the tag on the drop's first bar
+    if (cur.made.vox != null && palIsBuild(x.sec) && plan[i + 1] && palIsDrop(secs[i + 1].sec) && !tg.includes('vocalCut') && !tg.includes('turnaround')) {
+      if (cur.voxMode === 'all' || (secs[i + 1].dropNo || 0) >= 2) { set(T.FX, e - 1, [cur.made.vox, 0]); set(T.FX, e, [cur.made.vox, 1]); applied.push('voxStutter'); }
+    }
+    if (cur.made.vox != null && x.sec === 'breakdown' && cur.vox === 'user' && i > 0 && palIsDrop(secs[i - 1].sec)) { set(T.FX, a, [cur.made.vox, 4]); applied.push('voxPhrase'); }
+  });
+  if (cur.made.loop != null) applied.push('loopLayer');
+  palWrite(P, TL, bars);
+  cur.applied = applied;
+}
+if (typeof genSongLayout === 'function') {
+  const palLayout0 = genSongLayout;
+  genSongLayout = function (P, st) { // eslint-disable-line no-func-assign
+    const plan = palLayout0(P, st), cur = PAL.cur;
+    if (cur && st && cur.id === st.id && (cur.fam === 'dnb' || cur.fam === 'pf')) { try { palApplyTags(P, plan, cur, cur.fam); } catch (e) { console.error('[dnb808] palette tags', e); } cur.plan = plan; }
+    return plan;
+  };
+}
+if (typeof genHouseLayout === 'function') {
+  const palHouseLayout0 = genHouseLayout;
+  genHouseLayout = function (P, st, snd) { // eslint-disable-line no-func-assign
+    const plan = palHouseLayout0(P, st, snd), cur = PAL.cur;
+    if (cur && st && cur.id === st.id && (cur.fam === 'afro' || cur.fam === 'swe')) { try { palApplyTags(P, plan, cur, cur.fam); } catch (e) { console.error('[dnb808] palette tags', e); } cur.plan = plan; }
+    return plan;
+  };
+}
+
+// ---------- the sounds and clips wrappers ----------
+if (typeof genStyleSounds === 'function') {
+  const palSounds0 = genStyleSounds;
+  genStyleSounds = function (P, st, rng) { // eslint-disable-line no-func-assign
+    palSounds0(P, st, rng);
+    const cur = PAL.cur; if (!cur || !st || cur.id !== st.id) return;
+    try {
+      if (cur.s === 'bank') {
+        const prof = palProfile(st);
+        if (PAL_OLD.includes(st.id)) { cur.kits = palDrawKits(P, st, cur, prof); palModernMix(P, st, prof); }
+        cur.draw = palDrawSounds(P, st, cur);
+      }
+      cur.vox = palVoxPads(P, cur, st);
+    } catch (e) { console.error('[dnb808] palette sounds', e); }
+  };
+}
+if (typeof genHouseSounds === 'function') {
+  const palHouseSounds0 = genHouseSounds;
+  genHouseSounds = function (P, st, rng) { // eslint-disable-line no-func-assign
+    const snd = palHouseSounds0(P, st, rng), cur = PAL.cur;
+    if (!cur || !st || cur.id !== st.id || cur.s !== 'bank') return snd;
+    try { // the melodic lanes of a house song only: the bass and its sub logic, the kits and the vox chops stay the style's
+      const keep = { BASS: P.tracks[PAL_T.BASS].synth, SUB: P.tracks[PAL_T.SUB].synth };
+      cur.draw = palDrawSounds(P, st, cur);
+      ['BASS', 'SUB'].forEach(ln => { P.tracks[PAL_T[ln]].synth = keep[ln]; cur.draw.picks[ln] = keep[ln] && keep[ln].preset; });
+      ['STAB', 'PAD', 'LEAD'].forEach(ln => { if (snd && snd.chosen && cur.draw.picks[ln]) snd.chosen[ln] = cur.draw.picks[ln]; });
+      cur.vox = palVoxPads(P, cur, st); // the house chop lanes: the user's chant and shout on the HEY and AAH chop pads
+    } catch (e) { console.error('[dnb808] palette sounds', e); }
+    return snd;
+  };
+}
+if (typeof genSongClips === 'function') {
+  const palClips0 = genSongClips;
+  genSongClips = function (P, st, rng) { // eslint-disable-line no-func-assign
+    const r = palClips0(P, st, rng), cur = PAL.cur;
+    if (cur && st && cur.id === st.id) {
+      try {
+        palClips(P, st, cur);
+        const prof = cur.s === 'bank' && PAL_OLD.includes(st.id) ? palProfile(st) : null, hats = prof && prof.mix && prof.mix.hats;
+        if (hats) { const sw = Math.round(palCl((hats - 50) / 50 * 1.5, 0, .5) * 1000) / 1000; [0, 1].forEach(t => P.tracks[t].clips.forEach(c => { if (c && c.groove && !/FILLS/.test(c.name)) c.groove.swing = Math.max(+c.groove.swing || 0, sw); })); }
+      } catch (e) { console.error('[dnb808] palette clips', e); }
+    }
+    return r;
+  };
+}
+
+// ---------- automation: the filter builds, and the modern build moves of the ten first styles ----------
+function palAuto(p, cur) {
+  if (typeof autoArrSet !== 'function' || typeof autoImpl !== 'function' || typeof autoDefault !== 'function' || !Array.isArray(cur.plan)) return;
+  const L = n => p.tracks[PAL_T[n]], hz = x => Math.log(x / 20) / Math.log(1000), secs = cur.secs || [];
+  const lane = (tr, id, pts) => { if (!tr || !autoImpl(tr, id) || (Array.isArray(tr.autoArr) && tr.autoArr.some(l => l && l.target === id))) return; pts.sort((a, b) => a[0] - b[0]); autoArrSet(tr, id, pts); };
+  const builds = cur.plan.map((x, i) => [x, secs[i]]).filter(([x, s]) => s && palIsBuild(s.sec));
+  const filt = builds.filter(([, s]) => (s.ptags || []).includes('filterBuild')), modern = cur.s === 'bank' && PAL_OLD.includes(cur.id);
+  const D = L('DRUMS'), S = L('STAB'), B = L('BASS'), LD = L('LEAD');
+  if (filt.length && D && D.fx && D.fx.ftype === 'highpass') { const d = autoDefault(D, 'tfreq'), pts = [[0, d, 2]]; filt.forEach(([[, a, n]]) => { const e = (a + n) * 16; pts.push([a * 16, d, 0], [e - 1, Math.max(d, hz(600)), 0], [e, d, 2]); }); lane(D, 'tfreq', pts); }
+  if (filt.length && S && S.type === 'synth' && autoImpl(S, 'cut')) { const d = autoDefault(S, 'cut'), pts = [[0, d, 2]]; filt.forEach(([[, a, n]]) => { const e = (a + n) * 16; pts.push([a * 16, palCl(d - .35, .05, 1), 0], [e - 1, palCl(d + .05, .05, 1), 0], [e, d, 2]); }); lane(S, 'cut', pts); }
+  // the transitions (research: the friend's project, RULES 5 and 7): echo throws on the lead and the vocal FX only in the last bars of
+  // a build and over a bass-out, dry in the drop; the drum reverb send per section (wet intro, a little in the builds, dry drops)
+  if (cur.v !== 'subtle') {
+    const bo = cur.plan.map((x, i) => [x, secs[i]]).filter(([, s2]) => s2 && (s2.ptags || []).includes('bassOut')).map(([[, a]]) => [a + 6, 2]);
+    const spots = builds.map(([[, a, n]]) => [a + n - Math.min(n, 7), Math.min(n, 7)]).concat(bo);
+    [LD, L('FX')].forEach(tr => { if (!tr || !spots.length) return; const d = autoDefault(tr, 'sendB'), hi = palCl(Math.max(d * 2.5, .45), 0, 1), pts = [[0, d, 2]]; spots.forEach(([b0, len]) => { pts.push([b0 * 16, d, 0], [(b0 + len) * 16 - 1, hi, 0], [(b0 + len) * 16, d, 2]); }); lane(tr, 'sendB', pts); });
+    if (D && autoImpl(D, 'sendA')) {
+      const d = autoDefault(D, 'sendA'), W = { intro: .45, verse: Math.min(d, .05), build: .28, build2: .28, breakdown: .32, bridge: .3, outro: .3 };
+      const pts = []; cur.plan.forEach(([sec, a], i) => { const k = secs[i] ? secs[i].sec : sec; pts.push([a * 16, palIsDrop(k) ? d : palCl(palHas(W, k) ? Math.max(d, W[k]) : d, 0, 1), 2]); });
+      lane(D, 'sendA', pts);
+    }
+    if (B && B.type === 'synth' && bo.length && autoImpl(B, 'cut')) { const d = autoDefault(B, 'cut'), pts = [[0, d, 2]]; bo.forEach(([b0]) => pts.push([b0 * 16, d, 0], [(b0 + 2) * 16 - 1, palCl(d + .25, 0, 1), 0], [(b0 + 2) * 16, d, 2])); lane(B, 'cut', pts); }
+  }
+  if (modern && builds.length) {
+    if (B && B.type === 'synth' && B.fx && B.fx.ftype === 'highpass') { const d = autoDefault(B, 'tfreq'), pts = [[0, d, 2]]; builds.forEach(([[, a, n]]) => { const e = (a + n) * 16; pts.push([e - 64, d, 0], [e - 1, Math.max(d, hz(300)), 0], [e, d, 2]); }); lane(B, 'tfreq', pts); }
+    if (LD) { const d = autoDefault(LD, 'sendA'), pts = [[0, d, 2]]; builds.forEach(([[, a, n]]) => { const e = (a + n) * 16; pts.push([e - 16, d, 0], [e - 1, palCl(d * 2.5, 0, 1), 0], [e, d, 2]); }); lane(LD, 'sendA', pts); }
+  }
+}
+
+// ---------- GENERATE SONG ----------
+const palReqOf = o => {
+  const v = o && PAL_VARS.includes(o.variation) ? o.variation : null, s = o && PAL_SNDS.includes(o.sounds) ? o.sounds : null;
+  if (v || s) return { v: v || 'normal', s: s || 'bank' };
+  return PAL.req ? { v: PAL.req.v, s: PAL.req.s } : null;
+};
+if (typeof genSong === 'function') {
+  const palGenSong0 = genSong;
+  genSong = function (id, o = {}) { // eslint-disable-line no-func-assign
+    o = o && typeof o === 'object' ? o : {};
+    const req = palReqOf(o);
+    if (!req || !palHas(GEN_STYLES, id) || PAL.cur) { // the old path (and a library song made inside a palette song)
+      const saved = PAL.cur, sreq = PAL.req; PAL.cur = null; PAL.req = null;
+      try { return palGenSong0(id, o); } finally { PAL.cur = saved; PAL.req = sreq; }
+    }
+    const seed = o.seed != null ? o.seed >>> 0 : genSeed(), st0 = GEN_STYLES[id], st = Object.assign({ id }, st0), fam = palFamily(st);
+    let ih = 2166136261; for (let k = 0; k < id.length; k++) ih = Math.imul(ih ^ id.charCodeAt(k), 16777619) >>> 0;
+    const cur = { id, fam, seed, v: req.v, s: req.s, rngA: genRng((seed ^ 0x1b873593 ^ ih) >>> 0), secs: null, plan: null, made: {}, trick: null, tpl: 'own' };
+    const rr = genRng((seed ^ 0x0c2ba7e1) >>> 0);
+    cur.loopWant = req.s === 'bank' && fam !== 'afro' && fam !== 'swe' && rr() < (req.v === 'wild' ? .6 : req.v === 'normal' ? .35 : 0);
+    const fxVox = rr();
+    const hadArr = palHas(st0, 'arr'), oldArr = st0.arr;
+    if (fam === 'dnb') cur.secs = palFormDnb(st, cur);
+    else if (fam !== 'pf') cur.secs = palFormHouse(st, cur, fam);
+    const userVox = req.s === 'bank' && PAL.voxReady && Array.isArray(PAL.vox) && PAL.vox.some(f => SMP.bufs.has(f.id));
+    cur.voxMode = req.v === 'subtle' || fam === 'afro' || fam === 'swe' ? '' : fxVox < (userVox ? 1 : req.v === 'wild' ? .8 : .55) ? (fxVox < (userVox ? .5 : .25) ? 'all' : 'late') : '';
+    const out = {}; let p;
+    const prevReq = PAL.req; PAL.req = null; PAL.cur = cur;
+    try {
+      if (cur.secs && fam !== 'pf') st0.arr = cur.secs.map(x => [x.sec, x.bars]);
+      p = palGenSong0(id, Object.assign({}, o, { seed, out }));
+      if (o.out && typeof o.out === 'object') o.out.plan = out.plan;
+      if (p) {
+        try { palAuto(p, cur); } catch (e) { console.error('[dnb808] palette automation', e); }
+        const secs = (cur.secs || []).map((x, i) => [x.sec.slice(0, 12), (cur.plan && cur.plan[i] ? cur.plan[i][2] : x.bars) | 0, (x.ptags || []).map(t => t.replace('@pf', '')).filter(t => /^[A-Za-z0-9]{1,16}$/.test(t)).slice(0, 6)]);
+        p.gen.pal = { v: req.v, s: req.s, seed, tpl: cur.tpl, secs: secs.slice(0, 32), picks: cur.draw ? Object.assign({}, cur.draw.picks) : {}, cost: cur.draw ? cur.draw.cost : 0, budget: cur.draw ? cur.draw.budget : 0,
+          kits: cur.kits ? Object.assign({}, cur.kits) : {}, loop: cur.loopId || '', vox: cur.vox || '', moments: (cur.applied || []).filter(t => /^vox|vocal/.test(t)).length };
+        PAL.last = { id, cur };
+      }
+    } finally {
+      PAL.cur = null; PAL.req = prevReq;
+      if (fam !== 'pf') { if (hadArr) st0.arr = oldArr; else delete st0.arr; }
+    }
+    return p;
+  };
+}
+// the dialog's choice goes to GENERATE SONG (the dialog, the browser's Styles list)
+if (typeof genSongGo === 'function') {
+  const palGo0 = genSongGo;
+  genSongGo = function (id, groove) { // eslint-disable-line no-func-assign
+    const prev = PAL.req; PAL.req = { v: PAL.pref.v, s: PAL.pref.s };
+    try { return palGo0(id, groove); } finally { PAL.req = prev; palVoxGc(); }
+  };
+}
+// warped vocal copies that no live set references (the set, undo/redo, the autosave) leave memory and storage
+function palVoxGc() {
+  try {
+    let ls = ''; try { ls = localStorage.getItem(LS_KEY) || ''; } catch (e) { /* private mode */ }
+    const refs = [JSON.stringify(P), ls].concat(HIST.undo, HIST.redo).join('\n');
+    Array.from(SMP.bufs.keys()).filter(id => /^user:[0-9a-f]{8}fa11ed[0-9a-f]{2}$/.test(id) && !refs.includes(id)).forEach(id => {
+      SMP.bufs.delete(id); SMP.meta.delete(id); SMP.state.delete(id); SMP.jobs.delete(id); smpDbDo('readwrite', st => st.delete(id));
+    });
+  } catch (e) { /* no storage */ }
+}
+if (typeof genSongOpen === 'function') {
+  const palOpen0 = genSongOpen;
+  genSongOpen = function (...a) { // eslint-disable-line no-func-assign
+    const r = palOpen0.apply(this, a);
+    palVoxFetch();
+    try {
+      const ov = $('#gensong-dialog'), anchor = ov && (ov.querySelector('.gs-feel') || ov.querySelector('.gs-auto') || ov.querySelector('.gs-groove'));
+      if (anchor && !ov.querySelector('#gs-var')) {
+        const mk = (id, cls, label, info, opts, val, key, prefKey) => {
+          const lb = document.createElement('label'); lb.className = 'gs-groove ' + cls; lb.dataset.info = info;
+          lb.innerHTML = `${label} <select id="${id}">${opts.map(([k, n]) => `<option value="${k}"${k === val ? ' selected' : ''}>${n}</option>`).join('')}</select>`;
+          lb.querySelector('select').addEventListener('change', e => { const v = e.target.value; if ((prefKey === 'v' ? PAL_VARS : PAL_SNDS).includes(v)) { PAL.pref[prefKey] = v; try { localStorage.setItem(key, v); } catch (er) { /* private */ } } });
+          return lb;
+        };
+        const lv = mk('gs-var', 'gs-var', 'Variation', 'VARIATION of the form: Subtle = the style\'s own arrangement; Normal = the seed picks one of several forms and moves the intro, the drops (2 or 3), the breakdown, the build type (riser, filter, silence, vocal cut, fake drop, halftime), the drop entry and the switch-ups; Wild = more of it',
+          PAL_VARS.map(k => [k, PAL_VAR_NAME[k]]), PAL.pref.v, 'dnb808.palVar', 'v');
+        const ls = mk('gs-snd', 'gs-snd', 'Sounds', 'SOUNDS: Whole bank = a coherent set drawn from every preset, kit and loop of the app (one sub, one mid-bass family, a CPU budget; your vocal packs on the vocal moments); Style only = the style\'s own presets and kits',
+          PAL_SNDS.map(k => [k, PAL_SND_NAME[k]]), PAL.pref.s, 'dnb808.palSnd', 's');
+        anchor.after(lv); lv.after(ls);
+      }
+    } catch (e) { /* the dialog changed */ }
+    return r;
+  };
+}
+// a saved set keeps P.gen.pal (plain data, bounded); a set without it loads as before
+if (typeof normalizeProject === 'function') {
+  const palNorm0 = normalizeProject;
+  normalizeProject = function (P) { // eslint-disable-line no-func-assign
+    let raw; try { raw = P && typeof P === 'object' && P.gen && typeof P.gen === 'object' ? P.gen.pal : undefined; } catch (e) { raw = undefined; }
+    const out = palNorm0(P);
+    try {
+      const g = out && out.gen, q = raw;
+      if (q !== undefined && g) {
+        if (!q || typeof q !== 'object' || Array.isArray(q) || !PAL_VARS.includes(q.v) || !PAL_SNDS.includes(q.s)) delete g.pal;
+        else {
+          const str = (x, n, re) => (typeof x === 'string' && x.length <= n && (!re || re.test(x)) ? x : '');
+          const picks = {}; if (q.picks && typeof q.picks === 'object' && !Array.isArray(q.picks)) PAL_LANES.forEach(k => { if (palHas(q.picks, k)) { const v = str(q.picks[k], 40, /^[^<>\u0000-\u001f]+$/); if (v) picks[k] = v; } });
+          const kits = {}; if (q.kits && typeof q.kits === 'object' && !Array.isArray(q.kits)) ['DRUMS', 'BREAK'].forEach(k => { if (palHas(q.kits, k)) { const v = str(q.kits[k], 24, /^[a-z0-9_]+$/); if (v) kits[k] = v; } });
+          g.pal = { v: q.v, s: q.s, seed: Number.isFinite(+q.seed) ? (+q.seed >>> 0) : 0, tpl: str(q.tpl, 16, /^[a-z0-9]+$/i) || 'own',
+            secs: Array.isArray(q.secs) ? q.secs.slice(0, 32).filter(x => Array.isArray(x) && x.length >= 2 && typeof x[0] === 'string' && Number.isInteger(x[1]) && x[1] > 0 && x[1] <= 128)
+              .map(x => [x[0].replace(/[^a-z0-9]/gi, '').slice(0, 12), x[1], Array.isArray(x[2]) ? x[2].filter(t => typeof t === 'string' && /^[A-Za-z0-9]{1,16}$/.test(t)).slice(0, 6) : []]) : [],
+            picks, cost: Number.isFinite(+q.cost) ? palCl(+q.cost, 0, 999) : 0, budget: Number.isFinite(+q.budget) ? palCl(+q.budget, 0, 999) : 0, kits, loop: typeof q.loop === 'string' && q.loop.length <= 64 && (q.loop === '' || (typeof LIB_ID_RE === 'object' && LIB_ID_RE.test(q.loop))) ? q.loop : '',
+            vox: ['user', 'synth', ''].includes(q.vox) ? q.vox : '', moments: Number.isInteger(q.moments) ? palCl(q.moments, 0, 64) : 0 };
+        }
+      }
+    } catch (e) { if (out && out.gen) delete out.gen.pal; }
+    return out;
+  };
+}
+palVoxFetch();
 
 // ===================== 9. MIDI IMPORT =====================
 // Reads a Standard MIDI File (format 0 or 1, PPQ timing) and turns it into a new set:
