@@ -831,6 +831,16 @@ harmony families, sounds and growl feel, loops in the loop library and a song te
   notes, the jump-up quarter-note bassline (pauses, early steps, 8th-note pickups, a varied second phrase) and 80s 8th-note
   basslines with off-beats shifted up. With SOUNDS: Whole bank the palette's bass sound is kept
 
+## My MIDI: your own MIDI packs
+
+- Loops > MY MIDI > LOAD PACK... imports a .zip, single .mid files or a whole folder of MIDI packs you own. The files
+  stay in this browser (IndexedDB) and are never uploaded or bundled with the app
+- Each file is indexed by key, chords, roman numerals and type (chords, progression, melody, other). Filter the list,
+  preview a file, then drag it onto a lane
+- GENERATE SONG has a HARMONY choice (App or My MIDI). My MIDI takes a progression from your library and moves it to the
+  song key; regenerating a single lane uses the app's harmony
+- Imports are capped per file (too big for a MIDI file is skipped) and a long import can be stopped with Cancel
+
 ## Shortcuts
 
 | Key | Action |

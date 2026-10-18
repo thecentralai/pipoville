@@ -24950,6 +24950,1015 @@ if (typeof genSongOpen === 'function') {
     return r;
   };
 }
+// ===================== 3z. MY MIDI: the user's own MIDI files (chord packs), their browser, the generator's harmony =====================
+// The user loads MIDI files he owns (a chord pack .zip, many .mid files, or a folder). Nothing is bundled and nothing is uploaded:
+// the files are read here in the browser and only a compact index of each one is kept in this browser's IndexedDB
+// (database dnb808.mymidi, like the vocal and sample packs). The feature is generic: it reads any MIDI file, and what it knows
+// about a file comes from the file itself (its notes) and from its own name and folders.
+// - IMPORT (mmImport): every .mid/.midi of a .zip (stored or deflate entries), of a file list or of a folder. Each file is read with
+//   the app's own parser (parseMidi, section 9), in chunks with a progress dialog; broken files are skipped and listed, the same
+//   bytes twice are one file (id = a hash of the bytes). Index per file: path, name, folder tags, kind (chord, progression,
+//   melody, other), key and mode (from the folders, else from the notes), the chord symbol and roman numerals of the file name
+//   when it has them ('<numeral> - <chord>', a ';' in the chord = a slash chord, '... (<numeral>-<numeral>-...)'), the notes (1/48 of a 16th),
+//   the chords (start, length, root, bass, pitches, symbol, numeral, quality tags), bars, chord count, voicing span.
+// - BROWSER: the MY MIDI tab of the loop library panel (section 3q): filters (kind, key, quality, numeral, bars, favourites,
+//   search), preview (a small piano voice, or the lane's own sound) at the set tempo in the set key, a tap or a drag puts the
+//   file into a clip of a lane (moved into the set key, the voicing kept; RE-VOICE folds it into the lane's register), one undo
+//   step. A clip keeps only its notes plus ref = { lib: 'mymidi', id } (sanitized; a set without the library just has notes).
+// - GENERATE SONG: "Harmony: app / my MIDI" (shown only when the library has progressions; localStorage dnb808.harmony). With
+//   my MIDI the song draws its chord progression and voicings from one of the user's progression files that fits the mode the
+//   song picked (minor or major) and the chord colours of the style (triads, 7ths, 9ths), moved into the song key; the keys,
+//   pads and stabs play its voicings, and the bass, sub and lead writers follow its chords. The pick depends only on the
+//   library (its order: by path) and the seed. genSong(id, { harmony: 'mymidi' | 'app', mmId }) is the API.
+// Hooks (guarded wrappers, no other section edited): normalizeProject (clip.ref), libTab, libRenderList, libClose, libSong,
+// renderBrowser, genSong, genSongGo, genSongOpen, genSongClips, genHouseClips, genProgChords, genTimeline, genVoice,
+// genRootless, genHouseTl, genHouseVoicing.
+const MM_DB = 'dnb808.mymidi', MM_STORE = 'files';
+const MM_ID_RE = /^mm:[0-9a-f]{16}$/;
+const MM_MAX_FILES = 12000, MM_MAX_BYTES = 2e6, MM_MAX_NOTES = 4096, MM_ZIP_MB = 512, MM_SHOW = 300;
+const MM_KINDS = { chord: 'Chords', progression: 'Progressions', melody: 'Melodies', other: 'Other' };
+const MM_QUALS = { triad: 'Triad', '7th': '7th', '9th': '9th and up', add9: 'add9', sus: 'sus', '6/9': '6/9', altered: 'Altered', slash: 'Slash', borrowed: 'Borrowed / modal' };
+const MM_SCALE_OK = ['minor', 'major', 'dorian', 'phrygian', 'harmonic', 'mixolydian', 'lydian', 'melodic', 'pentatonic', 'phrygdom', 'locrian'];
+const MM_MAJ = [0, 2, 4, 5, 7, 9, 11], MM_MIN = [0, 2, 3, 5, 7, 8, 10], MM_LET = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+const MM = { list: null, byId: new Map(), words: new Map(), loading: null, busy: false, rnList: null,
+  f: { q: '', kind: '', key: '', qual: '', rn: '', bars: '', fav: '' }, sel: null, pv: null,
+  opt: { toKey: true, revoice: false, lane: -1, sound: 'piano' }, pref: 'app', goReq: false, req: null, bind: null, last: null, lastImport: null };
+try { const v = localStorage.getItem('dnb808.harmony'); if (v === 'mymidi') MM.pref = 'mymidi'; } catch (e) { /* private mode */ }
+const mmHas = (o, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
+const mmKeyText = (k, m) => (k >= 0 && k < 12 ? NOTE_NAMES[k] + (m === 'minor' ? 'm' : '') : '');
+
+// ---------- storage: one record per file, keyed by its id. Every access may fail (private mode, blocked storage) ----------
+function mmDbOpen() {
+  return new Promise((res, rej) => {
+    const rq = indexedDB.open(MM_DB, 1);
+    rq.onupgradeneeded = () => { const db = rq.result; if (!db.objectStoreNames.contains(MM_STORE)) db.createObjectStore(MM_STORE); };
+    rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); rq.onblocked = () => rej(new Error('blocked'));
+  });
+}
+async function mmDbDo(mode, fn) { // -> the request's result (or true), false when storage failed
+  try {
+    if (typeof indexedDB === 'undefined') return false;
+    const db = await mmDbOpen();
+    return await new Promise((res, rej) => {
+      try {
+        const tx = db.transaction(MM_STORE, mode), rq = fn(tx.objectStore(MM_STORE));
+        tx.oncomplete = () => { db.close(); res(rq && typeof rq === 'object' && 'result' in rq ? rq.result : true); };
+        tx.onerror = tx.onabort = () => { db.close(); rej(tx.error); };
+      } catch (e) { db.close(); rej(e); }
+    });
+  } catch (e) { return false; }
+}
+const mmDbPutMany = recs => mmDbDo('readwrite', st => { recs.forEach(r => st.put(r, r.id)); });
+// A stored record, checked field by field (storage is data: a broken or edited record never reaches the UI unchecked)
+function mmRecFix(r) {
+  try {
+    if (!r || typeof r !== 'object' || typeof r.id !== 'string' || !MM_ID_RE.test(r.id)) return null;
+    const str = (v, n) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f]/g, '').slice(0, n) : '');
+    const int = (v, a, b, d) => (Number.isInteger(v) && v >= a && v <= b ? v : d);
+    const nt = Array.isArray(r.nt) && r.nt.length % 4 === 0 && r.nt.length <= 4 * MM_MAX_NOTES && r.nt.every(Number.isInteger) ? r.nt.slice() : null;
+    if (!nt || !nt.length) return null;
+    for (let i = 0; i < nt.length; i += 4) { nt[i] = clamp(nt[i], 0, 1e7); nt[i + 1] = clamp(nt[i + 1], 0, 127); nt[i + 2] = clamp(nt[i + 2], 1, 1e6); nt[i + 3] = clamp(nt[i + 3], 1, 127); }
+    const ch = (Array.isArray(r.ch) ? r.ch : []).slice(0, 512).filter(c => c && typeof c === 'object' && Number.isInteger(c.s) && Number.isInteger(c.l) && c.l > 0 && Array.isArray(c.ps) && c.ps.length && c.ps.every(p => Number.isInteger(p) && p >= 0 && p <= 127))
+      .map(c => ({ s: clamp(c.s, 0, 1e7), l: clamp(c.l, 1, 1e6), r: int(c.r, 0, 11, mod(c.ps[0], 12)), ps: c.ps.slice(0, 16), y: str(c.y, 40), n: str(c.n, 24), t: (Array.isArray(c.t) ? c.t : []).filter(x => mmHas(MM_QUALS, x)) }));
+    return { id: r.id, path: str(r.path, 400) || 'file.mid', name: str(r.name, 160) || 'MIDI', tags: (Array.isArray(r.tags) ? r.tags : []).map(x => str(x, 80)).filter(Boolean).slice(0, 12),
+      kind: mmHas(MM_KINDS, r.kind) ? r.kind : 'other', key: int(r.key, -1, 11, -1), mode: r.mode === 'major' || r.mode === 'minor' ? r.mode : '', ksrc: str(r.ksrc, 12),
+      sym: str(r.sym, 40), rn: (Array.isArray(r.rn) ? r.rn : []).map(x => str(x, 24)).filter(Boolean).slice(0, 64), q: (Array.isArray(r.q) ? r.q : []).filter(x => mmHas(MM_QUALS, x)),
+      bars: int(r.bars, 1, 4096, 1), n: int(r.n, 0, 100000, ch.length), span: int(r.span, 0, 127, 0), lo: int(r.lo, 0, 127, 0), hi: int(r.hi, 0, 127, 127), nt, ch, fav: r.fav ? 1 : 0, at: Number.isFinite(r.at) ? r.at : 0 };
+  } catch (e) { return null; }
+}
+function mmSetList(list) {
+  list.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  MM.list = list; MM.byId = new Map(list.map(r => [r.id, r])); MM.words = new Map(); MM.rnList = null;
+}
+function mmLoad(force) {
+  if (MM.loading && !force) return MM.loading;
+  MM.loading = (async () => {
+    const all = await mmDbDo('readonly', st => st.getAll());
+    mmSetList((Array.isArray(all) ? all : []).map(mmRecFix).filter(Boolean));
+    try { mmRender(); } catch (e) { /* the UI is not up */ }
+    return MM.list;
+  })();
+  return MM.loading;
+}
+const mmProgs = () => (MM.list || []).filter(r => r.kind === 'progression' && r.key >= 0 && r.mode && r.ch.length >= 2);
+const mmProgCount = () => mmProgs().length;
+
+// ---------- names: chord symbols, roman numerals, keys in folder names ----------
+// One chord quality after its root ('maj7', 'm11sus4', 'maj6Add9#11', '7(b5b9)', ' Maj', ' min', 'dim7', 'm7b5'...): the intervals
+// above the root, and the flags the quality tags come from. minor0: the default third (a lower-case roman numeral).
+function mmQual(rest, minor0) {
+  const s = String(rest || '').replace(/♯/g, '#').replace(/♭/g, 'b').replace(/[()[\],]/g, ' '), lo = s.toLowerCase();
+  const f = { minor: !!minor0, dim: false, aug: false, sus: 0, sev: 0, ext: 0, six: false, adds: [], alts: [], alt: false, power: false, ok: true };
+  let maj = false;
+  for (let i = 0; i < s.length;) {
+    const r = lo.slice(i); let m;
+    if (/^[\s\-_]/.test(r)) { i++; continue; }
+    if ((m = /^(maj|ma(?=\d))/.exec(r)) || (s[i] === 'M' && /^\d/.test(r.slice(1)))) { maj = true; i += m ? m[0].length : 1; continue; }
+    if ((m = /^(min|mi(?=\d))/.exec(r))) { f.minor = true; i += m[0].length; continue; }
+    if (r.startsWith('dim') || r[0] === '°' || (r[0] === 'o' && /^\d/.test(r.slice(1)))) { f.dim = true; f.minor = true; i += r.startsWith('dim') ? 3 : 1; continue; }
+    if (r[0] === 'ø') { f.minor = true; f.alts.push(['b', 5]); if (!f.sev) f.sev = 10; f.ext = Math.max(f.ext, 7); i++; continue; }
+    if (r.startsWith('aug') || r[0] === '+') { f.aug = true; i += r[0] === '+' ? 1 : 3; continue; }
+    if (r.startsWith('alt')) { f.alt = true; i += 3; continue; }
+    if ((m = /^sus\s*([24])?/.exec(r))) { f.sus = m[1] === '2' ? 2 : 4; i += m[0].length; continue; }
+    if ((m = /^add\s*([#b]?)\s*(\d{1,2})/.exec(r))) { f.adds.push([m[1], +m[2]]); i += m[0].length; continue; }
+    if ((m = /^([#b])\s*(\d{1,2})/.exec(r))) { f.alts.push([m[1], +m[2]]); i += m[0].length; continue; }
+    if ((m = /^\d{1,2}/.exec(r))) {
+      const n = +m[0]; i += m[0].length;
+      if (n === 6) f.six = true;
+      else if (n === 69) { f.six = true; f.adds.push(['', 9]); }
+      else if (n === 5 && !f.sev && !f.six) f.power = true;
+      else if (n === 9 && f.six && !f.sev) f.adds.push(['', 9]); // 6(9), 6/9
+      else if (n === 7 || n === 9 || n === 11 || n === 13) { if (!f.sev) f.sev = maj ? 11 : f.dim ? 9 : 10; else if (maj) f.sev = 11; f.ext = Math.max(f.ext, n); }
+      else if (n === 2 || n === 4) f.adds.push(['', n === 2 ? 9 : 11]);
+      else f.ok = false;
+      maj = false; continue;
+    }
+    if (r[0] === 'm') { f.minor = true; i++; continue; }
+    if (r[0] === '/') { i++; continue; }
+    f.ok = false; i++;
+  }
+  if (f.alt && !f.sev) { f.sev = 10; f.ext = Math.max(f.ext, 7); }
+  const iv = new Set([0]), alt = (a, n) => f.alts.some(x => x[0] === a && x[1] === n);
+  if (!f.power) iv.add(f.sus === 2 ? 2 : f.sus === 4 ? 5 : f.minor ? 3 : 4);
+  iv.add(f.dim || alt('b', 5) ? 6 : f.aug || alt('#', 5) ? 8 : 7);
+  if (f.sev) iv.add(f.sev);
+  if (f.six) iv.add(9);
+  if (f.ext >= 9 && !alt('b', 9) && !alt('#', 9)) iv.add(2);
+  if (f.ext >= 11) iv.add(alt('#', 11) ? 6 : 5);
+  if (f.ext >= 13) iv.add(alt('b', 13) ? 8 : 9);
+  const T = { 9: 2, 2: 2, 11: 5, 4: 5, 13: 9, 6: 9 };
+  f.adds.forEach(([a, n]) => { const b = T[n]; if (b != null) iv.add(mod(b + (a === '#' ? 1 : a === 'b' ? -1 : 0), 12)); });
+  f.alts.forEach(([a, n]) => { if (n === 5) return; const b = T[n]; if (b != null) iv.add(mod(b + (a === '#' ? 1 : -1), 12)); });
+  if (f.alt) [1, 3, 8].forEach(x => iv.add(x));
+  return { iv: [...iv].sort((a, b) => a - b), f };
+}
+// The quality tags of a chord from its flags (a named chord) or from its intervals (a chord read from the notes)
+function mmTagsFlags(f, slash) {
+  const t = [], ext = f.ext >= 9, nine = f.adds.some(x => x[1] === 9 || x[1] === 2);
+  if (!f.sev && !f.six && !ext && !f.adds.length && !f.alts.length && !f.alt && !f.power && !f.sus) t.push('triad');
+  if (f.sev && !ext) t.push('7th');
+  if (ext) t.push('9th');
+  if (nine && !f.six) t.push('add9');
+  if (f.sus) t.push('sus');
+  if (f.six && (nine || ext)) t.push('6/9');
+  if (f.alts.length || f.alt || f.aug) t.push('altered');
+  if (slash) t.push('slash');
+  return t;
+}
+function mmTagsIv(iv, slash) {
+  const h = x => iv.includes(x), third = h(3) || h(4), sev = h(10) || h(11) || (h(3) && h(6) && h(9) && !h(7)), t = [];
+  const ext = sev && (h(2) || h(1) || (h(5) && third) || (h(9) && !(h(3) && h(6) && !h(7))));
+  if (iv.length <= 3 && third && !sev && !h(2) && !h(5) && !h(9)) t.push('triad');
+  if (sev && !ext) t.push('7th');
+  if (ext) t.push('9th');
+  if (!sev && h(2) && third && !h(9)) t.push('add9');
+  if (!third && (h(2) || h(5))) t.push('sus');
+  if (!sev && h(9) && h(2)) t.push('6/9');
+  if (h(1) || (h(3) && h(4)) || (h(6) && h(7)) || (h(8) && h(4))) t.push('altered');
+  if (slash) t.push('slash');
+  return t;
+}
+// 'Ebmaj7', 'F#m11', 'D;F#' (= D/F#), 'Ab7(b9)', 'E min' -> { root, bass, iv, f } or null
+function mmParseSym(sym) {
+  const m = /^\s*([A-G])\s?([#b♯♭]?)(.*)$/.exec(String(sym || ''));
+  if (!m) return null;
+  let rest = m[3], bass = null;
+  const sl = /\s*[;/\\]\s*([A-G])\s?([#b♯♭]?)\s*$/.exec(rest);
+  if (sl) { bass = mod(MM_LET[sl[1]] + (/[#♯]/.test(sl[2]) ? 1 : /[b♭]/.test(sl[2]) ? -1 : 0), 12); rest = rest.slice(0, sl.index); }
+  const root = mod(MM_LET[m[1]] + (/[#♯]/.test(m[2]) ? 1 : /[b♭]/.test(m[2]) ? -1 : 0), 12), q = mmQual(rest, false);
+  if (!q.f.ok) return null;
+  return { root, bass: bass == null ? root : bass, iv: q.iv, f: q.f };
+}
+// a roman numeral with its quality: 'bVIadd9', 'iim11', '#IV', 'V6(9)' -> { acc, deg, minor, rest, base } or null
+const MM_RN_RE = /^([#b♯♭]?)(VII|VI|V|IV|III|II|I|vii|vi|v|iv|iii|ii|i)(?![A-Za-z]*[IVX])/;
+function mmParseRn(tok) {
+  const t = String(tok || '').trim(), m = MM_RN_RE.exec(t);
+  if (!m) return null;
+  const up = m[2].toUpperCase(), deg = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'].indexOf(up), rest = t.slice(m[0].length);
+  const q = mmQual(rest, m[2] !== up);
+  if (!q.f.ok) return null;
+  return { acc: /[#♯]/.test(m[1]) ? 1 : /[b♭]/.test(m[1]) ? -1 : 0, deg, minor: m[2] !== up, rest, base: (m[1] || '').replace('♯', '#').replace('♭', 'b') + m[2], q };
+}
+const mmRnRoot = (r, key, mode) => mod(key + (mode === 'minor' ? MM_MIN : MM_MAJ)[r.deg] + r.acc, 12);
+// The numeral of root pc in key (counted from the key's own scale; # / b when it is outside), upper case for a major 3rd
+function mmRnOf(pc, key, mode, minor) {
+  const sc = mode === 'minor' ? MM_MIN : MM_MAJ, iv = mod(pc - key, 12), N = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
+  let d = sc.indexOf(iv), acc = '';
+  if (d < 0) { d = sc.indexOf(mod(iv + 1, 12)); acc = 'b'; if (d < 0) { d = sc.indexOf(mod(iv - 1, 12)); acc = '#'; } }
+  if (d < 0) return '';
+  return acc + (minor ? N[d].toLowerCase() : N[d]);
+}
+// The parts of a file name: 'II - Dmaj13#11' -> chord { rn, sym }; '... (I-vi-IV-V)' or 'I-vi-IV-V' -> numerals
+function mmParseName(base) {
+  const name = String(base).replace(/\s+v\d+$/i, '').trim(), out = { sym: '', rnTok: '', toks: null, mode: '' };
+  const c = /^\s*([#b♯♭]?(?:VII|VI|IV|V|III|II|I|vii|vi|iv|v|iii|ii|i)\S*)\s+-\s+(.+?)\s*$/.exec(name);
+  if (c && mmParseRn(c[1]) && mmParseSym(c[2])) { out.rnTok = c[1]; out.sym = c[2].trim(); }
+  else if (/^[A-G][#b♯♭]?(?:$|[\s;/]|m|maj|min|dim|aug|sus|add|\d|M)/.test(name) && name.length <= 18 && mmParseSym(name)) out.sym = name;
+  const a = name.indexOf('('), b = name.lastIndexOf(')');
+  const inner = a >= 0 && b > a ? name.slice(a + 1, b) : !out.sym && /-/.test(name) ? name : '';
+  if (inner) { const toks = inner.split(/\s*-\s*/).map(x => x.trim()).filter(Boolean); if (toks.length >= 2 && toks.length <= 64 && toks.every(x => mmParseRn(x))) out.toks = toks; }
+  return out;
+}
+// Key mentions in one folder (or file) name: 'E Major - C# Minor', 'Ab Major', 'B Minor', 'Am', 'F# min'
+function mmKeyMentions(seg) {
+  const out = [], s = ' ' + String(seg).replace(/[_.]+/g, ' ') + ' ';
+  const re = /(?:^|[^A-Za-z0-9#])([A-G])\s?(#|b|♯|♭|sharp|flat)?\s*([Mm]ajor|[Mm]inor|MAJOR|MINOR|[Mm]aj|[Mm]in|m|M)(?![A-Za-z0-9#])/g, reLo = /(?:^|[^A-Za-z0-9#])([a-g])\s?(#|b|sharp|flat)?\s+(major|minor)(?![A-Za-z0-9])/g;
+  let m;
+  const add = mm => { const acc = /#|♯|sharp/.test(mm[2] || '') ? 1 : /b|♭|flat/.test(mm[2] || '') ? -1 : 0, w = mm[3]; out.push({ key: mod(MM_LET[mm[1].toUpperCase()] + acc, 12), mode: w === 'M' || /^maj/i.test(w) ? 'major' : 'minor' }); };
+  while ((m = re.exec(s))) add(m);
+  while ((m = reLo.exec(s))) add(m);
+  return out;
+}
+const mmModeHint = seg => { const s = String(seg).replace(/(?:^|[^A-Za-z])[A-Ga-g]\s?(?:#|b)?\s*(?:major|minor|maj|min)(?![A-Za-z])/gi, ' '); return /\bmajor\b/i.test(s) ? 'major' : /\bminor\b/i.test(s) ? 'minor' : ''; };
+// The key of a file from its folders (deepest first), with the mode hints of the deeper folders and of the file name
+function mmPathKey(path, base, kind) {
+  const segs = String(path).split('/').slice(0, -1);
+  let hint = mmModeHint(base.replace(/\(.*$/, '')), cands = null;
+  for (let k = segs.length - 1; k >= 0; k--) {
+    const ms = mmKeyMentions(segs[k]);
+    if (ms.length) { cands = ms; break; }
+    if (!hint) hint = mmModeHint(segs[k]);
+  }
+  if (!cands && kind !== 'chord') { const ms = mmKeyMentions(base.replace(/\(.*$/, '')); if (ms.length) cands = ms; }
+  if (!cands) return null;
+  const uniq = cands.filter((c, i) => cands.findIndex(x => x.key === c.key && x.mode === c.mode) === i);
+  if (uniq.length === 1) return uniq[0];
+  const h = hint ? uniq.filter(c => c.mode === hint) : [];
+  if (h.length === 1) return h[0];
+  return { cands: h.length ? h : uniq };
+}
+// Krumhansl-Schmuckler key profiles (duration weighted), the first and the last chord root count a little more
+const MM_KS = { major: [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88], minor: [6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17] };
+function mmKeyScore(w, key, mode, roots) {
+  const pr = MM_KS[mode], mx = w.reduce((a, x) => a + x, 0) / 12, mp = pr.reduce((a, x) => a + x, 0) / 12;
+  let num = 0, da = 0, db = 0;
+  for (let i = 0; i < 12; i++) { const a = w[mod(i + key, 12)] - mx, b = pr[i] - mp; num += a * b; da += a * a; db += b * b; }
+  let r = da > 0 ? num / Math.sqrt(da * db) : 0;
+  if (roots.length) { if (roots[0] === key) r += .15; if (roots[roots.length - 1] === key) r += .1; }
+  return r;
+}
+function mmContentKey(nt, roots, cands) {
+  const w = new Float64Array(12); for (let i = 0; i < nt.length; i += 4) w[nt[i + 1] % 12] += nt[i + 2];
+  const list = cands || [].concat(...Array.from({ length: 12 }, (_, k) => [{ key: k, mode: 'major' }, { key: k, mode: 'minor' }]));
+  let best = null, bs = -Infinity;
+  list.forEach(c => { const x = mmKeyScore(w, c.key, c.mode, roots); if (x > bs) { bs = x; best = c; } });
+  return best ? { key: best.key, mode: best.mode } : null;
+}
+
+// ---------- the notes: chords, kind, chord names ----------
+const MM_TPL = [['', [0, 4, 7]], ['m', [0, 3, 7]], ['dim', [0, 3, 6]], ['aug', [0, 4, 8]], ['sus2', [0, 2, 7]], ['sus4', [0, 5, 7]], ['5', [0, 7]], ['6', [0, 4, 7, 9]], ['m6', [0, 3, 7, 9]],
+  ['7', [0, 4, 7, 10]], ['maj7', [0, 4, 7, 11]], ['m7', [0, 3, 7, 10]], ['mMaj7', [0, 3, 7, 11]], ['m7b5', [0, 3, 6, 10]], ['dim7', [0, 3, 6, 9]], ['7sus4', [0, 5, 7, 10]], ['add9', [0, 2, 4, 7]],
+  ['madd9', [0, 2, 3, 7]], ['9', [0, 2, 4, 7, 10]], ['maj9', [0, 2, 4, 7, 11]], ['m9', [0, 2, 3, 7, 10]], ['6/9', [0, 2, 4, 7, 9]], ['m6/9', [0, 2, 3, 7, 9]], ['11', [0, 2, 5, 7, 10]],
+  ['m11', [0, 2, 3, 5, 7, 10]], ['m7add11', [0, 3, 5, 7, 10]], ['maj7#11', [0, 4, 6, 7, 11]], ['13', [0, 2, 4, 7, 9, 10]], ['maj13', [0, 2, 4, 7, 9, 11]]];
+// The chord a set of pitch classes names: { root, sym } (the bass note is preferred as the root)
+function mmDetect(pcs, bassPc) {
+  let best = null, bs = -Infinity;
+  for (let r = 0; r < 12; r++) {
+    const rel = pcs.map(pc => mod(pc - r, 12));
+    MM_TPL.forEach(([suf, tp]) => {
+      const hit = tp.filter(x => rel.includes(x)).length, miss = tp.filter(x => !rel.includes(x)), extra = rel.filter(x => !tp.includes(x)).length;
+      const sc = hit - miss.reduce((a, x) => a + (x === 7 ? .3 : x === 0 ? 1.5 : 1), 0) - 1.2 * extra + (bassPc === r ? .8 : 0) - .05 * tp.length;
+      if (sc > bs) { bs = sc; best = { root: r, suf, tp }; }
+    });
+  }
+  return best ? { root: best.root, sym: NOTE_NAMES[best.root] + best.suf + (bassPc !== best.root ? '/' + NOTE_NAMES[bassPc] : '') } : { root: bassPc, sym: NOTE_NAMES[bassPc] };
+}
+// A parsed MIDI file (parseMidi) and its path -> the index record (without id)
+function mmAnalyze(m, path) {
+  const file = String(path).split('/').pop(), base = file.replace(/\.(mid|midi|smf)$/i, ''), segs = String(path).split('/').slice(0, -1);
+  const pitched = m.parts.filter(pt => !pt.drum), src = pitched.length ? pitched : m.parts, k = 192 / m.ppq; // 48ths of a 16th per tick
+  let nt = [];
+  src.forEach(pt => pt.notes.forEach(n => nt.push([Math.round(n.tick * k), n.pitch, Math.max(1, Math.round(n.dur * k)), clamp(n.vel | 0, 1, 127)])));
+  nt.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  nt = nt.filter((n, i) => !i || n[0] !== nt[i - 1][0] || n[1] !== nt[i - 1][1]);
+  if (!nt.length) throw new Error('no notes');
+  if (nt.length > MM_MAX_NOTES) nt = nt.slice(0, MM_MAX_NOTES);
+  const first = Math.floor(nt[0][0] / 768) * 768; nt.forEach(n => { n[0] -= first; });
+  const end = nt.reduce((a, n) => Math.max(a, n[0] + n[2]), 1), bars = Math.max(1, Math.ceil(end / 768 - 1e-6));
+  // onsets: the notes that start within 1/8 of a 16th of each other
+  const groups = [];
+  nt.forEach(n => { const g = groups[groups.length - 1]; if (g && n[0] - g.s <= 6) { g.ps.push(n[1]); g.e = Math.max(g.e, n[0] + n[2]); } else groups.push({ s: n[0], ps: [n[1]], e: n[0] + n[2] }); });
+  groups.forEach(g => { g.ps = [...new Set(g.ps)].sort((a, b) => a - b); g.pcs = [...new Set(g.ps.map(p => p % 12))]; });
+  const chordG = groups.filter(g => g.pcs.length >= 2).slice(0, 512), name = mmParseName(base), drumOnly = !pitched.length;
+  const progPath = segs.concat(base).some(x => /prog/i.test(x)), setName = /\b(all|set|collection)\b/i.test(base);
+  let kind = 'other';
+  if (!drumOnly && chordG.length && chordG.length / groups.length >= .6) kind = chordG.length === 1 || name.sym ? 'chord' : progPath || name.toks ? 'progression' : setName ? 'chord' : 'progression';
+  else if (!drumOnly && groups.filter(g => g.ps.length === 1).length / groups.length >= .7) kind = 'melody';
+  // the key: the folders, else (or to choose between relative keys) the notes
+  let pk = drumOnly ? null : mmPathKey(path, base, kind), key = -1, mode = '', ksrc = '';
+  const sym0 = name.sym ? mmParseSym(name.sym) : null;
+  const rootsOf = () => chordG.map(g => (sym0 ? sym0.root : mmDetect(g.pcs, g.ps[0] % 12).root));
+  const flat = [].concat(...nt);
+  if (pk && pk.key != null) { key = pk.key; mode = pk.mode; ksrc = 'folder'; }
+  else if (!drumOnly) {
+    if (kind === 'chord' && sym0 && !pk) { key = sym0.root; mode = sym0.iv.includes(3) && !sym0.iv.includes(4) ? 'minor' : 'major'; ksrc = 'chord'; }
+    else { const c = mmContentKey(flat, rootsOf(), pk && pk.cands); if (c) { key = c.key; mode = c.mode; ksrc = pk ? 'folder' : 'content'; } }
+  }
+  // the chords: start, length (to the next chord), root, bass, pitches, symbol, numeral, tags
+  const toks = name.toks && key >= 0 && name.toks.length === chordG.length ? name.toks.map(mmParseRn) : null;
+  const scl = key >= 0 ? (mode === 'minor' ? MM_MIN : MM_MAJ).map(x => mod(x + key, 12)) : null;
+  const ch = chordG.map((g, i) => {
+    const nx = chordG[i + 1], l = Math.max(1, (nx ? nx.s : Math.max(g.e, g.s + 1)) - g.s), bassPc = g.ps[0] % 12;
+    let root, y, n = '', t;
+    if (sym0) { root = sym0.root; y = name.sym; t = mmTagsFlags(sym0.f, sym0.bass !== sym0.root); n = name.rnTok; }
+    else if (toks && toks[i] && g.pcs.includes(mmRnRoot(toks[i], key, mode))) {
+      const r = toks[i]; root = mmRnRoot(r, key, mode);
+      const minor = r.minor && !/^(m(?!aj)|min|dim|°|ø)/i.test(r.rest);
+      y = NOTE_NAMES[root] + (minor ? 'm' : '') + r.rest + (bassPc !== root ? '/' + NOTE_NAMES[bassPc] : ''); n = name.toks[i];
+      t = mmTagsFlags(r.q.f, bassPc !== root);
+    } else {
+      const d = mmDetect(g.pcs, bassPc); root = d.root; y = d.sym;
+      t = mmTagsIv(g.pcs.map(pc => mod(pc - root, 12)).sort((a, b) => a - b), bassPc !== root);
+      if (key >= 0) { const iv = g.pcs.map(pc => mod(pc - root, 12)); n = mmRnOf(root, key, mode, iv.includes(3) && !iv.includes(4)); }
+    }
+    if (scl && g.pcs.some(pc => !scl.includes(pc))) t = t.concat('borrowed');
+    return { s: g.s, l, r: root, ps: g.ps.slice(0, 16), y: String(y).slice(0, 40), n: String(n).slice(0, 24), t: [...new Set(t)] };
+  });
+  const q = new Set(); ch.forEach(c => c.t.forEach(x => q.add(x)));
+  if (segs.concat(base).some(x => /borrow|modal/i.test(x)) && kind === 'chord') q.add('borrowed');
+  const lo = nt.reduce((a, n) => Math.min(a, n[1]), 127), hi = nt.reduce((a, n) => Math.max(a, n[1]), 0);
+  const span = chordG.length ? chordG.reduce((a, g) => Math.max(a, g.ps[g.ps.length - 1] - g.ps[0]), 0) : hi - lo;
+  const rn = name.toks ? name.toks.slice(0, 64) : name.rnTok ? [name.rnTok] : ch.map(c => c.n).filter(Boolean).slice(0, 64);
+  return { path: String(path).slice(0, 400), name: base.slice(0, 160), tags: segs.map(x => x.trim()).filter(Boolean).slice(-6), kind, key, mode, ksrc, sym: sym0 ? name.sym : '', rn,
+    q: Object.keys(MM_QUALS).filter(x => q.has(x)), bars, n: ch.length, span, lo, hi, nt: flat, ch, fav: 0, at: Date.now() };
+}
+// the id of a file: two 32-bit hashes of its bytes (the same file twice is one file)
+function mmHash(u8) {
+  let a = 2166136261 >>> 0, b = 0x9747b28c >>> 0;
+  for (let i = 0; i < u8.length; i++) { a = Math.imul(a ^ u8[i], 16777619) >>> 0; b = Math.imul(b ^ u8[i], 0x5bd1e995) >>> 0; b = (b ^ (b >>> 13)) >>> 0; }
+  b = Math.imul(b ^ u8.length, 0x5bd1e995) >>> 0;
+  return 'mm:' + a.toString(16).padStart(8, '0') + b.toString(16).padStart(8, '0');
+}
+
+// ---------- import: a .zip, a file list, a folder ----------
+// The .mid entries of a zip: { path, get() -> ArrayBuffer } (stored and deflate entries; encrypted and zip64 ones are skipped)
+function mmUnzipList(ab) {
+  const u = new Uint8Array(ab), dv = new DataView(ab), td = new TextDecoder(), out = [], skipped = [];
+  let e = -1;
+  for (let k = u.length - 22; k >= Math.max(0, u.length - 65557); k--) if (dv.getUint32(k, true) === 0x06054b50) { e = k; break; }
+  if (e < 0) throw new Error('not a zip file');
+  const n = dv.getUint16(e + 10, true); let p = dv.getUint32(e + 16, true);
+  for (let j = 0; j < n && p + 46 <= u.length && out.length < MM_MAX_FILES; j++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const flags = dv.getUint16(p + 8, true), method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true), usize = dv.getUint32(p + 24, true);
+    const nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true), lo = dv.getUint32(p + 42, true);
+    const path = td.decode(u.subarray(p + 46, Math.min(u.length, p + 46 + nl))).replace(/\\/g, '/'); p += 46 + nl + xl + cl;
+    const name = path.split('/').pop();
+    if (!name || /(^|\/)__MACOSX\//.test(path) || name.startsWith('._') || !/\.(mid|midi|smf)$/i.test(name)) continue;
+    if (flags & 1) { skipped.push({ path, why: 'encrypted' }); continue; }
+    if (csize === 0xffffffff || usize > MM_MAX_BYTES || csize > MM_MAX_BYTES || lo + 30 > u.length || dv.getUint32(lo, true) !== 0x04034b50) { skipped.push({ path, why: usize > MM_MAX_BYTES ? 'too big for a MIDI file' : 'unreadable zip entry' }); continue; }
+    const d0 = lo + 30 + dv.getUint16(lo + 26, true) + dv.getUint16(lo + 28, true);
+    if (d0 + csize > u.length || (method !== 0 && method !== 8)) { skipped.push({ path, why: 'unreadable zip entry' }); continue; }
+    const comp = u.subarray(d0, d0 + csize);
+    out.push({ path, get: () => (method === 0 ? Promise.resolve(comp.slice().buffer) : mmInflate(comp, MM_MAX_BYTES)) });
+  }
+  return { list: out, skipped };
+}
+// a deflate entry, inflated as a stream and stopped past cap bytes (the declared size of an entry is not trusted: zip bombs)
+async function mmInflate(comp, cap) {
+  const rd = new Blob([comp]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader(), parts = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await rd.read(); if (done) break;
+    n += value.length; if (n > cap) { try { rd.cancel(); } catch (e) { /* gone */ } throw new Error('too big for a MIDI file'); }
+    parts.push(value);
+  }
+  const out = new Uint8Array(n); let o = 0; parts.forEach(x => { out.set(x, o); o += x.length; }); return out.buffer;
+}
+// files: File objects (.zip, .mid, a folder's files). -> the report { files, added, dup, failed: [{ path, why }], ms, kinds }
+async function mmImport(files, onProgress) {
+  if (MM.busy) throw new Error('an import is running');
+  MM.busy = true; MM.cancel = false;
+  const t0 = performance.now(), rep = { files: 0, added: 0, dup: 0, failed: [], ms: 0, kinds: { chord: 0, progression: 0, melody: 0, other: 0 }, stored: true };
+  try {
+    await mmLoad();
+    const items = [];
+    for (const f of Array.from(files || [])) {
+      if (!f || typeof f.name !== 'string') continue;
+      const rel = (f.webkitRelativePath || f.name).replace(/\\/g, '/');
+      if (/\.zip$/i.test(f.name)) {
+        if (f.size > MM_ZIP_MB * 1e6) { rep.failed.push({ path: rel, why: 'the zip is too big' }); continue; }
+        try { const z = mmUnzipList(await f.arrayBuffer()); z.list.forEach(x => items.push({ path: x.path, get: x.get })); rep.failed.push(...z.skipped); }
+        catch (err) { rep.failed.push({ path: rel, why: (err && err.message) || 'not a zip file' }); }
+      } else if (/\.(mid|midi|smf)$/i.test(f.name)) {
+        if (f.size > MM_MAX_BYTES) { rep.failed.push({ path: rel, why: 'too big for a MIDI file' }); continue; }
+        items.push({ path: rel, get: () => f.arrayBuffer() });
+      }
+      if (items.length >= MM_MAX_FILES) break;
+    }
+    rep.files = items.length + rep.failed.length;
+    const have = new Set(MM.byId.keys()), fresh = [];
+    let pend = [];
+    for (let i = 0; i < items.length; i++) {
+      if (MM.cancel) { rep.cancelled = true; if (pend.length && (await mmDbPutMany(pend)) === false) rep.stored = false; pend = []; break; } // CANCEL keeps what was read so far
+      const it = items[i];
+      try {
+        const buf = await it.get(), id = mmHash(new Uint8Array(buf));
+        if (have.has(id)) { rep.dup++; } else {
+          const rec = mmRecFix(Object.assign({ id }, mmAnalyze(parseMidi(buf), it.path)));
+          if (!rec) throw new Error('no notes');
+          have.add(id); fresh.push(rec); pend.push(rec); rep.added++; rep.kinds[rec.kind]++;
+        }
+      } catch (err) { rep.failed.push({ path: it.path, why: String((err && err.message) || err).slice(0, 120) }); }
+      if (pend.length >= 250 || i === items.length - 1) { if (pend.length && (await mmDbPutMany(pend)) === false) rep.stored = false; pend = []; }
+      if (i % 40 === 39 || i === items.length - 1) { if (onProgress) try { onProgress(i + 1, items.length, rep); } catch (e) { /* UI */ } await new Promise(r => setTimeout(r, 0)); }
+    }
+    mmSetList((MM.list || []).concat(fresh));
+  } finally { MM.busy = false; rep.ms = Math.round(performance.now() - t0); MM.lastImport = rep; }
+  try { mmRender(); } catch (e) { /* the UI is not up */ }
+  return rep;
+}
+// The import dialog: progress, then the report
+function mmImportUi(files) {
+  if (MM.busy) { flash('An import is running'); return; }
+  const arr = Array.from(files || []); if (!arr.length) return;
+  const old = $('#mm-imp'); if (old) old.remove();
+  const ov = el('div', 'overlay'); ov.id = 'mm-imp';
+  ov.innerHTML = `<div class="modal mm-imp"><h2>Load MIDI pack</h2><p class="mdesc">Reading your MIDI files here in the browser. They stay in this browser (IndexedDB); nothing is uploaded.</p>
+    <div class="mm-bar"><i></i></div><p class="mm-st">Opening...</p><div class="mm-rep"></div><div class="mbtns"><button class="btn" id="mm-imp-cancel">Cancel</button><button class="btn on" id="mm-imp-ok" disabled>Close</button></div></div>`;
+  document.body.append(ov);
+  const st = $('.mm-st', ov), bar = $('.mm-bar i', ov), ok = $('#mm-imp-ok', ov);
+  ok.onclick = () => ov.remove();
+  const cx = $('#mm-imp-cancel', ov); cx.onclick = () => { MM.cancel = true; cx.disabled = true; cx.textContent = 'Stopping...'; };
+  ov.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Escape' && !ok.disabled) ov.remove(); });
+  mmImport(arr, (i, n, rep) => { bar.style.width = Math.round(100 * i / Math.max(1, n)) + '%'; st.textContent = `${i} of ${n} files read, ${rep.added} new, ${rep.dup} already in the library, ${rep.failed.length} skipped`; })
+    .then(rep => {
+      bar.style.width = '100%';
+      const k = rep.kinds, tot = (MM.list || []).length;
+      st.textContent = `${rep.added} new file${rep.added === 1 ? '' : 's'} (${k.chord} chords, ${k.progression} progressions, ${k.melody} melodies, ${k.other} other), ${rep.dup} already in the library, ${rep.failed.length} skipped, in ${(rep.ms / 1000).toFixed(1)} s. The library has ${tot} file${tot === 1 ? '' : 's'}.` + (rep.stored ? '' : ' This browser did not keep them (private mode or blocked storage): they are gone after a reload.');
+      $('.mm-rep', ov).innerHTML = rep.failed.length ? `<b>Skipped</b><ul>${rep.failed.slice(0, 30).map(x => `<li>${esc(x.path.split('/').pop())}: ${esc(x.why)}</li>`).join('')}${rep.failed.length > 30 ? `<li>${rep.failed.length - 30} more</li>` : ''}</ul>` : '';
+      ok.disabled = false; cx.hidden = true; ok.focus(); if (rep.cancelled) st.textContent = 'Stopped: ' + st.textContent;
+      if (!$('#lib-panel') || $('#lib-panel').hidden) mmOpen(); else mmRender();
+    }, err => { st.textContent = 'Could not read the files: ' + ((err && err.message) || err); ok.disabled = false; cx.hidden = true; });
+}
+function mmPick(dir) {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.multiple = true;
+  if (dir) { inp.webkitdirectory = true; inp.setAttribute('webkitdirectory', ''); } else inp.accept = '.zip,.mid,.midi,application/zip,audio/midi,audio/x-midi';
+  inp.style.display = 'none'; document.body.append(inp);
+  inp.addEventListener('change', () => { const fs = Array.from(inp.files || []); inp.remove(); mmImportUi(fs); });
+  inp.click();
+}
+async function mmClear() {
+  await mmDbDo('readwrite', st => st.clear());
+  mmSetList([]); MM.sel = null; mmStop(); mmRender();
+}
+
+// ---------- a file as notes: decoded, moved into the set key, re-voiced ----------
+const mmNotes = rec => { const out = []; for (let i = 0; i < rec.nt.length; i += 4) out.push({ s: rec.nt[i] / 48, p: rec.nt[i + 1], l: rec.nt[i + 2] / 48, v: rec.nt[i + 3] }); return out; };
+// semitones that move rec into the key of set p (the same mode: the set's tonic; the other mode: its relative key), -6..+5
+function mmShift(rec, p) {
+  if (!rec || !(rec.key >= 0) || !p) return 0;
+  const setMinor = MINOR_LIKE.includes(p.scale), recMinor = rec.mode === 'minor', k = mod(Math.round(+p.key) || 0, 12);
+  const tgt = recMinor === setMinor ? k : recMinor ? k + 9 : k + 3;
+  return mod(tgt - rec.key + 6, 12) - 6;
+}
+const MM_REG = { sub: [28, 39], bass: [40, 51], pad: [52, 72], stab: [53, 72], lead: [64, 86] };
+// RE-VOICE: the whole file moved by octaves so its middle sits in the lane's register; a chord's low bass note (a 5th or more
+// under the rest) is left to the bass lanes; a note still outside folds in by an octave. BASS / SUB lanes keep each chord's bass note.
+function mmRevoice(notes, tr) {
+  const role = typeof genRole === 'function' ? genRole(tr) : 'stab', reg = MM_REG[role] || MM_REG.stab, low = role === 'bass' || role === 'sub';
+  const by = new Map(); notes.forEach(n => { const k = Math.round(n.s * 8); if (!by.has(k)) by.set(k, []); by.get(k).push(n); });
+  let keep = [];
+  by.forEach(g => {
+    g.sort((a, b) => a.p - b.p);
+    if (low) keep.push(g[0]);
+    else keep.push(...(g.length >= 4 && g[1].p - g[0].p >= 7 ? g.slice(1) : g));
+  });
+  if (!keep.length) return notes;
+  const mid = (reg[0] + reg[1]) / 2, avg = keep.reduce((a, n) => a + n.p, 0) / keep.length, sh = 12 * Math.round((mid - avg) / 12);
+  keep = keep.map(n => { let p = n.p + sh; while (p < reg[0] - 2) p += 12; while (p > reg[1] + 4) p -= 12; return Object.assign({}, n, { p: clamp(p, 0, 127) }); });
+  const seen = new Set(); return keep.filter(n => { const k = n.s + ':' + n.p; if (seen.has(k)) return false; seen.add(k); return true; }).sort((a, b) => a.s - b.s || a.p - b.p);
+}
+// -> { notes, bars, cut, shift } for track tr in set p
+function mmClipNotes(rec, tr, p, o = MM.opt) {
+  const sh = o.toKey ? mmShift(rec, p) : 0;
+  let notes = mmNotes(rec).map(n => Object.assign(n, { p: clamp(n.p + sh, 0, 127) }));
+  if (o.revoice && tr && tr.type === 'synth') notes = mmRevoice(notes, tr);
+  const end = notes.reduce((a, n) => Math.max(a, n.s + n.l), 1), need = Math.ceil(end / 16 - 1e-6), bars = [1, 2, 4, 8].find(b => b >= need) || 8;
+  notes = notes.filter(n => n.s < bars * 16).map(n => ({ s: q48(n.s), p: n.p, l: Math.max(1 / 48, q48(Math.min(n.l, bars * 16 - n.s))), v: n.v }));
+  return { notes, bars, cut: need > 8 ? need : 0, shift: sh };
+}
+// The lane a file goes to: the chosen lane, else the target / selected one when it is a synth lane, else STAB (chords) or LEAD
+function mmLaneFor(rec, t) {
+  const ok = i => P.tracks[i] && P.tracks[i].type === 'synth';
+  if (MM.opt.lane >= 0 && ok(MM.opt.lane)) return MM.opt.lane;
+  if (Number.isInteger(t) && ok(t)) return t;
+  const want = rec.kind === 'melody' ? ['LEAD', 'STAB', 'PAD'] : ['STAB', 'PAD', 'LEAD'];
+  for (const nm of want) { const i = P.tracks.findIndex(x => x.type === 'synth' && x.name === nm); if (i >= 0) return i; }
+  return P.tracks.findIndex(x => x.type === 'synth');
+}
+// Put rec into a clip: where { t, s } (a slot) or { t, bar } (the arrangement). One undo step (o.undo false: the caller made it).
+function mmPlace(rec, where = {}, o = {}) {
+  if (!rec) throw new Error('no such MIDI file');
+  const t = mmLaneFor(rec, where.t); if (t < 0) throw new Error('the set has no synth lane');
+  const tr = P.tracks[t], r = mmClipNotes(rec, tr, P);
+  if (!r.notes.length) throw new Error('no notes');
+  let s = Number.isInteger(where.s) && where.t === t ? where.s : null;
+  if (where.bar == null && s == null) s = clamp(UI.sel.t === t ? UI.sel.s : UI.sel.s, 0, tr.clips.length - 1);
+  if (where.bar != null) { // a lane of the arrangement: a scene row with no clips first, so a scene launch does not play it
+    s = tr.clips.findIndex((c, k) => !c && P.tracks.every(x => !x.clips[k]));
+    for (let k = tr.clips.length - 1; s < 0 && k >= 0; k--) if (!tr.clips[k]) s = k;
+    if (s < 0) throw new Error(`${tr.name} has no free slot: delete a clip of ${tr.name} in Session view first`);
+  }
+  if (o.undo !== false) pushUndo();
+  const old = tr.clips[s], clip = { name: rec.name.toUpperCase().slice(0, 24), bars: r.bars, notes: r.notes, ref: { lib: 'mymidi', id: rec.id } };
+  const gk = typeof midiGridOf === 'function' ? midiGridOf(clip.notes) : null; if (gk) clip.groove = { swing: 0, on: 16, humanize: { t: 0, v: 0 }, grid: gk };
+  let poly = false;
+  if (tr.synth && tr.synth.mono) { const st = new Set(); if (clip.notes.some(n => st.has(n.s) || !st.add(n.s))) { tr.synth.mono = false; poly = true; } }
+  tr.clips[s] = clip;
+  if (where.bar != null) {
+    const bar = clamp(where.bar | 0, 0, 511);
+    carve(tr, bar, bar + clip.bars); tr.arr.push({ start: bar, slot: s, len: clip.bars, off: 0 });
+    P.arr.len = Math.min(512, Math.max(P.arr.len, bar + clip.bars)); UI.arrSel = { t, k: tr.arr.length - 1 };
+  }
+  if (E) { if (poly) E.applyTrack(t); E.applyAll(); }
+  if (!o.quiet) {
+    renderSession(); renderArrIfVisible(); select(t, s, 'clip'); save();
+    const k = mmKeyText(rec.key, rec.mode), tk = mmKeyText(mod(rec.key + r.shift, 12), rec.mode);
+    flash(`${clip.name} on ${tr.name}, ${where.bar != null ? 'bar ' + (where.bar + 1) + ` (slot ${s + 1})` : sceneLabel(s)}: ${clip.notes.length} notes, ${clip.bars} bar${clip.bars > 1 ? 's' : ''}`
+      + (r.shift ? `, moved ${r.shift > 0 ? '+' : ''}${r.shift} st from ${k} to ${tk}` : k ? `, in ${k}` : '') + (MM.opt.revoice ? `, re-voiced for ${tr.name}` : '') + (poly ? `. ${tr.name} set to poly for the chords` : '')
+      + (r.cut ? `. The file has ${r.cut} bars: the clip keeps the first 8` : '') + (old ? `, replacing ${old.name}` : '') + '. CTRL+Z to undo');
+  }
+  return { t, s, clip, shift: r.shift };
+}
+
+// ---------- preview: a small piano voice (or the lane's sound), at the set tempo, in the set key ----------
+function mmPianoNote(p, v, t, dur) {
+  const c = ctx, f = mtof(p), g = c.createGain(), lp = c.createBiquadFilter(), o1 = c.createOscillator(), o2 = c.createOscillator(), g2 = c.createGain();
+  o1.type = 'triangle'; o1.frequency.value = f; o2.type = 'sine'; o2.frequency.value = f * 2; g2.gain.value = .22;
+  lp.type = 'lowpass'; lp.frequency.setValueAtTime(Math.min(14000, f * 9), t); lp.frequency.setTargetAtTime(Math.min(7000, f * 3), t, .25);
+  const pk = .09 * v / 127, end = t + Math.max(.05, dur);
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(pk, t + .005); g.gain.setTargetAtTime(pk * .3, t + .005, .5); g.gain.setTargetAtTime(0, end, .09);
+  o1.connect(lp); o2.connect(g2); g2.connect(lp); lp.connect(g); g.connect(E.m.bus);
+  const stopAt = end + .7; o1.start(t); o2.start(t); o1.stop(stopAt); o2.stop(stopAt);
+  const voice = { done: false, release(now) { if (voice.done) return; voice.done = true; try { g.gain.cancelScheduledValues(now); g.gain.setTargetAtTime(0, now, .015); o1.stop(now + .08); o2.stop(now + .08); } catch (e) { /* ended */ } } };
+  o1.onended = () => { voice.done = true; try { g.disconnect(); lp.disconnect(); g2.disconnect(); } catch (e) { /* gone */ } };
+  return voice;
+}
+function mmStop() {
+  const pv = MM.pv; MM.pv = null; if (!pv) return;
+  clearInterval(pv.iv);
+  const now = ctx ? ctx.currentTime : 0;
+  pv.voices.forEach(v => { try { if (v.release.length >= 3) v.release(now, .03, true); else v.release(now); } catch (e) { /* ended */ } });
+  mmUiPlaying();
+}
+function mmPreview(rec) {
+  const same = MM.pv && MM.pv.rec === rec; mmStop(); if (same || !rec) return;
+  if (typeof E === 'undefined' || !E || !ctx) { flash('Start the audio first'); return; }
+  if (ctx.state === 'suspended') ctx.resume();
+  const lane = MM.opt.sound === 'lane' ? mmLaneFor(rec, UI.sel.t) : -1, tr = lane >= 0 ? P.tracks[lane] : null;
+  const r = mmClipNotes(rec, tr, P), len = r.bars * 16;
+  const pv = MM.pv = { rec, voices: new Set(), iv: 0, next: 0, pass: 0 };
+  const bar = 240 / P.bpm, now = ctx.currentTime;
+  pv.next = TR.playing ? TR.grid + mod(16 - TR.tick, 16) * stepDur() : now + .06;
+  if (pv.next < now + .02) pv.next += bar;
+  const pump = () => {
+    if (MM.pv !== pv) return;
+    const sd = stepDur();
+    for (let guard = 0; pv.next < ctx.currentTime + .35 && guard < 4 && pv.pass < 64; guard++, pv.pass++) {
+      const T0 = pv.next;
+      r.notes.forEach(n => {
+        const t = T0 + n.s * sd, d = n.l * sd; if (t < ctx.currentTime) return;
+        const v = lane >= 0 && P.tracks[lane] && P.tracks[lane].type === 'synth' ? E.synthNote(lane, n.p, n.v, t) : mmPianoNote(n.p, n.v, t, d);
+        if (lane >= 0 && v.release) v.release(t + d);
+        pv.voices.add(v);
+      });
+      pv.next += len * sd;
+    }
+    pv.voices.forEach(v => { if (v.ended || v.done) pv.voices.delete(v); });
+  };
+  pump(); pv.iv = setInterval(pump, 80);
+  mmUiPlaying();
+}
+
+// ---------- the browser: the MY MIDI tab of the loop library ----------
+function mmWords(rec) {
+  let w = MM.words.get(rec.id);
+  if (!w) { w = [rec.name, rec.tags.join(' '), MM_KINDS[rec.kind], rec.kind, mmKeyText(rec.key, rec.mode), rec.mode, rec.sym, rec.rn.join(' '), rec.ch.slice(0, 32).map(c => c.y).join(' '), rec.q.join(' '), 'my midi mine'].join(' ').toLowerCase(); MM.words.set(rec.id, w); }
+  return w;
+}
+const mmRnBase = tok => { const r = mmParseRn(tok); return r ? r.base : ''; };
+function mmRnOptions() {
+  if (MM.rnList) return MM.rnList;
+  const set = new Set(); (MM.list || []).forEach(r => r.rn.forEach(x => { const b = mmRnBase(x); if (b) set.add(b); }));
+  const N = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'], ord = b => { const r = mmParseRn(b); return r ? r.deg * 10 + (r.acc + 1) * 2 + (r.minor ? 1 : 0) : 99; };
+  MM.rnList = [...set].sort((a, b) => ord(a) - ord(b) || (a < b ? -1 : 1)).slice(0, 80); void N;
+  return MM.rnList;
+}
+function mmFilter(list, f) {
+  const toks = String(f.q || '').toLowerCase().split(/\s+/).filter(Boolean);
+  const [fk, fm] = String(f.key || '').split(':');
+  return list.filter(r => (!f.kind || r.kind === f.kind) && (!f.key || (r.key === +fk && r.mode === fm)) && (!f.qual || r.q.includes(f.qual))
+    && (!f.rn || r.rn.some(x => mmRnBase(x) === f.rn)) && (!f.bars || (f.bars === '9' ? r.bars > 8 : r.bars === +f.bars)) && (!f.fav || r.fav)
+    && toks.every(t => mmWords(r).includes(t)));
+}
+const mmTagLine = rec => [MM_KINDS[rec.kind].replace(/s$/, ''), mmKeyText(rec.key, rec.mode) + (rec.ksrc === 'content' ? '?' : ''), rec.kind === 'chord' && rec.sym ? rec.sym + (rec.rn[0] ? ' (' + rec.rn[0] + ')' : '') : rec.rn.length ? rec.rn.slice(0, 6).join('-') + (rec.rn.length > 6 ? '...' : '') : '',
+  rec.bars + ' bar' + (rec.bars > 1 ? 's' : ''), rec.n > 1 ? rec.n + ' chords' : ''].filter(Boolean).join(' · ');
+function mmOpen() {
+  if (typeof libOpen !== 'function') return;
+  LIB.tab = 'mm'; libOpen(); mmLoad().then(() => mmRender());
+}
+function mmBox(pn) {
+  let box = $('.mm-box', pn);
+  if (box) return box;
+  box = el('div', 'mm-box');
+  const opt = (v, t) => `<option value="${esc(v)}">${esc(t)}</option>`;
+  const keys = [['', 'Any key']].concat(...NOTE_NAMES.map((n, k) => [[k + ':major', n + ' major'], [k + ':minor', n + ' minor']]));
+  box.innerHTML = `<div class="lib-filters mm-filters">
+    <input class="lib-q mm-q" type="search" placeholder="Search: maj9, vi, borrowed, Am..." aria-label="Search my MIDI" data-info="Search your MIDI files: words of the name and folders, chord names, numerals, the key">
+    <div class="lib-row"><select data-mf="kind" aria-label="Kind" data-info="Kind of file: single chords, progressions, melodies, other">${opt('', 'Any kind')}${Object.entries(MM_KINDS).map(([k, t]) => opt(k, t)).join('')}</select>
+      <select data-mf="key" aria-label="Key" data-info="The key of the file (from its folders, else from its notes; ? = read from the notes)">${keys.map(([v, t]) => opt(v, t)).join('')}</select>
+      <select data-mf="qual" aria-label="Chord quality" data-info="Chord quality: a file matches when one of its chords has it">${opt('', 'Any quality')}${Object.entries(MM_QUALS).map(([k, t]) => opt(k, t)).join('')}</select></div>
+    <div class="lib-row"><select data-mf="rn" aria-label="Numeral" data-info="Roman numeral (from the file name, else read from the chords)"></select>
+      <select data-mf="bars" aria-label="Bars" data-info="Length in bars">${[['', 'Any length'], ['1', '1 bar'], ['2', '2 bars'], ['4', '4 bars'], ['8', '8 bars'], ['9', 'Over 8 bars']].map(([v, t]) => opt(v, t)).join('')}</select>
+      <select data-mf="fav" aria-label="Favourites" data-info="All files or only your favourites">${opt('', 'All files')}${opt('1', 'Favourites')}</select></div>
+  </div>
+  <div class="lib-list mm-list" role="listbox" aria-label="My MIDI files"></div>
+  <div class="lib-foot mm-foot">
+    <div class="lib-tgt mm-tgt"></div>
+    <div class="mm-opts"><select data-mo="lane" aria-label="Lane" data-info="The lane the file goes to: the selected slot's lane (a drum or audio slot: STAB for chords, LEAD for melodies) or a fixed lane"></select>
+      <label data-info="Move the file into the key of the set (the same mode: its tonic; the other mode: its relative key). The voicing is kept"><input type="checkbox" data-mo="toKey"> To set key</label>
+      <label data-info="RE-VOICE: fold the file into the lane's register (pads and keys: the upper voices; BASS and SUB: each chord's bass note)"><input type="checkbox" data-mo="revoice"> Re-voice</label>
+      <select data-mo="sound" aria-label="Preview sound" data-info="Preview with a small piano, or with the lane's own sound">${opt('piano', 'Hear: piano')}${opt('lane', 'Hear: lane')}</select></div>
+    <div class="lib-acts mm-acts">
+      <button class="btn go" data-mm="slot" data-info="Put the selected file in the selected slot as a MIDI clip (one undo step)">TO SLOT</button>
+      <button class="btn" data-mm="arr" data-info="Put the selected file in the arrangement at the start marker, on its lane">TO ARRANGE</button>
+      <button class="btn" data-mm="load" data-info="Load MIDI pack: a .zip or .mid files. They are read here and stay in this browser (nothing is uploaded)">LOAD PACK...</button>
+      <button class="btn" data-mm="dir" data-info="Load a folder of MIDI files (and its sub-folders)">FOLDER...</button>
+    </div>
+  </div>`;
+  const foot = $('.lib-foot', pn); if (foot) foot.after(box); else pn.append(box);
+  box.addEventListener('input', e => {
+    const x = e.target;
+    if (x.classList.contains('mm-q')) { MM.f.q = x.value.slice(0, 80); mmRenderList(); return; }
+    if (x.dataset.mf) { MM.f[x.dataset.mf] = x.value; mmRenderList(); return; }
+    if (x.dataset.mo) {
+      const k = x.dataset.mo; if (k === 'lane') MM.opt.lane = +x.value; else if (k === 'sound') MM.opt.sound = x.value === 'lane' ? 'lane' : 'piano'; else MM.opt[k] = !!x.checked;
+      if (MM.pv) { const r = MM.pv.rec; mmStop(); mmPreview(r); }
+      mmTarget();
+    }
+  });
+  box.addEventListener('click', e => {
+    const b = e.target.closest('[data-mm]'), row = e.target.closest('.mm-it'), rec = row ? MM.byId.get(row.dataset.id) : MM.sel;
+    if (row && rec) { MM.sel = rec; $$('.mm-it.sel', box).forEach(r => { r.classList.remove('sel'); r.setAttribute('aria-selected', 'false'); }); row.classList.add('sel'); row.setAttribute('aria-selected', 'true'); mmTarget(); }
+    if (!b) return;
+    const a = b.dataset.mm;
+    if (a === 'load') mmPick(false);
+    else if (a === 'dir') mmPick(true);
+    else if (a === 'clear') { if (confirm(`Remove all ${(MM.list || []).length} files from My MIDI in this browser? Your sets keep their clips.`)) mmClear(); }
+    else if (a === 'play' && rec) mmPreview(rec);
+    else if (a === 'fav' && rec) { rec.fav = rec.fav ? 0 : 1; b.classList.toggle('on', !!rec.fav); b.innerHTML = rec.fav ? '&#9733;' : '&#9734;'; mmDbPutMany([rec]); if (MM.f.fav) mmRenderList(); }
+    else if ((a === 'add' || a === 'slot' || a === 'arr') && rec) {
+      try { mmPlace(rec, a === 'arr' ? { t: UI.sel.t, bar: TR.startBar | 0 } : { t: UI.sel.t, s: UI.sel.s }); } catch (err) { flash(`Could not place ${rec.name}: ${(err && err.message) || err}`); }
+      mmTarget();
+    }
+  });
+  // a .zip or .mid files dropped on the tab load into the library (anywhere else they keep their own meaning)
+  box.addEventListener('dragover', e => { if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) { e.preventDefault(); e.stopPropagation(); box.classList.add('drop'); } });
+  box.addEventListener('dragleave', () => box.classList.remove('drop'));
+  box.addEventListener('drop', e => { box.classList.remove('drop'); const fs = e.dataTransfer && e.dataTransfer.files; if (!fs || !fs.length) return; e.preventDefault(); e.stopPropagation(); mmImportUi(fs); });
+  mmInitDrag(box, pn);
+  return box;
+}
+function mmTabUi() {
+  const pn = $('#lib-panel'); if (!pn) return;
+  const tabs = $('.lib-tabs', pn);
+  if (tabs && !$('[data-l="tab-mm"]', tabs)) {
+    const b = el('button', 'btn', 'MY MIDI'); b.dataset.l = 'tab-mm'; b.dataset.info = 'MY MIDI: your own MIDI files (chord packs, progressions, melodies), kept in this browser. Filter, preview in the set key, drop on a lane';
+    b.addEventListener('click', e => { e.stopPropagation(); LIB.tab = 'mm'; libStop(); libTab(); libRenderList(); mmLoad().then(() => mmRender()); });
+    tabs.append(b);
+  }
+  const on = LIB.tab === 'mm';
+  pn.classList.toggle('mm', on);
+  if (on) { pn.classList.remove('tpl'); mmBox(pn); }
+  $$('.lib-tabs .btn', pn).forEach(b => { const me = b.dataset.l === 'tab-mm', act = on ? me : !me && ((b.dataset.l === 'tab-tpl') === (LIB.tab === 'tpl')); b.classList.toggle('on', act); b.setAttribute('aria-pressed', act); });
+}
+function mmRender() {
+  const pn = $('#lib-panel'); if (!pn || pn.hidden || LIB.tab !== 'mm') return;
+  const box = mmBox(pn), f = MM.f;
+  const rs = $('[data-mf="rn"]', box), rl = mmRnOptions();
+  rs.innerHTML = `<option value="">Any numeral</option>` + rl.map(x => `<option value="${esc(x)}"${x === f.rn ? ' selected' : ''}>${esc(x)}</option>`).join('');
+  ['kind', 'key', 'qual', 'bars', 'fav'].forEach(k => { const s = $(`[data-mf="${k}"]`, box); if (s) s.value = f[k]; });
+  const q = $('.mm-q', box); if (q && q.value !== f.q) q.value = f.q;
+  const ls = $('[data-mo="lane"]', box);
+  ls.innerHTML = `<option value="-1">Lane: selected</option>` + P.tracks.map((x, i) => (x.type === 'synth' ? `<option value="${i}">Lane: ${esc(x.name)}</option>` : '')).join('');
+  if (!(MM.opt.lane >= 0 && P.tracks[MM.opt.lane] && P.tracks[MM.opt.lane].type === 'synth')) MM.opt.lane = -1;
+  ls.value = String(MM.opt.lane);
+  $('[data-mo="toKey"]', box).checked = MM.opt.toKey; $('[data-mo="revoice"]', box).checked = MM.opt.revoice; $('[data-mo="sound"]', box).value = MM.opt.sound;
+  mmRenderList();
+}
+function mmRenderList() {
+  const pn = $('#lib-panel'); if (!pn || pn.hidden || LIB.tab !== 'mm') return;
+  const box = mmBox(pn), all = MM.list || [], list = mmFilter(all, MM.f), n = list.length, shown = list.slice(0, MM_SHOW), cur = MM.pv && MM.pv.rec;
+  const cnt = $('.lib-count', pn); if (cnt) cnt.textContent = !MM.list ? 'loading...' : n === all.length ? `${n} MIDI files` : `${n} of ${all.length}`;
+  $('.mm-list', box).innerHTML = !MM.list ? '<div class="lib-more">Reading the library...</div>' : !all.length
+    ? `<div class="lib-more mm-empty"><b>No MIDI files yet.</b> Load your MIDI pack: a .zip, .mid files or a folder (or drop them here). They are read in this browser and stay here (IndexedDB); nothing is uploaded and nothing goes into a set but the notes of the clips you make.<div class="mm-empty-b"><button class="btn go" data-mm="load">LOAD PACK...</button><button class="btn" data-mm="dir">FOLDER...</button></div></div>`
+    : shown.map(r => `<div class="lib-it mm-it${r === MM.sel ? ' sel' : ''}" role="option" aria-selected="${r === MM.sel}" data-id="${esc(r.id)}" data-info="${esc(r.path)}: ${esc(mmTagLine(r))}. Tap + for the selected slot, or drag it onto a slot or a lane">`
+      + `<button class="mm-pl${r === cur ? ' on' : ''}" data-mm="play" aria-label="Preview ${esc(r.name)}" data-info="Preview at the set tempo${MM.opt.toKey ? ', in the set key' : ''} (again: stop)">${r === cur ? '&#9632;' : '&#9654;'}</button>`
+      + `<span class="lib-nm"><b>${esc(r.name)}</b><small>${esc(mmTagLine(r))}</small></span>`
+      + `<button class="lib-fv${r.fav ? ' on' : ''}" data-mm="fav" aria-label="Favourite" data-info="Favourite (kept in this browser)">${r.fav ? '&#9733;' : '&#9734;'}</button>`
+      + `<button class="lib-add" data-mm="add" aria-label="Put ${esc(r.name)} in the selected slot" data-info="Put it in the selected slot">+</button>`
+      + `<span class="lib-grip mm-grip" aria-hidden="true" data-info="Drag onto a slot of Session view or a lane of the arrangement">&#8942;&#8942;</span></div>`).join('')
+      + (n > MM_SHOW ? `<div class="lib-more">${n - MM_SHOW} more: search or filter to see them</div>` : '') + (!n ? '<div class="lib-more">No file matches: clear a filter.</div>' : '')
+      + `<div class="lib-more mm-lib">${all.length} files in this browser. <button class="btn" data-mm="clear" data-info="Remove every file from My MIDI in this browser (the clips of your sets stay)">Clear library</button></div>`;
+  mmTarget();
+}
+function mmUiPlaying() {
+  const pn = $('#lib-panel'); if (!pn) return;
+  const cur = MM.pv && MM.pv.rec;
+  $$('.mm-it', pn).forEach(r => { const b = $('.mm-pl', r), on = !!cur && cur.id === r.dataset.id; if (b) { b.classList.toggle('on', on); b.innerHTML = on ? '&#9632;' : '&#9654;'; } });
+}
+function mmTarget() {
+  const pn = $('#lib-panel'); if (!pn || !P || LIB.tab !== 'mm') return;
+  const box = $('.mm-tgt', pn); if (!box) return;
+  const rec = MM.sel;
+  if (!rec) { box.innerHTML = 'Tap a file to select it, &#9654; to hear it, + to put it in the selected slot, or drag it onto a slot or a lane'; return; }
+  const t = mmLaneFor(rec, UI.sel.t), tr = P.tracks[t], sh = MM.opt.toKey ? mmShift(rec, P) : 0;
+  box.innerHTML = `<b>${esc(rec.name)}</b> &#8594; ${tr ? esc(tr.name) + ', ' + esc(sceneLabel(UI.sel.s)) : 'no synth lane'}${rec.key >= 0 ? ` · ${esc(mmKeyText(rec.key, rec.mode))}${sh ? ` to ${esc(mmKeyText(mod(rec.key + sh, 12), rec.mode))} (${sh > 0 ? '+' : ''}${sh} st)` : ''}` : ''}`;
+}
+// Drag a row by its grip (mouse or touch) onto a slot or an arrangement lane
+function mmInitDrag(box, pn) {
+  let d = null;
+  const target = (x, y) => { const elx = document.elementFromPoint(x, y); if (!elx || pn.contains(elx)) return null; const f = typeof midiDropTarget === 'function' ? midiDropTarget : audDropTarget; return f({ target: elx, clientX: x, clientY: y }); };
+  box.addEventListener('pointerdown', e => {
+    const g = e.target.closest('.mm-grip, .lib-nm'), row = e.target.closest('.mm-it'); if (!g || !row || e.button > 0) return;
+    const rec = MM.byId.get(row.dataset.id); if (!rec) return;
+    d = { rec, x0: e.clientX, y0: e.clientY, on: false, id: e.pointerId, grip: g.classList.contains('mm-grip') };
+    if (d.grip) { e.preventDefault(); try { g.setPointerCapture(e.pointerId); } catch (err) { /* old browser */ } }
+  });
+  window.addEventListener('pointermove', e => {
+    if (!d || e.pointerId !== d.id) return;
+    if (!d.on) {
+      if (Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 8 || (!d.grip && e.pointerType === 'touch')) return;
+      d.on = true; d.ghost = el('div', 'lib-ghost', esc(d.rec.name)); document.body.append(d.ghost); pn.classList.add('dragging');
+    }
+    e.preventDefault();
+    d.ghost.style.transform = `translate(${e.clientX + 10}px, ${e.clientY + 8}px)`;
+    d.tg = target(e.clientX, e.clientY);
+    if (typeof midiDropHilite === 'function') midiDropHilite(d.tg && d.tg.el);
+  }, { passive: false });
+  const end = e => {
+    if (!d || e.pointerId !== d.id) return;
+    const was = d; d = null;
+    if (!was.on) return;
+    was.ghost.remove(); pn.classList.remove('dragging'); if (typeof midiDropHilite === 'function') midiDropHilite(null);
+    const tg = e.type === 'pointerup' ? target(e.clientX, e.clientY) : null;
+    if (!tg) { if (e.type === 'pointerup') flash('Drop a MIDI file on a slot of Session view or on a lane of the arrangement'); return; }
+    const tr = P.tracks[tg.t];
+    if (!tr || tr.type !== 'synth') { flash(`${tr ? tr.name : 'That lane'} is not a synth lane: drop the MIDI file on a synth lane (STAB, PAD, LEAD, BASS...)`); return; }
+    const keep = MM.opt.lane; MM.opt.lane = -1; // a drop names its lane
+    try { mmPlace(was.rec, tg.bar != null ? { t: tg.t, bar: tg.bar } : { t: tg.t, s: tg.s }); } catch (err) { flash(`Could not place ${was.rec.name}: ${(err && err.message) || err}`); } finally { MM.opt.lane = keep; }
+  };
+  window.addEventListener('pointerup', end); window.addEventListener('pointercancel', end);
+}
+
+// ---------- GENERATE SONG: the harmony from my MIDI ----------
+// The progression for a song: the user's progression files in the song's mode (minor or major; the other mode when there is
+// none), scored by the style's chord colours, a length that loops in 8 bars and a usable chord count; one of the best,
+// drawn with the seed. Only the library and the seed decide.
+function mmPickProg(st, P, seed, forceId) {
+  const all = mmProgs(); if (!all.length) return null;
+  if (forceId) { const r = all.find(x => x.id === forceId); if (r) return r; }
+  const want = MINOR_LIKE.includes(P.scale) ? 'minor' : 'major', same = all.filter(r => r.mode === want), c = same.length ? same : all;
+  const pr = (typeof GEN_PROGS === 'object' && P.gen && GEN_PROGS[P.gen.prog]) || {}, pref = (st && st.harm && (st.harm.stab || st.harm.pad)) || pr.harm || 'seventh';
+  const heavy = st && (st.genre === 'neuro' || st.genre === 'jumpup');
+  const score = r => {
+    const n = r.ch.length, cnt = t => r.ch.filter(x => x.t.includes(t)).length, ext = cnt('9th') + cnt('add9') + cnt('6/9'), sev = cnt('7th'), tri = cnt('triad') + cnt('sus');
+    let s = /ninth|eleventh/.test(pref) ? 2 * (ext + .5 * sev) / n : pref === 'seventh' ? 2 * (sev + .6 * ext) / n : 2 * tri / n;
+    s += [2, 4, 8].includes(r.bars) ? 1 : r.bars < 8 ? 0 : -1.5;
+    s += n >= 3 && n <= 8 ? .5 : n > 10 ? -.5 : 0;
+    if (heavy) s -= .5 * cnt('altered') / n;
+    s -= .4 * cnt('borrowed') / n; // the style's own key first: a borrowed chord is a colour, not the rule
+    return Math.round(s * 1000) / 1000;
+  };
+  const ranked = c.map((r, i) => ({ r, i, s: score(r) })).sort((a, b) => b.s - a.s || a.i - b.i);
+  const top = ranked.slice(0, Math.max(6, Math.ceil(ranked.length * .2)));
+  return top[genRng((seed ^ 0x6d796d69) >>> 0).int(top.length)].r;
+}
+const mmK = (x, S) => (x === 0 ? 0 : x === 1 ? 8 : x === 2 ? (S.has(3) || S.has(4) ? 8 : 1) : x === 3 ? (S.has(4) ? 8 : 2) : x === 4 ? 2 : x === 5 ? (S.has(3) || S.has(4) ? 10 : 3)
+  : x === 6 ? (S.has(7) ? 10 : 4) : x === 7 ? 4 : x === 8 ? (S.has(7) ? 12 : 4) : x === 9 ? (S.has(10) || S.has(11) ? 12 : 5) : 6);
+const mmSymShift = (y, sh) => String(y || '').replace(/^([A-G])([#b]?)/, (m0, L, a) => NOTE_NAMES[mod(MM_LET[L] + (a === '#' ? 1 : a === 'b' ? -1 : 0) + sh, 12)])
+  .replace(/([;/])\s*([A-G])([#b]?)\s*$/, (m0, s0, L, a) => '/' + NOTE_NAMES[mod(MM_LET[L] + (a === '#' ? 1 : a === 'b' ? -1 : 0) + sh, 12)]);
+// One chord of the file as a chord of the generator (genChord's fields), moved by sh. bassRoot: the root is the bass note (the
+// bass writers' view of a slash chord). mmv: the file's voicing (its upper voices; a low bass note a 5th or more under them is the bass's)
+function mmChordObj(c, sh, P, bassRoot) {
+  const ps = c.ps.map(p => clamp(p + sh, 0, 127)).sort((a, b) => a - b), croot = mod(c.r + sh, 12), bass = mod(ps[0], 12), key = mod(Math.round(+P.key) || 0, 12);
+  let pcs0 = [...new Set(ps.map(p => mod(p, 12)))]; if (!pcs0.includes(croot)) pcs0 = [croot].concat(pcs0);
+  const S = new Set(pcs0.map(pc => mod(pc - croot, 12)));
+  const tones = pcs0.map(pc => ({ k: mmK(mod(pc - croot, 12), S), pc, name: NOTE_NAMES[pc] })).sort((a, b) => a.k - b.k), pcs = tones.map(x => x.pc);
+  const root = bassRoot ? bass : croot, has = i => pcs.includes(mod(root + i, 12));
+  const t3 = [4, 3, 2, 5].find(has) ?? 4, t5 = [7, 6, 8].find(has) ?? ([3, 4, 5, 9, 10].find(has) ?? 7);
+  const iv = [...S], minor = iv.includes(3) && !iv.includes(4), rn = mmRnOf(croot, key, MINOR_LIKE.includes(P.scale) ? 'minor' : 'major', minor);
+  const name = mmSymShift(c.y, sh) || NOTE_NAMES[croot] + (minor ? 'm' : '');
+  return { d: 0, harm: 'mm', kind: 'tert', t3, t5, root, rootName: NOTE_NAMES[root], croot, bass, tones, pcs, names: pcs.map(pc => NOTE_NAMES[pc]), name, rn: rn + (name.replace(/^[A-G][#b]?m?/, '') || ''), num: rn,
+    mm: true, mmv: ps.length >= 4 && ps[1] - ps[0] >= 7 ? ps.slice(1) : ps };
+}
+// rec's chords fitted to a loop of 32, 64 or 128 steps (16th steps; longer files: the first 8 bars), in the key of P
+function mmBindOf(rec, P, sh, st) {
+  let cs = rec.ch.map(c => ({ c, s: Math.round(c.s / 48), l: Math.round(c.l / 48) })).filter(x => x.s < 128);
+  cs = cs.filter((x, i) => x.l > 0 && (i === 0 || x.s > cs[i - 1].s));
+  if (!cs.length) return null;
+  let end = cs[cs.length - 1].s + cs[cs.length - 1].l;
+  const Lf = [16, 32, 64, 128].find(x => x >= Math.min(end, 128)) || 128;
+  cs.forEach((x, i) => { const nx = cs[i + 1]; x.l = (nx ? nx.s : Lf) - x.s; });
+  if (cs[0].s > 0) { cs[cs.length - 1].l += 0; cs.unshift({ c: cs[cs.length - 1].c, s: 0, l: cs[0].s }); } // a file that starts late: its last chord before it
+  end = Lf;
+  const mk = bassRoot => cs.map(x => Object.assign(mmChordObj(x.c, sh, P, bassRoot), { mmS: x.s, mmL: x.l }));
+  const chords = mk(true), chordsA = mk(false), key = mod(Math.round(+P.key) || 0, 12), scl = (SCALES[P.scale] || SCALES.minor).map(x => mod(x + key, 12));
+  const extra = [...new Set([].concat(...chords.map(c => c.pcs)).filter(pc => !scl.includes(pc)))];
+  return { rec, id: rec.id, sh, len: Lf, chords, chordsA, extra, key, scale: P.scale, prog: P.gen && P.gen.prog, style: st && st.id };
+}
+// The timeline of L steps: the fitted loop again and again
+function mmTl(list, len, L) {
+  const segs = [];
+  for (let off = 0; off < L; off += len) list.forEach(c => { const s = off + c.mmS; if (s < L) segs.push({ s, l: Math.min(c.mmL, L - s), ch: c }); });
+  const fits = Math.min(8, new Set(list.map(c => c.name)).size);
+  return { per: Math.max(1, Math.min(...segs.map(g => g.l))), segs, fits, cyc: list.slice(0, 8) };
+}
+// The song a request binds: the scale it picked decides the mode; P.scale becomes the file's mode (minor or major)
+function mmBindSong(P, st) {
+  const q = MM.req; if (!q || q.bound || !P || !P.gen) return;
+  q.bound = true;
+  if (!MM_SCALE_OK.includes(P.scale)) { q.skip = `the ${(GEN_SCALES[P.scale] || {}).name || P.scale} scale of this style has no minor or major progression`; return; }
+  const rec = mmPickProg(st, P, q.seed, q.mmId); if (!rec) { q.skip = 'no progression in My MIDI'; return; }
+  const want = MINOR_LIKE.includes(P.scale) ? 'minor' : 'major';
+  P.scale = rec.mode === want ? (want === 'minor' ? 'minor' : 'major') : rec.mode; // the file's own notes: natural minor or major
+  const sh = mod(mod(Math.round(+P.key) || 0, 12) - rec.key + 6, 12) - 6, b = mmBindOf(rec, P, sh, st);
+  if (!b) { q.skip = 'the progression has no chords'; return; }
+  MM.bind = b; q.used = { id: rec.id, name: rec.name, path: rec.path, sh, from: mmKeyText(rec.key, rec.mode), to: mmKeyText(b.key, rec.mode), chords: b.chords.map(c => c.name), len: b.len, tl: b.chords.map(c => [c.mmS, c.mmL, c.root, c.pcs.slice()]) };
+}
+const mmBound = P => { const b = MM.bind; return b && P && typeof P === 'object' && mod(Math.round(+P.key) || 0, 12) === b.key && P.scale === b.scale && (P.gen && P.gen.prog) === b.prog ? b : null; };
+if (typeof genSongClips === 'function') {
+  const mmClips0 = genSongClips;
+  genSongClips = function (P, st, rng) { mmBindSong(P, st); return mmClips0.apply(this, arguments); }; // eslint-disable-line no-func-assign
+}
+if (typeof genHouseClips === 'function') {
+  const mmHouseClips0 = genHouseClips;
+  genHouseClips = function (P, st, rng, snd) { mmBindSong(P, st); return mmHouseClips0.apply(this, arguments); }; // eslint-disable-line no-func-assign
+}
+if (typeof genProgChords === 'function') {
+  const mmProg0 = genProgChords;
+  genProgChords = function (P, id, harm) { const b = mmBound(P); return b ? b.chords.slice() : mmProg0.apply(this, arguments); }; // eslint-disable-line no-func-assign
+}
+if (typeof genTimeline === 'function') {
+  const mmTl0 = genTimeline;
+  genTimeline = function (pr, chords, L) { // eslint-disable-line no-func-assign
+    if (Array.isArray(chords) && chords.length && chords[0] && chords[0].mm && MM.bind) return mmTl(chords, MM.bind.len, L);
+    return mmTl0.apply(this, arguments);
+  };
+}
+// the voicing of a chord of the file: its own voices, moved by octaves into the lane's range (voice-led from the chord before)
+function mmFit(v, prev, lo, hi, n) {
+  let u = v.slice().sort((a, b) => a - b); if (n > 0 && u.length > n) u = u.slice(u.length - n);
+  const mid = (lo + hi) / 2, avg = w => w.reduce((a, x) => a + x, 0) / w.length;
+  let best = u, bc = Infinity;
+  for (let k = -5; k <= 5; k++) {
+    const w = u.map(p => p + 12 * k); if (w[0] < 0 || w[w.length - 1] > 127) continue;
+    const out = w.reduce((a, p) => a + (p < lo ? lo - p : p > hi + 3 ? p - hi - 3 : 0), 0);
+    const c = out * 4 + (prev && prev.length ? .5 * genMotion(prev, w) + .15 * Math.abs(avg(w) - mid) : Math.abs(avg(w) - mid));
+    if (c < bc) { bc = c; best = w; }
+  }
+  const f = best.map(p => { while (p < lo - 2) p += 12; while (p > hi + 4) p -= 12; return p; });
+  return [...new Set(f)].sort((a, b) => a - b);
+}
+if (typeof genVoice === 'function') {
+  const mmVoice0 = genVoice;
+  genVoice = function (ch, prev, lo, hi, open) { return ch && ch.mmv ? mmFit(ch.mmv, prev, lo, hi, 0) : mmVoice0.apply(this, arguments); }; // eslint-disable-line no-func-assign
+}
+if (typeof genRootless === 'function') {
+  const mmRootless0 = genRootless;
+  genRootless = function (ch) { return ch && ch.mm ? ch : mmRootless0.apply(this, arguments); }; // eslint-disable-line no-func-assign
+}
+if (typeof genHouseVoicing === 'function') {
+  const mmHv0 = genHouseVoicing;
+  genHouseVoicing = function (ch, prev, lo, hi, n) { return ch && ch.mmv ? mmFit(ch.mmv, prev, lo, hi, n) : mmHv0.apply(this, arguments); }; // eslint-disable-line no-func-assign
+}
+if (typeof genHouseTl === 'function') {
+  const mmHtl0 = genHouseTl;
+  genHouseTl = function (P, prog, L) { const b = mmBound(P); return b ? { tl: mmTl(b.chordsA, b.len, L), tlB: mmTl(b.chords, b.len, L) } : mmHtl0.apply(this, arguments); }; // eslint-disable-line no-func-assign
+}
+// genSong(id, { harmony: 'mymidi', mmId }): the request (the outermost wrapper: every section's writer sees the bound chords)
+if (typeof genSong === 'function') {
+  const mmGen0 = genSong;
+  genSong = function (id, o = {}) { // eslint-disable-line no-func-assign
+    o = o && typeof o === 'object' ? o : {};
+    const want = o.harmony === 'mymidi' || (o.harmony !== 'app' && MM.goReq && MM.pref === 'mymidi');
+    if (!want || MM.req || !mmProgCount()) return mmGen0(id, o);
+    const seed = o.seed != null ? o.seed >>> 0 : genSeed();
+    const q = MM.req = { seed, id, mmId: typeof o.mmId === 'string' && MM_ID_RE.test(o.mmId) ? o.mmId : '', bound: false, used: null, skip: '' };
+    let p;
+    try { p = mmGen0(id, Object.assign({}, o, { seed })); } finally { MM.req = null; MM.bind = null; MM.last = q; }
+    if (p && q.used) {
+      const head = String(p.name || '').split(' IN ')[0], sc = GEN_SCALES[p.scale] ? GEN_SCALES[p.scale].name.toLowerCase() : p.scale;
+      p.name = `${head} in ${typeof genKeyName === 'function' ? genKeyName(p) : NOTE_NAMES[p.key]} ${sc}`.toUpperCase().slice(0, 40);
+      if (o.out && typeof o.out === 'object') o.out.mymidi = q.used;
+    }
+    return p;
+  };
+}
+if (typeof libSong === 'function') { // the loop library's songs keep the app's harmony (their renders are cached)
+  const mmLib0 = libSong;
+  libSong = function (...a) { const g = MM.goReq; MM.goReq = false; try { return mmLib0.apply(this, a); } finally { MM.goReq = g; } }; // eslint-disable-line no-func-assign
+}
+if (typeof genSongGo === 'function') {
+  const mmGo0 = genSongGo;
+  genSongGo = function (id, groove) { // eslint-disable-line no-func-assign
+    const g = MM.goReq; MM.goReq = true; MM.last = null;
+    let r;
+    try { r = mmGo0(id, groove); } finally { MM.goReq = g; }
+    const q = MM.last;
+    if (q && MM.pref === 'mymidi' && P && P.gen) {
+      if (q.used) flash(`Generated "${P.name}" with the harmony of your MIDI file "${q.used.name}" (${q.used.chords.slice(0, 8).join(' ')}), ${q.used.sh ? `moved ${q.used.sh > 0 ? '+' : ''}${q.used.sh} st from ${q.used.from} to ${q.used.to}` : 'in its own key ' + q.used.from}: the keys, pads and stabs play its voicings, the bass and the lead follow its chords. CTRL+Z goes back`);
+      else if (q.skip) flash(`Generated "${P.name}" with the app's harmony: ${q.skip}. CTRL+Z goes back`);
+    }
+    return r;
+  };
+}
+// the GENERATE SONG dialog: HARMONY app / my MIDI (only when My MIDI has progressions; kept in this browser: dnb808.harmony)
+function mmHarmMenu(ov) {
+  if (!ov || ov.querySelector('#gs-harm') || !mmProgCount()) return;
+  const all = ov.querySelectorAll('label.gs-groove'), anchor = all.length ? all[all.length - 1] : null; if (!anchor) return;
+  const lb = document.createElement('label'); lb.className = 'gs-groove gs-harm';
+  lb.dataset.info = `HARMONY: App = the style's own progressions. My MIDI = one of your ${mmProgCount()} progression files (My MIDI) that fits the song's mode and the style's chord colours, moved into the song key: the keys, pads and stabs play its voicings, the bass and the lead follow its chords`;
+  lb.innerHTML = `Harmony <select id="gs-harm"><option value="app"${MM.pref === 'mymidi' ? '' : ' selected'}>App</option><option value="mymidi"${MM.pref === 'mymidi' ? ' selected' : ''}>My MIDI</option></select>`;
+  lb.querySelector('select').addEventListener('change', e => { MM.pref = e.target.value === 'mymidi' ? 'mymidi' : 'app'; try { localStorage.setItem('dnb808.harmony', MM.pref); } catch (er) { /* private */ } });
+  anchor.after(lb);
+}
+if (typeof genSongOpen === 'function') {
+  const mmOpen0 = genSongOpen;
+  genSongOpen = function (...a) { // eslint-disable-line no-func-assign
+    const r = mmOpen0.apply(this, a);
+    try { const ov = $('#gensong-dialog'); if (MM.list) mmHarmMenu(ov); else mmLoad().then(() => mmHarmMenu($('#gensong-dialog'))); } catch (e) { /* the dialog is optional */ }
+    return r;
+  };
+}
+
+// ---------- the set: clip.ref (sanitized), and the hooks of the loop library panel ----------
+// a MIDI clip keeps ref = { lib: 'mymidi', id } (the id's format only; anything else in it is dropped), like c16 keeps clip.auto
+function mmRefFix(out, p) {
+  if (!out || !Array.isArray(out.tracks)) return out;
+  let src = []; try { src = p && Array.isArray(p.tracks) ? p.tracks : []; } catch (e) { src = []; }
+  out.tracks.forEach((tr, i) => {
+    let s = null; try { s = src[i]; } catch (e) { s = null; }
+    (tr.clips || []).forEach((c, k) => {
+      if (!c) return;
+      let ok = null;
+      try {
+        const sc = s && typeof s === 'object' && s.type === tr.type && Array.isArray(s.clips) ? s.clips[k] : null, r = sc && typeof sc === 'object' ? sc.ref : null;
+        if (tr.type !== 'audio' && r && typeof r === 'object' && r.lib === 'mymidi' && typeof r.id === 'string' && MM_ID_RE.test(r.id)) ok = { lib: 'mymidi', id: r.id };
+      } catch (e) { ok = null; } // a hostile ref: dropped
+      delete c.ref; if (ok) c.ref = ok;
+    });
+  });
+  return out;
+}
+if (typeof normalizeProject === 'function') {
+  const mmNorm0 = normalizeProject;
+  normalizeProject = function (p) { const out = mmNorm0(p); try { mmRefFix(out, p); } catch (e) { console.error('[dnb808] my midi sanitize', e); } return out; }; // eslint-disable-line no-func-assign
+}
+if (typeof libTab === 'function') {
+  const mmTab0 = libTab;
+  libTab = function () { mmTab0(); try { mmTabUi(); } catch (e) { console.warn('[dnb808] my midi tab', e); } }; // eslint-disable-line no-func-assign
+}
+if (typeof libRenderList === 'function') {
+  const mmList0 = libRenderList;
+  libRenderList = function () { if (typeof LIB === 'object' && LIB.tab === 'mm') { try { mmRender(); } catch (e) { console.warn('[dnb808] my midi', e); } return; } return mmList0.apply(this, arguments); }; // eslint-disable-line no-func-assign
+}
+if (typeof libClose === 'function') {
+  const mmClose0 = libClose;
+  libClose = function () { mmStop(); return mmClose0.apply(this, arguments); }; // eslint-disable-line no-func-assign
+}
+if (typeof markSel === 'function') {
+  const mmSel0 = markSel;
+  markSel = function () { mmSel0.apply(this, arguments); try { mmTarget(); } catch (e) { /* not up yet */ } }; // eslint-disable-line no-func-assign
+}
+// the browser's Loops section: My MIDI...
+if (typeof renderBrowser === 'function') {
+  const mmBr0 = renderBrowser;
+  renderBrowser = function () { // eslint-disable-line no-func-assign
+    mmBr0.apply(this, arguments);
+    try {
+      const br = $('#browser'), sec = br && br.querySelector('.lib-sec');
+      if (sec && !sec.querySelector('[data-mmopen]')) sec.append(el('button', 'br-item', '<span>My MIDI...</span>')), sec.lastChild.dataset.mmopen = '1', sec.lastChild.dataset.info = 'MY MIDI: your own MIDI files (a chord pack .zip, .mid files or a folder), kept in this browser. Browse, preview in the set key, drop on a lane; GENERATE SONG can take its harmony from them';
+      if (br && !br.dataset.mmsec) { br.dataset.mmsec = '1'; br.addEventListener('click', e => { if (e.target.closest('[data-mmopen]')) { e.stopPropagation(); mmOpen(); if (innerWidth <= 980) br.classList.remove('open'); } }, true); }
+    } catch (e) { /* the UI is not up yet */ }
+    if (!MM.loading) setTimeout(() => mmLoad(), 0);
+  };
+}
+(function mmStyle() {
+  const css = `.mm-box{display:none;flex:1;min-height:0;flex-direction:column}.lib-panel.mm .mm-box{display:flex}
+.lib-panel.mm>.lib-filters,.lib-panel.mm>.lib-list,.lib-panel.mm>.lib-foot{display:none}
+.mm-box.drop{outline:2px dashed var(--accent,#ffa64d);outline-offset:-4px}
+.mm-list{flex:1;min-height:60px}.mm-it .lib-nm b{color:#c8b6ff}
+.lib-it button.mm-pl.on{background:var(--accent,#ffa64d);color:#1a1a1a}
+.mm-opts{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;font-size:11px;color:var(--dim,#8e8e8e)}.mm-opts select{height:26px;min-width:0;max-width:44%}.mm-opts label{display:flex;align-items:center;gap:3px;white-space:nowrap}
+.mm-empty{text-align:left;line-height:1.45}.mm-empty-b{display:flex;gap:6px;margin-top:8px}.mm-empty-b .btn{height:30px;padding:0 12px}
+.mm-lib{font-size:10.5px}.mm-lib .btn{height:22px;padding:0 8px;font-size:10.5px;margin-left:6px}
+.mm-imp .mm-bar{height:8px;background:var(--surface,#232323);border-radius:4px;overflow:hidden;margin:8px 0}.mm-imp .mm-bar i{display:block;height:100%;width:0;background:var(--accent,#ffa64d);transition:width .1s}
+.mm-imp .mm-rep{max-height:30vh;overflow:auto;font-size:11px}.mm-imp .mm-rep ul{margin:4px 0 0 16px;padding:0}
+@media (max-width:640px){.lib-head{gap:4px}.lib-panel .lib-tabs .btn{padding:0 5px;font-size:10px}.lib-panel.mm .lib-count{font-size:10px}.mm-opts select{max-width:48%}}`;
+  try { const s = document.createElement('style'); s.id = 'mm-css'; s.textContent = css; document.head.append(s); } catch (e) { /* no document */ }
+})();
 
 // ===================== 9. MIDI IMPORT =====================
 // Reads a Standard MIDI File (format 0 or 1, PPQ timing) and turns it into a new set:
