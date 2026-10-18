@@ -762,6 +762,26 @@ Silk Lead, Silk Pad, Smooth Growl, Smooth Hoover, Soft Pluck, Talking Bass, Velv
 - Styles in GENERATE SONG: Middle-eastern dubstep 140, Desert DnB 174, Afro DnB, Afro house world
 - 135 world loops in the loop library (percussion and melodic riffs at 120, 140 and 174 BPM)
 
+## Styles from the owner's reference playlist
+
+Nine more styles in GENERATE SONG, built from research on public tutorials, interviews and articles about the owner's
+reference tracks. Inspired-by only: every note and progression is original.
+
+| Style | BPM | Inspired by |
+| --- | --- | --- |
+| Heavy halftime riddim 145 | 145 | Zeds Dead and the heavy dubstep of the playlist |
+| UK skank 140 | 140 | Hamdi and the 140 UK bass of the playlist |
+| Neurofunk 174 (intensity 0-2) | 174 | Mefjus and the neurofunk of the playlist |
+| MC jump-up 175 | 175 | Bou and the MC-led jump-up of the playlist |
+| UK rave clash 174 | 174 | Chase & Status |
+| Liquid / melodic 174 | 174 | Etherwood and the melodic DnB of the playlist |
+| Jungle revival 172 | 172 | Nia Archives |
+| Emotive UK 130 | 130 | Fred again.. |
+| Afro / Middle-Eastern bass fusion | 140 | Dog Blood and the fusion tracks of the playlist |
+
+Each style has its arrangement template (intro, builds, drops, switch-ups, DJ intro and outro), its drums, bass rhythms,
+harmony families, sounds and growl feel, loops in the loop library and a song template in TEMPLATES.
+
 ## Shortcuts
 
 | Key | Action |
