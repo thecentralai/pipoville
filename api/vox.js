@@ -1,7 +1,7 @@
 // DNB-808 Live: the owner's private vocal pack, read from a private Vercel Blob store (any folder).
 // The audio never lives in this repository. Preview deployments sit behind Vercel Authentication; production
 // always answers 404, so a merge never exposes the files. Without a connected store the route answers 404 too.
-//   GET /api/vox           -> { files: [{ name, size }] }
+//   GET /api/vox           -> { files: [{ name, size }] }   (file names only, any folder of the store)
 //   GET /api/vox?f=<name>  -> the file's bytes
 import { list, get } from '@vercel/blob';
 
@@ -14,18 +14,18 @@ export default async function handler(req, res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   try {
     const f = typeof req.query.f === 'string' ? req.query.f : '';
-    if (!f) {
-      const files = [];
-      let cursor;
-      do {
-        const r = await list({ cursor, limit: 1000 });
-        r.blobs.forEach(b => { if (AUDIO.test(b.pathname)) files.push({ name: b.pathname, size: b.size }); });
-        cursor = r.hasMore ? r.cursor : undefined;
-      } while (cursor);
-      return res.status(200).json({ files });
-    }
-    if (f.includes('..') || f.includes('\\') || f.startsWith('/') || !AUDIO.test(f) || f.length > 300) return res.status(400).end();
-    const r = await get(f, { access: 'private' });
+    if (f && (/[\/\\]/.test(f) || f.startsWith('.') || !AUDIO.test(f) || f.length > 200)) return res.status(400).end();
+    const paths = new Map(); // file name -> the first blob path holding it
+    let cursor;
+    do {
+      const r = await list({ cursor, limit: 1000 });
+      r.blobs.forEach(b => { const name = b.pathname.split('/').pop(); if (AUDIO.test(name) && !paths.has(name)) paths.set(name, { path: b.pathname, size: b.size }); });
+      cursor = r.hasMore ? r.cursor : undefined;
+    } while (cursor);
+    if (!f) return res.status(200).json({ files: [...paths].map(([name, v]) => ({ name, size: v.size })) });
+    const hit = paths.get(f);
+    if (!hit) return res.status(404).end();
+    const r = await get(hit.path, { access: 'private' });
     if (!r || r.statusCode !== 200 || !r.stream) return res.status(404).end();
     res.setHeader('Content-Type', r.blob.contentType || 'application/octet-stream');
     if (r.blob.size) res.setHeader('Content-Length', String(r.blob.size));
