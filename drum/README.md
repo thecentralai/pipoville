@@ -854,6 +854,20 @@ harmony families, sounds and growl feel, loops in the loop library and a song te
 - Arrangement and automation: subtractive forms, the bass filter opening over 16-32 bars, a high-pass rise before the
   main drop, reverb and delay up in the breakdown and back at the drop, delay throws on phrase ends
 
+## Future house and synth vocals
+
+- Four styles in GENERATE SONG: Metal Bounce Future House, Organ Groove Future House, Neon Stutter Future House and
+  Future Bass Pop Crossover (124-128 BPM; inspired by Oliver Heldens, Tchami, Don Diablo and Marshmello)
+- Eight light presets: the metallic FM bounce bass over a separate mono sub, rubber square bass, digital organ bass,
+  pumping saw chords, air pad, snap pluck, formant chop lead and neon saw lead; 8-bar builds with a rising snare roll
+  and a riser rendered to the build length
+- Synth vox: an original formant singer (ooh, aah, oh, eh, hey, yeah and choir pads on the song's chords). GENERATE
+  uses it when no vocal pack is loaded (option Synth vox: Auto / Off); your own vocals always win
+- The GENERATE dialog shows LOAD VOCAL PACK and the number of vocal files in this browser
+- Private vocals: on a preview deployment (behind Vercel Authentication) the app loads the owner's vocal pack from a
+  private Vercel Blob store through /api/vox, one file at a time, and keeps it in this browser. Production answers 404
+  and the audio is never in this repository
+
 ## Warp and vocal tracks
 
 - AUTO WARP finds the tempo, the transients, the key and the phrases of an audio clip and puts warp markers on the

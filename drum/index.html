@@ -28307,6 +28307,1158 @@ if (typeof genSongOpen === 'function') { // the dialog: VOCAL PHRASES on or off 
   };
 }
 if (typeof window !== 'undefined' && typeof document !== 'undefined') warpInitDrag();
+// ===================== 3z. FUTURE HOUSE STYLES, SYNTHESIZED VOCALS, VOCAL PACK AUTOLOAD (wave 7) =====================
+// Research: research7/future_house.md (technique only: every pattern, chord loop, melody, preset and vowel chop here is original).
+// - SOUNDS: 8 light presets (Tidal Pro, one voice an oscillator, the width from a second detuned oscillator and the rack chorus,
+//   no rack reverb or tube stage): an FM "metal bounce" bass (sine carrier, a sine modulator an octave up, an index envelope,
+//   a +12 st pitch blip of 35 ms, LP24 with a 140 ms envelope, a keytracked comb at 30 %) over a separate mono sub, a rubber
+//   square bass, a digital organ bass (triangle + a sine 19 st up, a noise click), pumping saw chords (a -3 st bend into each
+//   chord, macro 2 = the build's pitch riser), an air saw pad, a snap pluck (+24 st in 25 ms), a formant chop lead (a vowel per
+//   note) and a neon saw lead. Levels fitted to -18 LUFS on the house audition phrases (the c26 method), the low end mono.
+// - STYLES (GENERATE SONG): Metal Bounce, Organ Groove, Neon Stutter (club template, 128 bars) and Pop Crossover (96 bars, a
+//   half-time second drop). 4/4 kick, clap on 2 and 4 a little early, offbeat hats, a 16th shaker, swing 54-60 % on the tops only
+//   (kick, clap and snare pads straight); an 8-bar build: the roll 1/4 -> 1/8 -> 1/16 -> 1/32 rising in pitch, a rendered noise +
+//   saw riser of the build's exact length, the last beat silent; ten bass patterns (offbeat, bounce, gallop, yelp, octave drop,
+//   3-3-2, walk, stutter, call, organ), seven progressions, voice-led rootless chords (the top voice held), the melody cells on
+//   chord tones, automation (filter sweeps, the HPF riser, the reverb macro, the chords' pitch riser).
+// - SYNTH VOX: a formant singer (band-limited saw source, 5 band-pass formants per vowel, vibrato, jitter, breath, an /h/ or /j/
+//   onset, a sharp start that settles) rendered in plain JS into sampler buffers (ids fvox:..., rendered again on demand: a set
+//   keeps only the id) for 'ooh', 'aah', 'oh', 'eh', 'hey', 'yeah' chops in the key and sustained choir pads on the chords of
+//   the song. GENERATE SONG puts them on the VOCALS lane of these styles and on the vocal pads of every other style (the
+//   dialog's path) when no vocal pack of the user is loaded; the user's vocals come first. Dialog option: Synth vox Auto / Off.
+// - GENERATE dialog: LOAD VOCAL PACK (the pack loader's storage: the files go to this browser's store, no lane changes) and the
+//   count of loaded vocal files. PRIVATE AUTOLOAD: GET /api/vox (same origin, in a worker); {files:[{name,size}]} -> each file
+//   GET /api/vox?f=<name>, one at a time, skipped when this browser already keeps it (by name and size, then by content hash),
+//   registered as the pack 'Private vocals'. A 404 or any failure: nothing happens. No audio is bundled.
+// Hooks (guarded wrappers): genHouseSounds, genHouseClips, genHouseLayout, genHouseAuto, genSong, genSongGo, genSongOpen,
+// palCatalog, palDrawSounds, smpState, smpBuffer, smpReady. Old styles generate as before (genSong without the
+// dialog: byte for byte; the palette hides these presets from their draws).
+
+const fhHas = (o, k) => o != null && typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
+const fhCl = (v, a, b) => Math.min(b, Math.max(a, v));
+const fhMod = (a, n) => ((a % n) + n) % n;
+const FH = { last: null, cur: null, snd: null, hide: false, view: null, viewOf: null, mode: null, req: null, depth: 0, pref: { svox: 'auto' }, budget: null };
+try { const v = localStorage.getItem('dnb808.fhSvox'); if (v === 'auto' || v === 'off') FH.pref.svox = v; } catch (e) { /* private mode */ }
+const fhW = (rng, list) => { const tot = list.reduce((a, x) => a + Math.max(0, x[1]), 0); let r = rng() * tot; for (const [x, w] of list) { r -= Math.max(0, w); if (r <= 0) return x; } return list[list.length - 1][0]; };
+
+// ---------- 1. the presets ----------
+const fhM = (s, d, a, b) => ({ s, d, a, b: !!b });
+const FH_SAW = 2 / 3, FH_TRW = 1 / 3;
+const FH_SINE = [[0, .5, -.35], [.25, 1, .35], [.5, .5, -.35], [.75, 0, .35], [1, .5, 0]];
+const fhCh = (mix, rate = .45, depth = .55, delay = 10) => ({ xcOn: true, xcRate: rate, xcDepth: depth, xcDelay: delay, xcMix: mix });
+const fhDl = (mix, time = '1/8', fb = .3, tone = 4500) => ({ xyOn: true, xyTime: time, xyFb: fb, xyTone: tone, xyMix: mix, xyLc: 300 });
+const fhWt = (o, ...fx) => Object.assign({ engine: 'wtpro', level: .6, lowMono: 180 }, o, ...fx);
+const FH_PRESETS = {
+  // the signature bass: FM (index envelope 0.75 -> 0.2 in 140 ms), the blip, LP24 3.5 kHz -> 500 Hz, a comb on the note (metal)
+  'Metal Bounce FM Bass': fhWt({ mono: true, glide: .02, lowMono: 160, o1table: 'Basic Shapes', o1pos: 0, o1vol: .9, o1rand: 0, o1warp: 'fm', o1wsrc: 'other', o1wamt: .2,
+    o2table: 'Basic Shapes', o2pos: 0, o2oct: 1, o2vol: .08, o2rand: 0, f1type: 'lp24', f1cut: 500, f1res: .28, f1drive: .35, f1key: .3, f2type: 'comb+', f2cut: 400, f2res: .45, f2mix: .3, f2key: 1,
+    e1a: .002, e1d: .18, e1s: .25, e1r: .06, e2a: .001, e2d: .14, e2s: 0, e2r: .06, e3a: .001, e3d: .035, e3s: 0, e3r: .02,
+    mods: [fhM('env2', 'o1wamt', .55), fhM('env2', 'f1cut', .42), fhM('env3', 'pitch', .5), fhM('vel', 'f1cut', .06), fhM('mac1', 'f1cut', .3)] }),
+  // the subtractive fallback: a square and a saw, LP24 600 Hz + a 200 ms envelope, the blip, drive in the filter
+  'Rubber Square Bass': fhWt({ mono: true, glide: .03, lowMono: 160, o1table: 'Basic Shapes', o1pos: 1, o1vol: .7, o1rand: 0, o2table: 'Basic Shapes', o2pos: FH_SAW, o2vol: .45, o2rand: 0,
+    f1type: 'lp24', f1cut: 600, f1res: .18, f1drive: .4, f1key: .25, e1a: .002, e1d: .2, e1s: .3, e1r: .06, e2a: .001, e2d: .2, e2s: 0, e2r: .06, e3a: .001, e3d: .03, e3s: 0, e3r: .02,
+    mods: [fhM('env2', 'f1cut', .38), fhM('env3', 'pitch', .5), fhM('vel', 'f1cut', .05), fhM('mac1', 'f1cut', .3)] }),
+  // the digital organ bass: a triangle, a sine 19 semitones up at -7 dB, LP12 1.8 kHz, snappy, an 8 ms noise click
+  'Digital Organ Bass': fhWt({ lowMono: 180, o1table: 'Basic Shapes', o1pos: FH_TRW, o1vol: .8, o1rand: 0, o2table: 'Basic Shapes', o2pos: 0, o2oct: 1, o2semi: 7, o2vol: .36, o2rand: 0,
+    noise: 0, noiseTone: .4, f1type: 'lp12', f1cut: 1800, f1res: .1, f1key: .2, f1drive: .15, e1a: .001, e1d: .22, e1s: .15, e1r: .05, e3a: .001, e3d: .008, e3s: 0, e3r: .01,
+    mods: [fhM('env3', 'noise', .22), fhM('env3', 'pitch', .04), fhM('vel', 'f1cut', .05), fhM('mac1', 'f1cut', .3)] }),
+  // the pumping chords: two saws 12 cents apart (no unison), a -3 st bend into the chord in 80 ms, LP24, the rack chorus;
+  // macro 2 lifts the pitch one octave (the build's riser)
+  'Wide Pump Saw Chords': fhWt({ lowMono: 220, o1table: 'Basic Shapes', o1pos: FH_SAW, o1vol: .62, o1rand: 0, o2table: 'Basic Shapes', o2pos: FH_SAW, o2fine: 12, o2vol: .5, o2rand: 0,
+    f1type: 'lp24', f1cut: 4800, f1res: .12, f1key: .25, e1a: .005, e1d: .4, e1s: .85, e1r: .22, e3a: .001, e3d: .08, e3s: 0, e3r: .02,
+    mods: [fhM('env3', 'pitch', -.125), fhM('mac2', 'pitch', .5), fhM('vel', 'f1cut', .05), fhM('mac1', 'f1cut', .3)] }, fhCh(.45, .35, .65, 9)),
+  'Air Saw Pad': fhWt({ lowMono: 220, o1table: 'Basic Shapes', o1pos: FH_SAW, o1vol: .55, o1rand: 0, o2table: 'Basic Shapes', o2pos: FH_SAW, o2fine: -9, o2vol: .45, o2rand: 0,
+    f1type: 'lp12', f1cut: 2600, f1res: .1, f1key: .2, e1a: .25, e1d: 1, e1s: .85, e1r: .9, l2pts: FH_SINE, l2rate: 'hz', l2hz: .08, l2mode: 'free',
+    mods: [fhM('lfo2', 'f1cut', .05, true), fhM('mac1', 'f1cut', .3), fhM('mac2', 'pitch', .5)] }, fhCh(.5, .3, .6, 8)),
+  // the airy pluck: a square and a sine, a breath of noise, +24 st falling in 25 ms (the snap), LP24 opened by its envelope, 1/8 echo
+  'Snap Air Pluck': fhWt({ lowMono: 220, o1table: 'Basic Shapes', o1pos: 1, o1vol: .5, o1rand: 0, o2table: 'Basic Shapes', o2pos: 0, o2vol: .5, o2rand: 0, noise: .04, noiseTone: .5,
+    f1type: 'lp24', f1cut: 900, f1res: .2, f1key: .35, e1a: .001, e1d: .32, e1s: 0, e1r: .12, e2a: .001, e2d: .3, e2s: .13, e2r: .08, e3a: .001, e3d: .025, e3s: 0, e3r: .01,
+    mods: [fhM('env2', 'f1cut', .45), fhM('env3', 'pitch', 1), fhM('vel', 'f1cut', .08), fhM('mac1', 'f1cut', .25)] }, fhDl(.18, '1/8', .32)),
+  // the chop lead: a saw and breath through the formant filter, a new vowel on every note (the random source), a sharp start
+  // (+1.4 st, 30 ms), a delayed vibrato, legato glide, 3/16 echo
+  'Chop Formant Lead': fhWt({ mono: true, glide: .04, lowMono: 250, o1table: 'Basic Shapes', o1pos: FH_SAW, o1vol: .75, o1rand: 0, noise: .07, noiseTone: .6,
+    f1type: 'formant', f1vowel: .3, f1res: .45, f1mix: .9, f2type: 'lp24', f2cut: 5000, f2res: .1, e1a: .004, e1d: .12, e1s: .6, e1r: .08, e3a: .001, e3d: .03, e3s: 0, e3r: .02,
+    l1pts: FH_SINE, l1rate: 'hz', l1hz: 5.5, l1dly: .15, l1fade: .2, mods: [fhM('rand', 'f1vowel', .5), fhM('env3', 'pitch', .06), fhM('lfo1', 'pitch', .004, true), fhM('mac2', 'pitch', .5)] }, fhDl(.2, '3/16', .3)),
+  'Neon Saw Lead': fhWt({ lowMono: 250, o1table: 'Basic Shapes', o1pos: FH_SAW, o1vol: .7, o1rand: 0, o2table: 'Basic Shapes', o2pos: FH_SAW, o2fine: -8, o2vol: .45, o2rand: 0,
+    f1type: 'lp24', f1cut: 2600, f1res: .25, f1key: .3, e1a: .003, e1d: .3, e1s: .7, e1r: .15, e2a: .002, e2d: .25, e2s: .3, e2r: .12, l1pts: FH_SINE, l1rate: '1/8', l1mode: 'retrig',
+    mods: [fhM('lfo1', 'f1cut', .15, true), fhM('env2', 'f1cut', .25), fhM('vel', 'f1cut', .05), fhM('mac2', 'pitch', .5)] }, fhCh(.25)),
+};
+// level fitted to -18 LUFS on the audition phrase of its role (c29tests/fhlevel.mjs fit): [level, xOut dB]
+const FH_FIT = {"Metal Bounce FM Bass":[0.927,0],"Rubber Square Bass":[0.538,0],"Digital Organ Bass":[1,0.14],"Wide Pump Saw Chords":[0.573,0],"Air Saw Pad":[0.606,0],"Snap Air Pluck":[1,0.71],
+  "Chop Formant Lead":[1,9.22],"Neon Saw Lead":[0.755,0]};
+Object.entries(FH_PRESETS).forEach(([n, p]) => {
+  if (fhHas(FH_FIT, n)) { p.level = FH_FIT[n][0]; p.xOut = FH_FIT[n][1]; }
+  if (typeof SYNTH_PRESETS === 'object' && !fhHas(SYNTH_PRESETS, n)) SYNTH_PRESETS[n] = p;
+});
+const FH_NAMES = Object.keys(FH_PRESETS);
+const FH_CLASS = { 'Metal Bounce FM Bass': 'fmbass', 'Rubber Square Bass': 'bass', 'Digital Organ Bass': 'organ', 'Wide Pump Saw Chords': 'chords', 'Air Saw Pad': 'pad',
+  'Snap Air Pluck': 'pluck', 'Chop Formant Lead': 'vox', 'Neon Saw Lead': 'lead' };
+try {
+  if (typeof HOUSE_TRACK === 'object' && HOUSE_TRACK) Object.entries({
+    'Metal Bounce FM Bass': [0, 0, .72, .14], 'Rubber Square Bass': [0, 0, .7, .14], 'Digital Organ Bass': [.08, .04, .55, .14], 'Wide Pump Saw Chords': [.16, .05, .68, .2],
+    'Air Saw Pad': [.36, .04, .5, .2], 'Snap Air Pluck': [.18, .2, .3, .13], 'Chop Formant Lead': [.2, .2, .3, .13], 'Neon Saw Lead': [.15, .12, .3, .13],
+  }).forEach(([n, [a, b, sc, rel]]) => { if (!fhHas(HOUSE_TRACK, n)) HOUSE_TRACK[n] = { mix: { sendA: a, sendB: b }, fx: { chorus: 0, sc, scHold: .012, scRel: rel } }; });
+} catch (e) { /* no house section */ }
+// the palette: tags and the measured CPU (ms of render a second, the palette's scale: c29tests/fhcpu.mjs, the review3 palette method)
+const FH_TAGS = { 'Metal Bounce FM Bass': ['midbass', 'house', 'modern', 'gritty'], 'Rubber Square Bass': ['bass', 'house', 'modern'], 'Digital Organ Bass': ['bass', 'house', 'vintage'],
+  'Wide Pump Saw Chords': ['stab', 'house', 'bright', 'wide', 'modern'], 'Air Saw Pad': ['pad', 'house', 'bright', 'wide'], 'Snap Air Pluck': ['pluck', 'house', 'bright', 'clean', 'modern'],
+  'Chop Formant Lead': ['lead', 'house', 'vocal', 'modern'], 'Neon Saw Lead': ['lead', 'house', 'bright', 'modern'] };
+const FH_CPU = {"Metal Bounce FM Bass":213,"Rubber Square Bass":131,"Digital Organ Bass":264,"Wide Pump Saw Chords":239,"Air Saw Pad":542,"Snap Air Pluck":246,"Chop Formant Lead":219,"Neon Saw Lead":293};
+try {
+  if (typeof window === 'object') { const t = window.LEAD_PALETTE_TAGS || (window.LEAD_PALETTE_TAGS = {}); Object.entries(FH_TAGS).forEach(([n, x]) => { if (!fhHas(t, n)) t[n] = x; }); }
+  if (typeof PAL_CPU_MS === 'object' && PAL_CPU_MS) Object.entries(FH_CPU).forEach(([n, v]) => { if (!fhHas(PAL_CPU_MS, n)) PAL_CPU_MS[n] = v; });
+} catch (e) { /* no palette */ }
+
+// ---------- 2. the progressions (a chord: [semitones over the tonic, quality, 16ths, bass semitones (slash)]) ----------
+const FH_Q = { m: [0, 3, 7], M: [0, 4, 7], m7: [0, 3, 7, 10], M7: [0, 4, 7, 11], d7: [0, 4, 7, 10], m9: [0, 3, 7, 10, 14], M9: [0, 4, 7, 11, 14], d9: [0, 4, 7, 10, 14],
+  madd9: [0, 3, 7, 14], add9: [0, 4, 7, 14], sus4: [0, 5, 7], sus2: [0, 2, 7] };
+const FH_QN = { m: 'm', M: '', m7: 'm7', M7: 'maj7', d7: '7', m9: 'm9', M9: 'maj9', d9: '9', madd9: 'm(add9)', add9: 'add9', sus4: 'sus4', sus2: 'sus2' };
+const FH_PROGS = {
+  'fh-c1': { name: 'i9 - VImaj7 - III - VIIsus4 - VII', scale: 'minor', ch: [[0, 'm9', 16], [8, 'M7', 16], [3, 'M', 16], [10, 'sus4', 8], [10, 'M', 8]], stab: [2, 6, 10, 13] },
+  'fh-c2': { name: 'VI - VII - v7 - i(add9)', scale: 'minor', ch: [[8, 'M', 16], [10, 'M', 16], [7, 'm7', 16], [0, 'madd9', 16]] },
+  'fh-c3': { name: 'i - VII - VI - VII', scale: 'minor', ch: [[0, 'm', 32], [10, 'M', 32], [8, 'M', 32], [10, 'M', 32]] },
+  'fh-c4': { name: 'IVmaj9 - V6 - iii7 - vi9', scale: 'major', ch: [[5, 'M9', 16], [7, 'M', 16, 11], [4, 'm7', 16], [9, 'm9', 16]] },
+  'fh-c5': { name: 'i - iv7 - VII9 - IIImaj7', scale: 'minor', ch: [[0, 'm', 16], [5, 'm7', 16], [10, 'd9', 16], [3, 'M7', 16]] },
+  'fh-c6': { name: 'VI - i - VII - v (half bars)', scale: 'minor', ch: [[8, 'M', 8], [0, 'm', 8], [10, 'M', 8], [7, 'm', 8]] },
+  'fh-c7': { name: 'i(add9) - i(add9)/bVI - IV - VII', scale: 'minor', ch: [[0, 'madd9', 16], [0, 'madd9', 16, 8], [5, 'M', 16], [10, 'M', 16]] },
+};
+(function fhRegProgs() {
+  if (typeof GEN_PROGS !== 'object' || !GEN_PROGS) return;
+  const kind = q => ({ m: 'tri', M: 'tri', m7: 'm7', M7: 'm7', d7: 'm7', m9: '9', M9: '9', d9: '9', madd9: 'add9', add9: 'add9', sus4: 'sus4', sus2: 'sus2' })[q] || 'tri';
+  const deg = (sc, r) => { const s = SCALES[sc] || SCALES.minor; let best = 0; s.forEach((x, i) => { if (Math.abs(x - r) < Math.abs(s[best] - r)) best = i; }); return best; };
+  Object.entries(FH_PROGS).forEach(([id, p]) => {
+    if (fhHas(GEN_PROGS, id)) return;
+    const bars = []; p.ch.forEach(c => { for (let k = 0; k < Math.max(1, Math.round(c[2] / 16)); k++) bars.push(c); });
+    while (bars.length < 8) bars.push(...bars.slice(0, 8 - bars.length));
+    GEN_PROGS[id] = { name: p.name, fam: 'swedish', scale: p.scale, deg: bars.slice(0, 8).map(c => deg(p.scale, c[0])), per: 1, harm: 'seventh', note: p.name + ': a future house loop (section 3z writes it)' };
+    if (typeof GEN_HOUSE_HX === 'object' && GEN_HOUSE_HX && !fhHas(GEN_HOUSE_HX, id)) GEN_HOUSE_HX[id] = bars.slice(0, 8).map(c => [deg(p.scale, c[0]), kind(c[1])]);
+  });
+})();
+
+// ---------- 3. the bass patterns, the melody cells, the chop rhythms ----------
+// bass tokens: R root (chord root, bass octave), R' an octave up, 5 b7 4 b3 (over the chord root, snapped into the key), - rest,
+// = tie, ^ a yelp (2 st under, bending up), v a drop (an octave over, falling); a step marked * sits on a kick on purpose
+const FH_BASS = {
+  P1: '- - R - - - R\' - - - R - - - R\' -', P2: '- - R R\' - - R - - - R R\' - - R -', P3: '- - R - - R\' R - - - R - - R\' R -', P4: '- - ^R - - - R - - - ^R - - 5\' R\' -',
+  P5: '- - vR\' - - - R - - - vR\' - - R - R\'', P6: '- - R - - R - - *R\' - - R - - R -', P7: '- - R - - - b3\' - - - 4\' - - - 5\' =', P8: '- - R R - - R\' R\' - - R R - - R\' -',
+  P9: '- - R - - - - - - - R\' - *R\' - b7 R\'', P10: '- - R - - - R - - - R - - - R =', PH: '- - R = = = - - - - R\' = - - 5 -',
+};
+const FH_BIV = { R: 0, 5: 7, b7: 10, 4: 5, b3: 3 };
+function fhParseBass(str) {
+  return str.trim().split(/\s+/).slice(0, 16).map(t => {
+    if (t === '-' || t === '=') return { t };
+    const kick = t.startsWith('*'), u = t.replace('*', ''), fl = /^[\^v]/.test(u) ? u[0] : '', d = u.replace(/^[\^v]/, ''), up = d.endsWith('\''), k = d.replace('\'', '');
+    return { t: 'n', iv: fhHas(FH_BIV, k) ? FH_BIV[k] : 0, up, fl, kick };
+  });
+}
+const FH_BASSES = Object.fromEntries(Object.entries(FH_BASS).map(([k, s]) => [k, fhParseBass(s)]));
+// melody cells: scale degrees (natural minor or major), ' an octave up, , an octave down, ^ a yelp, = tie, - rest; 2 bars
+const FH_MEL = {
+  M1: '1 - 1\' - - 5 - - 1 - 1\' - 7 - 5 - | 4 - 4\' - - 3 - - 1 - - - - - - -',
+  M2: '- - ^5 - - 5 - 6 - - ^5 - - 3 - - | - - ^5 - - 5 - 7 - - 1\' = - - - -',
+  M3: '3 - 3 - 5 - - - - - - - - - - - | - - - - - - - - 3 2 1 - 7, - 1 -',
+  M4: '5 5 - 5 - - 6 - 5 5 - 5 - - 3 - | 5 5 - 5 - - 7 - 1\' = = - - - - -',
+};
+function fhParseMel(str) {
+  const out = []; str.replace('|', ' ').trim().split(/\s+/).slice(0, 32).forEach((t, s) => {
+    if (t === '-') return;
+    if (t === '=') { if (out.length) out[out.length - 1].l++; return; }
+    const y = t.startsWith('^'), d = t.replace('^', ''), o = (d.match(/'/g) || []).length - (d.match(/,/g) || []).length;
+    out.push({ s, d: fhCl(parseInt(d, 10) || 1, 1, 7), o, l: 1, y });
+  });
+  return out;
+}
+const FH_MELS = Object.fromEntries(Object.entries(FH_MEL).map(([k, s]) => [k, fhParseMel(s)]));
+// 2-bar chop rhythms: X a main chop, x a ghost (the main chop repeated, softer)
+const FH_CHOP = { C1: '..X...X...X.x...|..X...X...X...X.', C2: 'X..X..X...X.X...|X..X..X...Xx....', C3: '..X.x...X.x...X.|..X.x...X...X.x.', C4: 'X.....X...X..x..|X.....X.X.X.....' };
+const FH_TOPS = { A: '..X..xX...X..xXx', B: '.xX..xX..xX..xX.', C: '..X...X...X...X.' };
+const FH_RIM = '...X..X....X..X.';
+
+// ---------- 4. the styles and their forms ----------
+// one char per lane and 8-bar column. dr: k kick, K kick + clap, F full, v verse (soft kick 1 and 3), h half time, b build,
+// e kick out after 4 bars, g ghost kick (the pump), . none. tp: h hats, s + shaker, F full tops, O open hats. bs (BASS lane):
+// A / B / C drop patterns, h half time, i intro. sb: F the bass's steps, r roots, p a long pad note. ch: f filtered and s held
+// chords, S stabs, g gated 1/8, a arp, u riser. pd (PAD lane): o organ riff (an organ) or a soft pad, s organ stabs or a held pad.
+// ld: F hook, N second hook, T + octave, m breakdown melody, a answer, p plucks on the chords. vx: t teaser, c chops, L chop
+// lead, p choir pads, q pads + chops, h hey tags + chops, f fading chops. fx: b build, i impact, G impact + a one-beat gap at its
+// end, r reverse swell into the next column, o downer
+const FH_TPL = {
+  A: { name: 'Club', secs: [['intro', 2], ['intro2', 2], ['breakdown', 1], ['build', 1], ['drop', 4], ['breakdown', 2], ['build2', 1], ['drop2', 2], ['outro', 1]],
+    dr: 'kk KK . b FFFF gg b FF k', tp: 'hs ss . . FFFF .. . OO h', bs: '.. .. . . AABB .. . CC .', sb: 'rr FF p . FFFF pp . FF r', ch: '.. ff s u SSSS ss u SS .',
+    pd: '.. oo s . .... ss . .. .', ld: '.. .. . . ..TT mm . NN .', vx: '.. .t t . hcch qq . cc f', fx: '.. .r . b i.i. .r b G. o' },
+  B: { name: 'Crossover', secs: [['intro', 1], ['intro2', 2], ['build', 1], ['drop', 2], ['breakdown', 2], ['build2', 1], ['drop2', 2], ['outro', 1]],
+    dr: '. vv b FF gg b hh e', tp: '. hs . FF .. . ss h', bs: '. .. . AB .. . hh .', sb: '. rr . FF pp . FF r', ch: 'f .. u SS ss a gg f',
+    pd: '. ss . .. ss . .. s', ld: '. pp . .. mm . .. .', vx: 'c .t . LL qq . LL f', fx: 'r .. b i. .r b i. o' },
+};
+const FH_LANES = ['dr', 'tp', 'bs', 'sb', 'ch', 'pd', 'ld', 'vx', 'fx'];
+const FH_SEC_LBL = { intro: 'INTRO', intro2: 'GROOVE', breakdown: 'BREAKDOWN', build: 'BUILD', drop: 'DROP', build2: 'BUILD 2', drop2: 'DROP 2', outro: 'OUTRO' };
+const FH_STY = {
+  fhmetal: { name: 'Metal Bounce Future House', short: 'Metal Bounce', by: 'Oliver Heldens and Tchami', bpms: [126, 127, 128], keys: [4, 9, 5, 7, 2], swingR: .55, tpl: { A: .85, B: .15 },
+    desc: 'Inspired by Oliver Heldens and Tchami: the metallic FM bounce bass (a pitch blip, a short filter envelope, octave hops and yelps) over a separate mono sub, an organ groove intro, rootless pumping saw chords and stabs, a snap pluck hook, 4/4 with an early clap, offbeat hats and a swung shaker, an 8-bar snare roll and noise riser build, synthesized vocal chops that answer the hook',
+    progs: ['fh-c1', 'fh-c3', 'fh-c6', 'fh-c2'], bass: { A: ['P2', 'P5', 'P1'], B: ['P4', 'P9', 'P6'], C: ['P8', 'P3', 'P5'], i: ['P1'], o: ['P10'], h: ['PH'] }, hooks: ['M1', 'M2'], hook2: ['M4', 'M2'], tops: ['A', 'B'],
+    presets: { bass: ['Metal Bounce FM Bass', 'Rubber Square Bass'], sub: ['Sub Pure Mono', 'Held Deep Sub'], stab: ['Wide Pump Saw Chords'], pad: ['Digital Organ Bass', 'Air Saw Pad'], lead: ['Snap Air Pluck', 'Chop Formant Lead'] },
+    pick: { bass: ['Metal Bounce FM Bass'], pad: ['Digital Organ Bass'], lead: ['Snap Air Pluck'] } },
+  fhorgan: { name: 'Organ Groove Future House', short: 'Organ Groove', by: 'Tchami', bpms: [124, 125, 126], keys: [9, 2, 7, 0, 5], swingR: .58, tpl: { A: 1 },
+    desc: 'Inspired by Tchami: a deeper, darker groove where a digital organ bass (triangle plus a sine 19 steps up, a click) carries the bassline over a held sub, a rubber or FM bass in the drops, garage-swung tops with a rim shuffle, sparse jazzy minor chords that pump, formant chop leads and synthesized vocal hooks',
+    progs: ['fh-c5', 'fh-c7', 'fh-c3', 'fh-c1'], bass: { A: ['P10', 'P6', 'P3'], B: ['P7', 'P9', 'P2'], C: ['P8', 'P5', 'P4'], i: ['P1'], o: ['P10'], h: ['PH'] }, hooks: ['M2', 'M3'], hook2: ['M4'], tops: ['C', 'A'], rim: true,
+    presets: { bass: ['Digital Organ Bass', 'Rubber Square Bass', 'Metal Bounce FM Bass'], sub: ['Held Deep Sub', 'Sub Pure Mono'], stab: ['Wide Pump Saw Chords'], pad: ['Digital Organ Bass', 'Air Saw Pad'], lead: ['Chop Formant Lead', 'Snap Air Pluck'] },
+    pick: { bass: ['Digital Organ Bass', 'Digital Organ Bass', 'Rubber Square Bass'], pad: ['Air Saw Pad'], lead: ['Chop Formant Lead'] } },
+  fhneon: { name: 'Neon Stutter Future House', short: 'Neon Stutter', by: 'Don Diablo', bpms: [126, 127, 128], keys: [5, 7, 9, 2, 11], swingR: .54, tpl: { A: .75, B: .25 },
+    desc: 'Inspired by Don Diablo: bright and driving: a stuttering, octave-jumping bass, a retriggered neon saw lead, wide pumping saw chords with fast half-bar changes, open hats in the second drop, a one-beat gap before the last eight bars, filter and pitch risers in every build and vocal tags on the drops',
+    progs: ['fh-c6', 'fh-c2', 'fh-c1', 'fh-c3'], bass: { A: ['P8', 'P3', 'P2'], B: ['P5', 'P4', 'P9'], C: ['P8', 'P6', 'P7'], i: ['P1'], o: ['P10'], h: ['PH'] }, hooks: ['M4', 'M1'], hook2: ['M2', 'M1'], tops: ['B', 'A'],
+    presets: { bass: ['Metal Bounce FM Bass', 'Rubber Square Bass'], sub: ['Sub Pure Mono', 'Held Deep Sub'], stab: ['Wide Pump Saw Chords'], pad: ['Air Saw Pad', 'Digital Organ Bass'], lead: ['Neon Saw Lead', 'Snap Air Pluck'] },
+    pick: { bass: ['Metal Bounce FM Bass', 'Rubber Square Bass'], pad: ['Air Saw Pad'], lead: ['Neon Saw Lead'] } },
+  fhpop: { name: 'Future Bass Pop Crossover', short: 'Pop Crossover', by: 'Marshmello', bpms: [124, 125, 126], keys: [2, 9, 7, 0, 4], swingR: .54, tpl: { B: 1 },
+    desc: 'Inspired by Marshmello: a bright pop form: a filtered supersaw intro, a pluck verse, a four-on-the-floor first drop with the bounce bass and a vocal chop lead, a breakdown of held chords that pump on a ghost kick, an arp build, a half-time second drop with gated chords, choir pads and chops sung by the synthesized vocalist',
+    progs: ['fh-c4', 'fh-c2', 'fh-c7', 'fh-c1'], bass: { A: ['P5', 'P2', 'P1'], B: ['P2', 'P4', 'P5'], C: ['P8', 'P2'], i: ['P1'], o: ['P10'], h: ['PH'] }, hooks: ['M2', 'M4'], hook2: ['M2', 'M4'], tops: ['A', 'C'],
+    presets: { bass: ['Metal Bounce FM Bass', 'Rubber Square Bass'], sub: ['Sub Pure Mono', 'Held Deep Sub'], stab: ['Wide Pump Saw Chords'], pad: ['Air Saw Pad'], lead: ['Snap Air Pluck', 'Chop Formant Lead'] },
+    pick: { bass: ['Metal Bounce FM Bass'], pad: ['Air Saw Pad'], lead: ['Snap Air Pluck'] } },
+};
+const FH_IDS = Object.keys(FH_STY);
+const fhIs = id => typeof id === 'string' && FH_IDS.includes(id);
+const FH_ARR = { A: [['intro', 16], ['intro2', 16], ['breakdown', 8], ['build', 8], ['drop', 32], ['breakdown', 16], ['build2', 8], ['drop2', 16], ['outro', 8]],
+  B: [['intro', 8], ['intro2', 16], ['build', 8], ['drop', 16], ['breakdown', 16], ['build2', 8], ['drop2', 16], ['outro', 8]] };
+if (typeof GEN_STYLES === 'object' && GEN_STYLES) Object.entries(FH_STY).forEach(([id, x]) => {
+  if (fhHas(GEN_STYLES, id)) return;
+  const t = Object.entries(x.tpl).sort((a, b) => b[1] - a[1])[0][0];
+  GEN_STYLES[id] = { name: x.name, short: x.short, by: x.by, genre: 'swedish', house: 'swe', fh: true, bpm: x.bpms[Math.floor(x.bpms.length / 2)], bpms: x.bpms, swing: 0, swingR: x.swingR, keys: x.keys,
+    desc: x.desc, progs: x.progs, drums: ['swedrop', 'swegroove'], dens: 'mid', rhythm: { bass: ['offbeat', 'gallop'], sub: ['long'], stab: ['hstab'], pad: ['hold'], lead: ['hook'] },
+    harm: { stab: 'seventh', pad: 'seventh', lead: 'triad' }, presets: x.presets, pick: x.pick, mixKind: { STAB: 'saw', PAD: 'pad', LEAD: 'pluck' },
+    kits: { DRUMS: 'swedish', BREAK: 'swedish' }, breakName: 'VOCALS', master: 'festival', arr: FH_ARR[t].map(s => s.slice()) };
+});
+try {
+  if (typeof PAL_PROFILE === 'object' && PAL_PROFILE) FH_IDS.forEach(id => {
+    if (!fhHas(PAL_PROFILE, id)) PAL_PROFILE[id] = { aff: { house: 1.2, bright: .8, modern: .7, wide: .5, clean: .3, vocal: .4, gritty: -.4, dark: -.3, ethnic: -1.2, cinematic: -.8, rave: -.3 }, own: 2.8,
+      never: ['ethnic', 'cinematic'], roles: { STAB: ['stab', 'keys'], PAD: ['pad'], LEAD: ['lead', 'pluck'] }, kits: null, mix: null };
+  });
+} catch (e) { /* no palette */ }
+
+// ---------- 5. the synthesized vocalist: formants rendered into sampler buffers ----------
+const FV_SR = 44100;
+// F1..F5 (Hz), their gains (dB) and bandwidths (Hz): the alto tables of formant synthesis (F2 of e and i lifted a little)
+const FV_VOW = { a: [[800, 1150, 2800, 3500, 4950], [0, -4, -20, -36, -60], [80, 90, 120, 130, 140]], e: [[400, 1600, 2700, 3300, 4950], [0, -14, -24, -35, -60], [60, 80, 120, 150, 200]],
+  i: [[350, 1700, 2700, 3700, 4950], [0, -16, -28, -36, -60], [50, 100, 120, 150, 200]], o: [[450, 800, 2830, 3500, 4950], [0, -9, -16, -28, -55], [70, 80, 100, 130, 135]],
+  u: [[325, 700, 2530, 3500, 4950], [0, -6, -30, -40, -64], [50, 60, 170, 180, 200]] };
+// a word: its vowel path ([fraction of the note, vowel]), the onset (g glottal, s soft, h breathy /h/, j the /j/ glide), the sharp
+// start in semitones (it settles in about 30 ms), the fall at the end, a pad (slow attack, wide vibrato, longer release)
+const FV_WORDS = { ooh: { path: [[0, 'u']], on: 's', sharp: 1.5 }, aah: { path: [[0, 'a']], on: 'g', sharp: 1.2 }, oh: { path: [[0, 'o'], [.7, 'o'], [1, 'u']], on: 'g', sharp: 1 },
+  eh: { path: [[0, 'e']], on: 'g', sharp: 1 }, hey: { path: [[0, 'e'], [.65, 'e'], [1, 'i']], on: 'h', sharp: 2 }, yeah: { path: [[0, 'i'], [.16, 'e'], [.42, 'a']], on: 'j', sharp: 0, fall: -1.5 },
+  pad: { path: [[0, 'a'], [.65, 'a'], [1, 'o']], on: 's', sharp: -.3, pad: true }, padu: { path: [[0, 'u'], [.6, 'o'], [1, 'o']], on: 's', sharp: -.3, pad: true } };
+// the limits of an id (what the writers use: 3-voice choir pads of 4.2 s at most, a riser of 31 beats at 124 BPM = 15 s): a set
+// file can not ask for a long render (4 voices, 4.5 s a word, 16 s a riser)
+const FV_RE = /^fvox:(ooh|aah|oh|eh|hey|yeah|pad|padu|riser):(\d{1,3}(?:\.\d{1,3}){0,3}):(\d{2,5}):(\d{1,2})$/;
+const FV_MAXV = 4, FV_MAXMS = 4500, FV_MAXRISE = 16000;
+const fvIs = id => typeof id === 'string' && id.length <= 80 && FV_RE.test(id);
+const fvId = (w, ps, dur, vr = 0) => `fvox:${w}:${ps.slice(0, FV_MAXV).map(p => fhCl(Math.round(p), 24, 108)).join('.')}:${fhCl(Math.round(dur * 1000), 60, w === 'riser' ? FV_MAXRISE : FV_MAXMS)}:${fhCl(vr | 0, 0, 99)}`;
+function fvParse(id) {
+  const m = fvIs(id) ? FV_RE.exec(id) : null; if (!m) return null;
+  const ps = m[2].split('.').map(Number), ms = +m[3];
+  if (ps.length > FV_MAXV || ps.some(p => p < 24 || p > 108) || ms < 60 || ms > (m[1] === 'riser' ? FV_MAXRISE : FV_MAXMS)) return null;
+  return { w: m[1], ps, dur: ms / 1000, vr: +m[4] };
+}
+const fvNoteName = p => (typeof NOTE_NAMES === 'object' ? NOTE_NAMES[fhMod(p, 12)] : 'C') + (Math.floor(p / 12) - 1);
+const fvRand = seed => { let s = (seed >>> 0) || 0x9e3779b9; return () => { s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; }; };
+// one band-pass (RBJ, 0 dB at the peak) coefficient set
+const fvBp = (f, bw) => { const w = 2 * Math.PI * fhCl(f, 40, FV_SR * .45) / FV_SR, q = fhCl(f / Math.max(20, bw), .5, 60), al = Math.sin(w) / (2 * q), a0 = 1 + al; return [al / a0, -al / a0, -2 * Math.cos(w) / a0, (1 - al) / a0]; };
+// the vowel at a fraction u of the note (log-frequency glide between the path's points), the first formant raised under a high voice
+function fvVowelAt(path, u, f0) {
+  let k = 0; while (k + 1 < path.length && path[k + 1][0] <= u) k++;
+  const A = FV_VOW[path[k][1]], B = path[k + 1] ? FV_VOW[path[k + 1][1]] : A, x = path[k + 1] ? fhCl((u - path[k][0]) / Math.max(1e-6, path[k + 1][0] - path[k][0]), 0, 1) : 0;
+  const F = A[0].map((f, j) => Math.exp(Math.log(f) * (1 - x) + Math.log(B[0][j]) * x)), G = A[1].map((g, j) => g * (1 - x) + B[1][j] * x), W = A[2].map((b, j) => b * (1 - x) + B[2][j] * x);
+  if (f0 > F[0] * .8) F[0] = Math.min(F[1] * .8, f0 * 1.15); // a singer tunes the first formant to the voice
+  return [F, G, W];
+}
+// a word sung on the pitches ps (a choir when several), dur seconds (the release after it) -> Float32Array at FV_SR. A generator:
+// it pauses every 8192 samples (the progressive render of section 5 runs it in slices; fvRun runs it at once: the same samples)
+function* fvSingG(w, ps, dur, vr) {
+  const W = FV_WORDS[w], sr = FV_SR, rel = W.pad ? .45 : .09, n = Math.round((dur + rel) * sr), out = new Float32Array(n), rnd = fvRand(Math.imul(vr + 1, 2654435761) ^ (ps[0] * 40503) ^ Math.round(dur * 1000));
+  const V = ps.map((p, k) => ({ f: 440 * Math.pow(2, (p - 69) / 12), ph: rnd(), det: ps.length > 1 ? (k - (ps.length - 1) / 2) * 7 : 0, vr: 5.1 + rnd() * .6, vp: rnd() * 6.283, j: 0 }));
+  const f0 = V[0].f, att = W.pad ? .2 : W.on === 's' ? .03 : W.on === 'h' ? .02 : .008, von = W.on === 'h' ? .05 : W.on === 'j' ? .01 : 0, vib = W.pad ? 24 : 9, vdl = W.pad ? .25 : .12;
+  const st = [0, 0, 0, 0, 0].map(() => [0, 0, 0, 0]); let co = [], gains = [], tilt = 0, dc = 0, dcy = 0;
+  const norm = 1 / Math.sqrt(V.length), B = 32;
+  for (let i0 = 0; i0 < n; i0 += B) {
+    if (i0 && !(i0 & 8191)) yield;
+    const t = i0 / sr, u = fhCl(t / Math.max(.05, dur), 0, 1), [F, G, Wd] = fvVowelAt(W.path, u, f0);
+    co = F.map((f, j) => fvBp(f, Wd[j] * (W.pad ? 1.2 : 1))); gains = G.map(g => Math.pow(10, g / 20));
+    // the envelopes of this block: voice, breath
+    const ve = t < von ? 0 : Math.min(1, Math.pow((t - von) / att, .7)) * (t < dur ? 1 - .15 * u : Math.exp(-(t - dur) / (rel / 4))) * (W.on === 'g' && t - von < .012 ? 1.25 : 1);
+    const hb = W.on === 'h' ? (t < .055 ? .9 : .9 * Math.exp(-(t - .055) / .02)) : 0, br = (W.pad ? .06 : .045) * ve + hb + (W.on === 's' ? .08 * Math.exp(-t / .04) : 0);
+    const fall = W.fall && t > dur * .7 ? W.fall * fhCl((t - dur * .7) / (dur * .3), 0, 1) : 0;
+    const vfade = fhCl((t - vdl) / (W.pad ? .3 : .15), 0, 1);
+    V.forEach(v => { v.j = v.j * .9 + (rnd() - .5) * .8; v.cents = 100 * (W.sharp * Math.exp(-t / .011) + fall) + v.det + v.j + vib * vfade * Math.sin(6.283 * v.vr * t + v.vp); v.dt = v.f * Math.pow(2, v.cents / 1200) / sr; });
+    const e = Math.min(n, i0 + B);
+    for (let i = i0; i < e; i++) {
+      let src = 0;
+      for (const v of V) { v.ph += v.dt; if (v.ph >= 1) v.ph -= 1; const p = v.ph, dt = v.dt; let s = 2 * p - 1; if (p < dt) { const x = p / dt; s -= x + x - x * x - 1; } else if (p > 1 - dt) { const x = (p - 1) / dt; s -= x * x + x + x + 1; } src += s; }
+      tilt += .35 * (src * norm * ve - tilt); // a gentle tilt: the glottal pulse is rounder than a saw
+      const x = tilt + br * (rnd() * 2 - 1);
+      let y = 0;
+      for (let j = 0; j < 5; j++) { const c = co[j], z = st[j], o = c[0] * x + c[1] * z[1] - c[2] * z[2] - c[3] * z[3]; z[1] = z[0]; z[0] = x; z[3] = z[2]; z[2] = o; y += o * gains[j]; }
+      dcy = y - dc + .995 * dcy; dc = y; out[i] = dcy;
+    }
+  }
+  return fvLevel(out, Math.round(Math.min(dur, .4) * sr * .25), Math.round(dur * sr), .12);
+}
+// the level: the RMS of the sung part to rms, the peak under -1 dBFS, a 5 ms fade at the end
+function fvLevel(out, a, b, rms) {
+  let s = 0, c = 0; for (let i = Math.max(0, a); i < Math.min(out.length, b); i++) { s += out[i] * out[i]; c++; }
+  const r = Math.sqrt(s / Math.max(1, c)); let k = r > 1e-6 ? rms / r : 1, pk = 0;
+  for (let i = 0; i < out.length; i++) pk = Math.max(pk, Math.abs(out[i]));
+  if (pk * k > .89) k = .89 / pk;
+  const f = Math.round(.005 * FV_SR);
+  for (let i = 0; i < out.length; i++) out[i] *= k * (i > out.length - f ? (out.length - i) / f : 1);
+  return out;
+}
+// the build riser: white noise through a low-pass sweeping 200 Hz -> 14 kHz and a high-pass 50 -> 800 Hz in the last quarter, a
+// saw from the note up two octaves 6 dB over it, a rising level; it stops dead at its end (the last beat of the build is the gap)
+function* fvRiserG(dur, p, vr) {
+  const sr = FV_SR, n = Math.round(dur * sr), out = new Float32Array(n), rnd = fvRand(0x51ed270b ^ Math.imul(vr + 1, 0x27d4eb2d) ^ n), f0 = 440 * Math.pow(2, (p - 69) / 12);
+  const tg = f => Math.tan(Math.PI * fhCl(f, 10, sr * .45) / sr);
+  let la = 0, lb = 0, ha = 0, hb = 0, sa = 0, sb = 0, ph = 0, a1 = 0, a2 = 0, a3 = 0, h1 = 0, h2 = 0, h3 = 0, s1 = 0, s2 = 0, s3 = 0;
+  const kL = .5, kH = 1.4, kS = 1.2, co = (g, k) => { const x = 1 / (1 + g * (g + k)); return [x, g * x, g * g * x]; };
+  for (let i = 0; i < n; i++) {
+    if (i && !(i & 8191)) yield;
+    const u = i / n;
+    if (!(i & 63)) { [a1, a2, a3] = co(tg(200 * Math.pow(70, u)), kL); [h1, h2, h3] = co(tg(u > .75 ? 50 * Math.pow(16, (u - .75) / .25) : 50), kH); [s1, s2, s3] = co(tg(800 * Math.pow(11, u)), kS); }
+    // TPT state-variable filters: the noise low-pass, its high-pass, the saw's low-pass
+    let x = rnd() * 2 - 1, v3 = x - lb, v1 = a1 * la + a2 * v3, v2 = lb + a2 * la + a3 * v3; la = 2 * v1 - la; lb = 2 * v2 - lb; const nz = v2;
+    v3 = nz - hb; v1 = h1 * ha + h2 * v3; v2 = hb + h2 * ha + h3 * v3; ha = 2 * v1 - ha; hb = 2 * v2 - hb; const hp = nz - kH * v1 - v2;
+    const dt = f0 * Math.pow(2, 2 * Math.pow(u, 1.6)) / sr; ph += dt; if (ph >= 1) ph -= 1;
+    let s = 2 * ph - 1; if (ph < dt) { const y = ph / dt; s -= y + y - y * y - 1; } else if (ph > 1 - dt) { const y = (ph - 1) / dt; s -= y * y + y + y + 1; }
+    v3 = s - sb; v1 = s1 * sa + s2 * v3; v2 = sb + s2 * sa + s3 * v3; sa = 2 * v1 - sa; sb = 2 * v2 - sb;
+    out[i] = (hp * .5 + v2 * .5) * (.03 + .97 * u * u);
+  }
+  return fvLevel(out, Math.round(n * .75), n, .2);
+}
+const fvRun = g => { let r; do r = g.next(); while (!r.done); return r.value; };
+const fvSing = (...a) => fvRun(fvSingG(...a)), fvRiser = (...a) => fvRun(fvRiserG(...a));
+const fvGen = q => (q.w === 'riser' ? fvRiserG(q.dur, q.ps[0], q.vr) : fvSingG(q.w, q.ps, q.dur, q.vr));
+// the rendered samples of an id -> the sampler's buffer
+function fvKeep(id, q, d) {
+  const b = new AudioBuffer({ length: d.length, numberOfChannels: 1, sampleRate: FV_SR }); b.copyToChannel(d, 0);
+  smpAdd(id, b, { name: (q.w === 'riser' ? 'Synth riser ' : 'Synth vox ' + q.w.toUpperCase() + ' ') + q.ps.map(fvNoteName).join(' '), kind: 'synth', slices: [], credit: '', url: '' });
+  return b;
+}
+// a buffer for an fvox id (rendered once, then kept by the sampler like any sample) -> AudioBuffer or null
+function fvEnsure(id) {
+  if (typeof SMP !== 'object' || !SMP.bufs) return null;
+  if (SMP.bufs.has(id)) return SMP.bufs.get(id);
+  const q = fvParse(id); if (!q) return null;
+  try { return fvKeep(id, q, fvRun(fvGen(q))); } catch (e) { if (SMP.state) SMP.state.set(id, 'broken'); return null; }
+}
+const fvIdsOf = p => { const ids = new Set(); ((p && p.tracks) || []).forEach(tr => (tr.pads || []).forEach(pd => { if (pd && pd.voice === 'smp' && fvIs(pd.sample)) ids.add(pd.sample); })); return [...ids]; };
+// The render is progressive: the writers only name the ids; a queue renders them in slices of about 8 ms (setTimeout 0, the
+// render's generator resumed where it paused) after a GENERATE, in smpReady (a render, the power-on, a set that opens) and when the device asks (smpState: 'loading' until then).
+// A reader that needs the audio now (smpBuffer: the engine's hit; SMP.bufs.get) renders that id at once, so a render and a hit
+// never miss it. The same id always renders the same samples (the queue changes when, not what).
+const FVQ = { q: [], wait: [], t: 0, cur: null, ms: 8 };
+function fvQueue(ids) {
+  if (typeof SMP !== 'object' || !SMP.bufs) return Promise.resolve(true);
+  const todo = (ids || []).filter(id => fvIs(id) && !SMP.bufs.has(id) && SMP.state.get(id) !== 'broken');
+  if (!todo.length) return Promise.resolve(true);
+  todo.forEach(id => { if (!FVQ.q.includes(id)) { FVQ.q.push(id); SMP.state.set(id, 'loading'); } });
+  const pr = new Promise(res => FVQ.wait.push({ ids: todo, res }));
+  if (!FVQ.t) FVQ.t = setTimeout(fvSlice, 0);
+  return pr;
+}
+function fvSlice() {
+  FVQ.t = 0;
+  // a hidden page (its timers throttled to one a second or less) renders the whole queue at once: nobody feels it, a render waits less
+  const t0 = performance.now(), ms = typeof document === 'object' && document.hidden ? 6e4 : FVQ.ms;
+  while (FVQ.q.length && performance.now() - t0 < ms) {
+    const id = FVQ.q[0];
+    let c = FVQ.cur && FVQ.cur.id === id ? FVQ.cur : null;
+    if (SMP.bufs.has(id)) { FVQ.q.shift(); FVQ.cur = null; continue; } // rendered meanwhile (a reader needed it at once)
+    try {
+      if (!c) { const q = fvParse(id); if (!q) { FVQ.q.shift(); if (SMP.state.get(id) !== 'broken') SMP.state.set(id, 'missing'); continue; } c = FVQ.cur = { id, q, g: fvGen(q) }; }
+      let r; do r = c.g.next(); while (!r.done && performance.now() - t0 < ms);
+      if (r.done) { FVQ.q.shift(); FVQ.cur = null; fvKeep(id, c.q, r.value); }
+    } catch (e) { FVQ.q.shift(); FVQ.cur = null; SMP.state.set(id, 'broken'); }
+  }
+  FVQ.wait = FVQ.wait.filter(w => { if (w.ids.some(x => FVQ.q.includes(x))) return true; w.res(true); return false; });
+  if (FVQ.q.length) FVQ.t = setTimeout(fvSlice, 0);
+  else if (typeof smpRefresh === 'function') smpRefresh();
+}
+if (typeof SMP === 'object' && SMP.bufs instanceof Map) { const fvGet0 = Map.prototype.get; SMP.bufs.get = function (id) { const b = fvGet0.call(this, id); return b || !fvIs(id) ? b : fvEnsure(id) || undefined; }; }
+if (typeof smpState === 'function') { const fvState0 = smpState; smpState = function (id) { if (fvIs(id) && !(SMP.bufs && SMP.bufs.has(id))) fvQueue([id]); return fvState0.apply(this, arguments); }; } // eslint-disable-line no-func-assign
+if (typeof smpBuffer === 'function') { const fvBuf0 = smpBuffer; smpBuffer = function (id) { if (fvIs(id)) return (SMP.bufs && SMP.bufs.get(id)) || null; return fvBuf0.apply(this, arguments); }; } // eslint-disable-line no-func-assign
+// a set that becomes the live one (setProject: GENERATE, open, a template) queues its ids; PLAY renders what is left before the
+// transport starts (a short wait at the click instead of a render inside a scheduled hit)
+const fvFlush = p => { try { fvIdsOf(p).forEach(id => { if (!SMP.bufs.has(id) && SMP.state.get(id) !== 'broken') fvEnsure(id); }); FVQ.q = FVQ.q.filter(id => !SMP.bufs.has(id)); } catch (e) { /* silent pads */ } };
+if (typeof setProject === 'function') { const fvSet0 = setProject; setProject = function (p) { const r = fvSet0.apply(this, arguments); try { fvQueue(fvIdsOf(p)); } catch (e) { /* rendered on demand */ } return r; }; } // eslint-disable-line no-func-assign
+if (typeof play === 'function') { const fvPlay0 = play; play = function () { if (!(typeof TR === 'object' && TR.playing) && typeof P === 'object' && P) fvFlush(P); return fvPlay0.apply(this, arguments); }; } // eslint-disable-line no-func-assign
+if (typeof smpReady === 'function') { const fvReady0 = smpReady; smpReady = function (p) { let q; try { q = fvQueue(fvIdsOf(p)); } catch (e) { q = true; /* silent pads */ } return Promise.all([q, fvReady0.apply(this, arguments)]).then(r => r[1], () => false); }; } // eslint-disable-line no-func-assign
+// the buffers no live set references (the set, undo and redo, the autosave) are dropped after a GENERATE
+function fvGc() {
+  try {
+    if (typeof SMP !== 'object' || !SMP.bufs) return;
+    let ls = ''; try { ls = localStorage.getItem(LS_KEY) || ''; } catch (e) { /* private mode */ }
+    const refs = [JSON.stringify(P), ls].concat(HIST.undo, HIST.redo).join('\n');
+    Array.from(SMP.bufs.keys()).filter(id => fvIs(id) && !refs.includes(id)).forEach(id => { SMP.bufs.delete(id); SMP.meta.delete(id); SMP.state.delete(id); });
+    FVQ.q = FVQ.q.filter(id => { if (refs.includes(id)) return true; SMP.state.delete(id); return false; }); // its waiters resolve at the next slice
+  } catch (e) { /* nothing kept */ }
+}
+// the old synthesized vox voices of a set (every style's vocal pads) -> the singer at the same pitch; pads keep their level,
+// pan, groove and choke; returns the number of pads changed
+const FV_VOICE = { voxa: 'aah', voxo: 'oh', voxe: 'eh', voxhey: 'hey' };
+function fvReplaceVoxPads(p) {
+  let n = 0;
+  (p.tracks || []).forEach(tr => {
+    if (!tr || tr.type !== 'drums' || !Array.isArray(tr.pads)) return;
+    tr.pads = tr.pads.map(pd => {
+      if (!pd || !fhHas(FV_VOICE, pd.voice)) return pd;
+      const ks = pd.key === true && typeof keyShift === 'function' ? keyShift({ p }, pd.voice) : 0, pitch = fhCl(Math.round(50 + (+pd.tune || 0) + ks), 36, 84);
+      const long = (+pd.decay || 1) >= 2, w = FV_VOICE[pd.voice], dur = long ? .6 : w === 'hey' ? .32 : .3, id = fvId(w, [pitch], dur, 0);
+      n++;
+      const keep = {}; ['offset', 'swing', 'hum', 'prob', 'drop', 'acc', 'cut'].forEach(k => { if (fhHas(pd, k)) keep[k] = pd[k]; });
+      return Object.assign({ name: String(pd.name || 'VOX').slice(0, 8), voice: 'smp' }, PAD_BASE, SAMPLE_PAD, keep, { sample: id, slice: -1, start: 0, end: 1, rev: false, choke: 0,
+        level: fhCl((+pd.level || .8) * Math.pow(10, ((FV_PADK[w] || 0) + (long ? FV_PADK.long : 0)) / 20), 0, 1.5), pan: +pd.pan || 0, decay: 1, tune: 0, duck: pd.duck === true, vx: w === 'hey' ? 'shot' : 'chop' });
+    });
+  });
+  return n;
+}
+const FV_PADK = { aah: 1.4, oh: 2.5, eh: 2.6, hey: 4.6, long: 3.8 }; // dB: a singer pad against the old voice it replaces (c29tests/t_padlevel.mjs: within 2 dB)
+// Transpose and Match key (transposeBy, transposeBlocked): a singer pad sounds a pitch like the old vox voices it replaces, so
+// its TUNE follows the key the same way (+-24); the riser (the build's noise) does not move
+const fvTuned = pd => !!pd && pd.voice === 'smp' && fvIs(pd.sample) && !pd.sample.startsWith('fvox:riser:');
+if (typeof transposeBy === 'function') {
+  const fvXp0 = transposeBy;
+  transposeBy = function (P, d) { // eslint-disable-line no-func-assign
+    const r = fvXp0.apply(this, arguments);
+    if (d && P && Array.isArray(P.tracks)) P.tracks.forEach(tr => { if (tr && tr.type !== 'synth' && Array.isArray(tr.pads)) tr.pads.forEach(pd => { if (fvTuned(pd)) { pd.tune = fhCl((+pd.tune || 0) + d, -24, 24); if (r) r.pads++; } }); });
+    return r;
+  };
+}
+if (typeof transposeBlocked === 'function') {
+  const fvXb0 = transposeBlocked;
+  transposeBlocked = function (P, d) { // eslint-disable-line no-func-assign
+    const out = fvXb0.apply(this, arguments);
+    if (Array.isArray(out) && P && Array.isArray(P.tracks)) P.tracks.forEach(tr => { if (tr && tr.type !== 'synth' && Array.isArray(tr.pads)) tr.pads.forEach(pd => { const t = +pd.tune || 0; if (fvTuned(pd) && Math.abs(t + d) > 24) out.push(`${tr.name} ${pd.name} (TUNE ${t > 0 ? '+' : ''}${t})`); }); });
+    return out;
+  };
+}
+
+// ---------- 6. the user's vocals and the vocal lane ----------
+const FV = { auto: null, autoMsg: '' };
+// the user's decoded vocal files (c22's prefetch): they come first
+const fhUserVox = () => (typeof PAL === 'object' && PAL && PAL.voxReady && Array.isArray(PAL.vox) && typeof SMP === 'object' ? PAL.vox.filter(f => SMP.bufs.has(f.id)) : []);
+// a file loaded as a vocal (the dialog's loader, the autoload) whose name says nothing of it is listed as 'vox <name>': the pack
+// browser shows it so, and the vocal readers of sections 3c, 3x and 3z take it
+const fvVocalName = name => (typeof voxIsVocal === 'function' && voxIsVocal(name) ? name : 'vox ' + name).slice(0, 60);
+const fvRefresh = () => { try { if (typeof PAL === 'object' && PAL) PAL.voxAt = 0; if (typeof palVoxFetch === 'function') palVoxFetch(); } catch (e) { /* no palette */ } };
+// the pads of the VOCALS lane. Synth: 0-7 'ooh' on the scale degrees 1..8 of the key (62-79), 8 'aah' on the octave, 9 'oh' on the
+// 5th, 10 'hey', 11 'yeah', 12-15 choir pads on the (first four) chords of the progression. Off: the old synthesized voices on the
+// same plan. User: the user's files on 0-7, the slices of the longest phrase on 8-15
+function fhVoxPads(P, S0, mode) {
+  const key = S0.key, SC = S0.SC, root = 62 + fhMod(key - 62, 12), deg = d => root + SC[(d - 1) % 7] + (d > 7 ? 12 : 0), map = { chops: [], aah: 8, oh: 9, hey: 10, yeah: 11, choir: new Map(), mode };
+  const pan = k => [-.12, .1, -.08, .14, -.14, .08, -.1, .12][k % 8];
+  const smp = (name, id, o) => Object.assign({ name, voice: 'smp' }, PAD_BASE, SAMPLE_PAD, { sample: id, slice: -1, start: 0, end: 1, rev: false, choke: 0, decay: 1 }, o);
+  const chords = []; S0.prog.ch.forEach(c => { const k = c[0] + ':' + c[1] + ':' + (c[3] != null ? c[3] : ''); if (!chords.some(x => x.k === k) && chords.length < 4) chords.push({ k, c }); });
+  const beat = 60 / P.bpm, padDur = Math.min(4.2, 8 * beat);
+  const choirV = c => { const tones = FH_Q[c[1]].map(x => fhMod(key + c[0] + x, 12)), out = []; [0, 1, 2].forEach(j => { const pc = tones[[1, 2, 0][j] % tones.length]; let p = 55 + fhMod(pc - 55, 12); while (out.some(q => Math.abs(q - p) < 3)) p += 12; out.push(p); }); return out.sort((a, b) => a - b); };
+  let pads;
+  if (mode === 'user') {
+    const files = fhUserVox(), R = genRng((S0.seed ^ 0x5bd1e995) >>> 0), shot = typeof palVoxShot === 'function' ? palVoxShot : f => f.dur < 2.5;
+    const order = files.map(f => [f, (typeof palVoxScore === 'function' ? palVoxScore(f, P, S0.st) : 0) + R() * 2]).sort((a, b) => b[1] - a[1]).map(x => x[0]);
+    const tune = f => { try { const k = typeof voxNameKey === 'function' ? voxNameKey(f.name) : null; return k && typeof palVoxSemis === 'function' ? palVoxSemis(k, P) : 0; } catch (e) { return 0; } };
+    const nm = f => String(f.name).replace(/\.[a-z0-9]{2,4}$/i, '').replace(/^[A-Z0-9]+_/, '').toUpperCase().slice(0, 8) || 'VOX';
+    const phr = order.filter(f => !shot(f)).sort((a, b) => SMP.bufs.get(b.id).duration - SMP.bufs.get(a.id).duration)[0] || order[0];
+    const beatEnd = f => { const d = SMP.bufs.get(f.id).duration; return fhCl(4 * beat / d, .02, 1); };
+    pads = Array.from({ length: 8 }, (_, k) => { const f = order[k % order.length]; return smp(nm(f), f.id, { level: .62, pan: pan(k), tune: tune(f), end: Math.round(beatEnd(f) * 1000) / 1000, vx: shot(f) ? 'shot' : 'chop' }); });
+    const sl = (SMP.meta.get(phr.id) || {}).slices || [];
+    for (let k = 0; k < 8; k++) pads.push(smp('CHOP ' + (k + 1), phr.id, { level: .6, pan: pan(k + 3), tune: tune(phr), slice: sl.length ? k % sl.length : -1, end: sl.length ? 1 : fhCl(.5 * beat / SMP.bufs.get(phr.id).duration, .02, 1), start: sl.length ? 0 : 0, vx: 'chop' }));
+    map.user = order.slice(0, 8).map(f => f.name); map.userIds = [...new Set(order.slice(0, 8).map(f => f.id).concat([phr.id]))];
+    for (let k = 0; k < 8; k++) map.chops.push({ pad: 8 + k, p: 0, w: 'user' });
+    map.hey = order.findIndex(f => shot(f)); if (map.hey < 0 || map.hey > 7) map.hey = 0; map.yeah = map.hey; map.aah = 1; map.oh = 2;
+    chords.forEach((x, j) => map.choir.set(x.k, j % 8));
+  } else if (mode === 'synth') {
+    pads = [];
+    for (let d = 1; d <= 8; d++) { const p = deg(d), id = fvId('ooh', [p], .36, d); pads.push(smp('OOH ' + fvNoteName(p), id, { level: .85, pan: pan(d - 1), vx: 'chop' })); map.chops.push({ pad: d - 1, p, w: 'ooh' }); }
+    const a = deg(8), o5 = deg(5), h5 = deg(5);
+    pads.push(smp('AAH ' + fvNoteName(a), fvId('aah', [a], .36, 1), { level: .85, pan: .06, vx: 'chop' })); map.chops.push({ pad: 8, p: a, w: 'aah' });
+    pads.push(smp('OH ' + fvNoteName(o5), fvId('oh', [o5], .42, 1), { level: .85, pan: -.06, vx: 'chop' })); map.chops.push({ pad: 9, p: o5, w: 'oh' });
+    pads.push(smp('HEY', fvId('hey', [h5], .3, 1), { level: .9, vx: 'shot' }), smp('YEAH', fvId('yeah', [root], .48, 1), { level: .85, vx: 'shot' }));
+    for (let j = 0; j < 4; j++) { const x = chords[j % chords.length], vs = choirV(x.c), id = fvId(j % 2 ? 'padu' : 'pad', vs, padDur, j); pads.push(smp('CHOIR ' + (j + 1), id, { level: .7, pan: [-.2, .2, -.1, .1][j], vx: 'chop' })); if (j < chords.length) map.choir.set(x.k, 12 + j); }
+  } else {
+    const vp = (name, voice, p, o) => Object.assign({ name, voice }, PAD_BASE, { tune: fhCl(p - 50, -24, 24), level: .85, decay: 1.1 }, o), fold = p => { while (p > 74) p -= 12; while (p < 52) p += 12; return p; };
+    pads = [];
+    for (let d = 1; d <= 8; d++) { const p = fold(deg(d)); pads.push(vp('OH ' + fvNoteName(p), 'voxo', p, { pan: pan(d - 1) })); map.chops.push({ pad: d - 1, p, w: 'ooh' }); }
+    pads.push(vp('AH', 'voxa', fold(deg(8))), vp('OH', 'voxo', fold(deg(5))), vp('HEY', 'voxhey', fold(deg(5)), { level: .95 }), vp('EH', 'voxe', fold(root)));
+    map.chops.push({ pad: 8, p: fold(deg(8)), w: 'aah' }, { pad: 9, p: fold(deg(5)), w: 'oh' });
+    for (let j = 0; j < 4; j++) { const x = chords[j % chords.length]; pads.push(vp('AAH ' + (j + 1), 'voxa', fold(choirV(x.c)[1]), { decay: 3, level: .7 })); if (j < chords.length) map.choir.set(x.k, 12 + j); }
+  }
+  return { pads, map };
+}
+
+// ---------- 7. harmony: the timeline, voicings ----------
+function fhChordOf(c, key) {
+  const [r, q, , b] = c, iv = FH_Q[q] || FH_Q.m, root = fhMod(key + r, 12), tones = iv.map(x => fhMod(root + x, 12)), bass = b != null ? fhMod(key + b, 12) : root;
+  const nm = (typeof NOTE_NAMES === 'object' ? NOTE_NAMES[root] : '') + FH_QN[q] + (bass !== root ? '/' + (typeof NOTE_NAMES === 'object' ? NOTE_NAMES[bass] : '') : '');
+  return { r, q, root, bass, tones, pcs: new Set(tones), name: nm, k: r + ':' + q + ':' + (b != null ? b : '') };
+}
+function fhTimeline(prog, key) {
+  const segs = []; let s = 0; prog.ch.forEach(c => { segs.push({ s, l: c[2], ch: fhChordOf(c, key) }); s += c[2]; });
+  const L = s; return { L, segs, at: x => { const m = fhMod(x, L); for (let i = segs.length - 1; i >= 0; i--) if (m >= segs[i].s) return segs[i]; return segs[0]; } };
+}
+// n voices of chord ch in lo..hi: the colour tones first (3rd, 7th, 9th, 5th; the root only when the chord has too few), close
+// stacked, the smallest motion from prev, the top voice kept when it can be (the hook rule)
+function fhVoicing(ch, lo, hi, n, prev, drop = true) {
+  const iv = (FH_Q[ch.q] || FH_Q.m).map(x => x % 12), pri = [3, 4, 10, 11, 2, 5, 7, 0].filter(x => iv.includes(x)), all = [...new Set(pri.map(x => fhMod(ch.root + x, 12)))];
+  let pcs = all.filter(pc => !drop || pc !== ch.root || all.length <= n).slice(0, n); if (pcs.length < Math.min(n, 3)) pcs = all.slice(0, n);
+  const perm = a => (a.length <= 1 ? [a] : a.flatMap((x, i) => perm(a.slice(0, i).concat(a.slice(i + 1))).map(r => [x].concat(r))));
+  let best = null, bc = 1e9; const ptop = prev && prev.length ? prev[prev.length - 1] : null;
+  perm(pcs).forEach(order => {
+    for (let b = lo + fhMod(order[0] - lo, 12); b <= hi; b += 12) {
+      const v = [b]; for (let k = 1; k < order.length; k++) { let p = v[k - 1] + 1; while (fhMod(p, 12) !== order[k]) p++; v.push(p); }
+      if (v[v.length - 1] > hi) continue;
+      const mv = prev && prev.length ? v.reduce((a, p, i) => a + Math.abs(p - (prev[Math.min(i, prev.length - 1)])), 0) : Math.abs((v[0] + v[v.length - 1]) / 2 - (lo + hi) / 2);
+      const c = mv + (ptop != null && v[v.length - 1] !== ptop ? 1.5 : 0) + (v[1] - v[0] === 1 && v[0] < 60 ? 3 : 0);
+      if (c < bc) { bc = c; best = v; }
+    }
+  });
+  return best || [lo + fhMod(ch.root - lo, 12)];
+}
+const fhRootIn = (pc, lo) => lo + fhMod(pc - lo, 12);
+// the nearest key-scale pitch (ties down)
+const fhSnapScale = (p, key, SC) => { for (let d = 0; d < 7; d++) for (const q of [p - d, p + d]) if (SC.includes(fhMod(q - key, 12))) return q; return p; };
+// the nearest chord tone (scale tones preferred)
+const fhSnapChord = (p, ch) => { for (let d = 0; d < 7; d++) for (const q of [p - d, p + d]) if (ch.pcs.has(fhMod(q, 12))) return q; return p; };
+
+// ---------- 8. the lanes, one 8-bar block each ----------
+const FH_T = { DRUMS: 0, VOX: 1, BASS: 2, SUB: 3, STAB: 4, PAD: 5, LEAD: 6, FX: 7 };
+const FH_DP = { K: 0, KT: 1, C: 2, C2: 3, H: 4, O: 5, SH: 6, RD: 7, GH: 8, RIM: 9, SN: 10, SK: 11, TB: 12, SH2: 13, CV: 14, TK: 15 };
+const FH_XP = { UP: 0, DOWN: 1, IMP: 2, CR: 3, SW: 4, ROLL: 5, WH: 6, RISE: 7, R4: 8, R8: 9, R12: 10, CV: 11, IMPL: 12, WHU: 13, CR2: 14, UP2: 15 };
+function fhDrumBlock(S, b) {
+  const out = [], R = S.R, c = b.col, kicks = Array.from({ length: 8 }, () => new Set()), N = (s, p, v, l = 1) => out.push({ s, p, l, v: fhCl(Math.round(v), 1, 127) });
+  const K = (s, v = 116, pad = FH_DP.K) => { N(s, pad, v); kicks[Math.floor(s / 16)].add(s % 16); };
+  for (let bar = 0; bar < 8; bar++) {
+    const o = bar * 16, last = bar === 7, fill = last && b.fill;
+    if (c.dr === 'k' || c.dr === 'K' || c.dr === 'F' || (c.dr === 'e' && bar < 4) || (c.dr === 'b' && bar < 6)) {
+      const q = c.dr === 'b' && bar >= 4 ? [0, 2, 4, 6, 8, 10, 12, 14] : [0, 4, 8, 12];
+      q.forEach(s => { if (!(fill === 'gap' && s === 12)) { K(o + s, c.dr === 'b' ? 96 + bar * 3 : 116); if (c.dr === 'F') { N(o + s, FH_DP.KT, 70); if (s === 0) N(o + s, FH_DP.TK, 40); } } });
+    }
+    if (c.dr === 'v') [0, 8].forEach(s => K(o + s, 104, FH_DP.SK));
+    if (c.dr === 'h') K(o, 118);
+    if (c.dr === 'g') [0, 4, 8, 12].forEach(s => N(o + s, FH_DP.GH, 100));
+    if (c.dr === 'K' || c.dr === 'F' || c.dr === 'v' || c.dr === 'e') [4, 12].forEach(s => { N(o + s, FH_DP.C, c.dr === 'v' ? 92 : 108); if (c.dr === 'F' && b.half) N(o + s, FH_DP.C2, 70); });
+    if (c.dr === 'h') { N(o + 8, FH_DP.SN, 112); N(o + 8, FH_DP.C, 100); if (last) [13, 14, 15].forEach((s, k) => N(o + s, FH_DP.SN, 70 + 14 * k)); }
+    // the tops: offbeat hats (the variant's ghosts in the drops), the 16th shaker, open hats, the rim shuffle
+    const tp = c.tp, top = FH_TOPS[S.top] || FH_TOPS.A, cut = fill && fill !== 'gap' ? 12 : 16;
+    if (tp !== '.') {
+      const hats = tp === 'F' ? top : FH_TOPS.C;
+      [...hats].forEach((ch, s) => { if (s < cut && ch !== '.') N(o + s, FH_DP.H, ch === 'X' ? 100 : 56 + R.int(14)); });
+      if (tp !== 'h') for (let s = 0; s < cut; s++) N(o + s, FH_DP.SH, s % 4 === 2 ? 96 : 57 + R.int(32));
+      if (tp === 'F' && bar % 2 === 1 && cut === 16) N(o + 14, FH_DP.O, 78);
+      if (tp === 'O') [2, 6, 10, 14].forEach(s => { if (s < cut) N(o + s, FH_DP.O, 76); });
+      if ((tp === 'F' || tp === 'O') && S.rim) [...FH_RIM].forEach((ch, s) => { if (ch === 'X' && s < cut) N(o + s, FH_DP.RIM, 70); });
+      if (tp === 'O' && bar % 4 === 3) N(o + 4, FH_DP.TB, 64);
+    }
+    if (fill === 'claps') [[12, 70], [13, 82], [14, 104], [15, 118]].forEach(([s, v]) => N(o + s, FH_DP.C, v));
+    if (fill === 'snare') [[12, 74], [13, 86], [14, 100], [15, 116]].forEach(([s, v]) => N(o + s, FH_DP.SN, v));
+    if (fill === 'gap') N(o + 12, FH_DP.CV, 100);
+  }
+  return { notes: out, kicks };
+}
+// the bass of a block: a pattern pair (bar A, bar B: the last 4 steps of B anticipate the next chord), the sub on the same steps
+function fhBassBlock(S, b, lane) {
+  const mid = [], sub = [], c = b.col, key = S.key, SC = S.SC;
+  const ch = c.bs !== '.' ? c.bs : lane === 'PAD' ? 'o' : c.sb === 'F' && c.pd === 'o' ? 'o' : null;
+  const subMode = c.sb;
+  if (!ch && subMode !== 'r' && subMode !== 'p') return { mid, sub };
+  const pair = ch ? S.bassPat(b, ch) : null, lo = S.cls.BASS === 'organ' || lane === 'PAD' ? 41 : 40;
+  for (let bar = 0; bar < 8; bar++) {
+    const o = bar * 16, pat = pair ? FH_BASSES[pair[bar % 2]] : null;
+    if (subMode === 'p') { const g = S.tl.at(b.a * 16 + o), p = fhRootIn(g.ch.bass, 28); if (!sub.length || sub[sub.length - 1].p !== p || bar % 2 === 0) sub.push({ s: o, p, l: 16, v: 82, pad: true }); continue; }
+    if (!pat || (subMode === 'r' && !ch)) { [2, 10].forEach(s => { const g = S.tl.at(b.a * 16 + o + s); sub.push({ s: o + s, p: fhRootIn(g.ch.bass, 28), l: 6, v: 92 }); }); if (!pat) continue; }
+    let lastMid = null, lastSub = null;
+    pat.forEach((t, s) => {
+      if (t.t === '=') { if (lastMid) lastMid.l += 1; if (lastSub) lastSub.l += 1; return; }
+      if (t.t === '-') { lastMid = null; return; }
+      const ant = bar % 2 === 1 && s >= 12, g = S.tl.at(b.a * 16 + (ant ? o + 16 : o + s)), r0 = fhRootIn(g.ch.bass, lo);
+      let p = fhSnapScale(r0 + t.iv, key, SC) + (t.up ? 12 : 0); if (t.iv === 0) p = r0 + (t.up ? 12 : 0);
+      const n = { s: o + s, p, l: S.gate || pair[0] === 'P8' ? .5 : 1, v: s % 4 === 2 ? 110 : 96 };
+      if (t.fl === '^') { n.p = p - 2; n.b = 2; n.l = 1; } else if (t.fl === 'v') { n.p = p + 12; n.b = -12; n.l = .5; }
+      if (t.kick) n.kick = true;
+      mid.push(n); lastMid = n;
+      if (subMode === 'F' || subMode === 'r') { const sp = fhRootIn(g.ch.bass, 28); if (lastSub && lastSub.p === sp && lastSub.s + lastSub.l >= o + s && !t.kick) { /* held through */ } else { const sn = { s: o + s, p: sp, l: 1, v: 100 }; if (t.kick) sn.kick = true; sub.push(sn); lastSub = sn; } }
+    });
+  }
+  // the sub rings to its next note (3 steps at most)
+  sub.sort((x, y) => x.s - y.s).forEach((n, i) => { const nx = sub[i + 1]; if (n.pad) { n.l = Math.min(32, (nx ? nx.s : 128) - n.s); delete n.pad; } else if ((subMode === 'F' || subMode === 'r') && n.l <= 1) n.l = Math.max(1, Math.min(3, (nx ? nx.s : 128) - n.s)); });
+  return { mid, sub };
+}
+// the pitch of a cell note: the degree in the song's scale, the register base, the chord tone on a strong step or a long note
+function fhCellNotes(S, cell, o, base, ch0, opt = {}) {
+  const out = [];
+  cell.forEach(m => {
+    const s = o + m.s, g = S.tl.at(S.blkA * 16 + s), d = m.d - 1;
+    let p = base + S.SC[d] + 12 * m.o;
+    if (m.s % 4 === 0 || m.l >= 2) p = fhSnapChord(p, g.ch);
+    const n = { s, p, l: opt.legato ? m.l : Math.min(m.l, 2), v: m.s % 4 === 0 ? 104 : 92 };
+    if (m.y && !opt.noBend) { n.p = p - 2; n.b = 2; }
+    out.push(n);
+  });
+  return out;
+}
+function fhLeadBlock(S, b) {
+  const c = b.col, ld = c.ld, out = []; if (ld === '.') return out;
+  const R = S.R, cls = S.cls.LEAD, [lo, hi] = cls === 'pluck' ? [64, 86] : cls === 'vox' ? [60, 79] : [62, 84];
+  S.blkA = b.a;
+  if (ld === 'p') { // plucks on the chords: the voicing an octave up, in 8ths, up and down
+    let prev = null;
+    for (let s = 0; s < 128; s += 2) { const g = S.tl.at(b.a * 16 + s); prev = fhVoicing(g.ch, lo, Math.min(hi, lo + 16), 4, prev, false); const seq = [0, 1, 2, 1, 2, 3, 2, 1], p = prev[seq[(s / 2) % 8] % prev.length]; out.push({ s, p, l: 1.5, v: s % 8 === 0 ? 100 : 84 }); }
+    return out;
+  }
+  const cellId = ld === 'm' ? 'M3' : ld === 'N' ? S.hook2 : S.hook, cell = FH_MELS[cellId], base = S.leadBase(cellId, lo, hi);
+  for (let r = 0; r < 4; r++) {
+    const o = r * 32; let ns = fhCellNotes(S, cell, o, base, null, { legato: ld === 'm' });
+    if (ld === 'a') ns = ns.filter(n => n.s - o >= 16);
+    if (r === 1 || r === 3) { // a mutation every 4 bars (the original comes back): the tail on a chord tone of the next chord, a note up an octave
+      const kind = (S.h ^ (b.k * 7 + r)) % 3;
+      if (kind === 0 && ns.length) { const t = ns[ns.length - 1], g = S.tl.at(b.a * 16 + o + 32); t.p = fhSnapChord(t.p + (R() < .5 ? 2 : -2), g.ch); S.mut.push([b.a + r * 2, 'tail']); }
+      else if (kind === 1 && ns.length > 2) { const t = ns[1 + R.int(ns.length - 2)]; if (t.p + 12 <= hi + 5) { t.p += 12; S.mut.push([b.a + r * 2, 'oct']); } }
+      else if (ns.length) { const t = ns[ns.length - 1]; if (!t.b) t.b = -5; t.l = Math.max(t.l, 2); S.mut.push([b.a + r * 2, 'fall']); }
+    }
+    if (ld === 'm') ns.forEach((n, i) => { const nx = ns[i + 1]; n.l = Math.max(n.l, Math.min(8, (nx ? nx.s : o + 32) - n.s)); n.v = 90; delete n.b; });
+    out.push(...ns);
+    if (ld === 'T' && !S.monoLead) ns.filter(n => (n.s % 4) === 0).forEach(n => out.push(Object.assign({}, n, { p: n.p + 12, v: n.v - 22 })));
+    if (ld === 'T' && S.monoLead && r % 2 === 1) ns.forEach(n => { n.p += 12; });
+  }
+  return out;
+}
+function fhChordBlock(S, b) {
+  const c = b.col, m = c.ch, out = []; if (m === '.') return out;
+  const lo = 55, hi = 79, nv = 4, rhy = S.stabRhy; let prev = S.vPrev;
+  const voice = g => (prev = fhVoicing(g.ch, lo, hi, nv, prev, true));
+  if (m === 'S' || m === 't') {
+    for (let bar = 0; bar < 8; bar++) (m === 't' ? (bar === 0 ? [0] : []) : rhy).forEach((st, k) => {
+      const s = bar * 16 + st, g = S.tl.at(b.a * 16 + (st >= 13 ? bar * 16 + 16 : s)), v = voice(g), l = st >= 13 ? 2 : 1.5;
+      v.forEach((p, j) => out.push({ s, p, l, v: (k === 0 ? 104 : 96) - j * 2 }));
+    });
+  } else if (m === 's' || m === 'f') {
+    for (let s = 0; s < 128;) { const g = S.tl.at(b.a * 16 + s), e = Math.min(128, s + Math.min(16 - (s % 16), g.l - fhMod(b.a * 16 + s - g.s, S.tl.L))); voice(g).forEach((p, j) => out.push({ s, p, l: Math.max(1, e - s), v: (m === 'f' ? 84 : 92) - j * 2 })); s = e; }
+  } else if (m === 'g') {
+    for (let s = 0; s < 128; s += (s >= 96 ? 1 : 2)) { const g = S.tl.at(b.a * 16 + s), v = voice(g); v.forEach((p, j) => out.push({ s, p, l: s >= 96 ? .5 : 1, v: (s % 4 === 0 ? 100 : 88) - j * 2 })); }
+  } else if (m === 'a') {
+    for (let s = 0; s < 124; s++) { const g = S.tl.at(b.a * 16 + s), v = voice(g), up = s >= 64 ? 12 : 0, seq = [0, 1, 2, 3, 2, 1]; out.push({ s, p: v[seq[s % 6] % v.length] + up, l: 1, v: 70 + Math.round(s / 4) }); }
+  } else if (m === 'u') {
+    for (let s = 0; s < 124; s += (s >= 64 ? 1 : 2)) { const g = S.tl.at(b.a * 16 + s), v = voice(g); v.forEach((p, j) => out.push({ s, p, l: s >= 64 ? .75 : 1.5, v: Math.round(60 + 50 * s / 124) - j * 2 })); }
+  }
+  S.vPrev = prev;
+  return out;
+}
+// the PAD lane: an organ plays its riff (the bass of the groove: section 'o') or offbeat stabs ('s'); a pad holds the chords
+function fhPadBlock(S, b) {
+  const c = b.col, m = c.pd, out = []; if (m === '.') return out;
+  if (S.cls.PAD === 'organ') {
+    if (m === 'o') return fhBassBlock(S, b, 'PAD').mid.map(n => Object.assign(n, { v: Math.round(n.v * .92) }));
+    let prev = null;
+    for (let bar = 0; bar < 8; bar++) [2, 6, 10, 14].forEach(st => { const g = S.tl.at(b.a * 16 + bar * 16 + st); prev = fhVoicing(g.ch, 55, 72, 3, prev, true); prev.forEach((p, j) => out.push({ s: bar * 16 + st, p, l: 1.5, v: 88 - j * 3 })); });
+    return out;
+  }
+  let prev = null;
+  for (let s = 0; s < 128;) { const g = S.tl.at(b.a * 16 + s), e = Math.min(128, s + g.l - fhMod(b.a * 16 + s - g.s, S.tl.L)); prev = fhVoicing(g.ch, 52, 72, 4, prev, true); prev.forEach((p, j) => out.push({ s, p, l: Math.max(1, e - s), v: (m === 'o' ? 66 : 80) - j * 2 })); s = e; }
+  return out;
+}
+// the VOCALS lane: chops on chord tones (main chops and their ghosts), the chop lead (the hook on the pads), the choir pads on
+// each chord, hey / yeah tags, a teaser, the fade
+function fhVoxBlock(S, b) {
+  const c = b.col, m = c.vx, out = [], V = S.vox; if (m === '.' || !V) return out;
+  const R = S.R, N = (s, p, v, l = 1) => { if (p != null && p >= 0) out.push({ s, p, l, v: fhCl(Math.round(v), 1, 127) }); };
+  const padFor = (want, g, w) => { // the chop pad nearest the wanted pitch among the chord tones (any pad when none)
+    const tone = x => g.ch.pcs.has(fhMod(x.p, 12)), list = V.chops.filter(x => !w || x.w === w || V.mode === 'user');
+    let cand = V.mode === 'user' ? list : list.filter(tone); if (!cand.length && V.mode !== 'user') cand = V.chops.filter(tone); // no such vowel on a chord tone: any vowel
+    const pool = cand.length ? cand : V.chops; if (V.mode === 'user') return pool.length ? pool[R.int(pool.length)].pad : 0;
+    let best = pool[0], bd = 1e9; pool.forEach(x => { const d = Math.abs(x.p - want) + (x.w !== 'ooh' ? .5 : 0); if (d < bd) { bd = d; best = x; } }); return best ? best.pad : 0;
+  };
+  const choir = () => { for (let s = 0; s < 128;) { const g = S.tl.at(b.a * 16 + s), e = Math.min(128, s + Math.max(16, g.l - fhMod(b.a * 16 + s - g.s, S.tl.L))), pd = V.choir.get(g.ch.k); if (pd != null) N(s, pd, 84, Math.max(1, e - s)); s = e; } };
+  const chops = (from, to, vel = 1) => {
+    const rh = FH_CHOP[S.chopR], top = 74; let lastPad = null;
+    for (let s = from; s < to; s++) {
+      const ch = rh[(s % 32) + (s % 32 >= 16 ? 1 : 0)];
+      if (ch === 'X') { const g = S.tl.at(b.a * 16 + s), w = (s >> 4) % 4 === 3 && R() < .5 ? 'aah' : 'ooh'; lastPad = padFor(top - 5 + R.int(8), g, w); N(s, lastPad, (98 + R.int(10)) * vel); }
+      else if (ch === 'x' && lastPad != null) { const g = S.tl.at(b.a * 16 + s), x = V.chops.find(y => y.pad === lastPad); if (V.mode === 'user' || !x || g.ch.pcs.has(fhMod(x.p, 12))) N(s, lastPad, 54 * vel); else N(s, padFor(x.p, g), 54 * vel); }
+    }
+  };
+  if (m === 'p' || m === 'q') choir();
+  if (m === 'q') chops(64, 128, .85);
+  if (m === 'c') chops(0, 128);
+  if (m === 'f') chops(0, 128, .75);
+  if (m === 'h') { N(0, V.hey, 108); N(60, V.yeah, 96); chops(64, 128); }
+  if (m === 't') [0, 2, 4, 6].forEach(bar => { const g = S.tl.at(b.a * 16 + bar * 16 + 2); N(bar * 16 + 2, padFor(72, g, 'ooh'), 96); N(bar * 16 + 3, padFor(72, g, 'ooh'), 50); if (bar === 6) N(bar * 16 + 10, V.aah, 90); });
+  if (m === 'L') { // the chop lead: the hook's notes on the pads (chord tones on the strong steps), a ghost after the long ones
+    S.blkA = b.a; const cell = FH_MELS[S.chopHook], base = S.leadBase(S.chopHook, 64, 79);
+    for (let r = 0; r < 4; r++) fhCellNotes(S, cell, r * 32, base, null, { noBend: true }).forEach(n => { const g = S.tl.at(b.a * 16 + n.s), pd = padFor(n.p, g); N(n.s, pd, n.v); if (n.l >= 2 && n.s + 1 < 128 && S.tl.at(b.a * 16 + n.s + 1) === g) N(n.s + 1, pd, 52); });
+    N(0, V.hey, 100);
+  }
+  if (m === 'f') out.forEach(n => { n.v = fhCl(Math.round(n.v * (1 - .6 * n.s / 128)), 1, 127); });
+  return out;
+}
+function fhFxBlock(S, b) {
+  const c = b.col.fx, out = [], N = (s, p, v, l = 1) => out.push({ s, p, l, v: fhCl(Math.round(v), 1, 127) });
+  if (c === 'i' || c === 'G') { N(0, FH_XP.IMP, 110); N(0, FH_XP.CR, 100); }
+  if (c === 'o') { N(0, FH_XP.DOWN, 100); N(0, FH_XP.CR2, 90); }
+  if (c === 'r') N(112, FH_XP.SW, 96);
+  if (c === 'G') N(124, FH_XP.CV, 96);
+  if (c === 'b') { // the roll: 1/4, 1/8, 1/16, 1/16 with a 32nd beat, 32nds; the pitch steps up 0, 4, 8, 12; velocity 38 -> 127; beat 32 silent
+    N(0, FH_XP.RISE, 100); N(64, FH_XP.UP, 70);
+    const pad = s => (s < 32 ? FH_XP.ROLL : s < 64 ? FH_XP.R4 : s < 96 ? FH_XP.R8 : FH_XP.R12);
+    for (let s = 0; s < 124;) { N(s, pad(s), 38 + 89 * s / 124, .5); s += s < 32 ? 4 : s < 64 ? 2 : s < 108 ? 1 : .5; }
+    N(96, FH_XP.WHU, 64);
+  }
+  return out;
+}
+
+// ---------- 9. one song ----------
+function fhForm(tid) {
+  const T = FH_TPL[tid], cols = [], L = Object.fromEntries(FH_LANES.map(k => [k, T[k].replace(/\s+/g, '')]));
+  let c = 0; T.secs.forEach(([sec, n], si) => { for (let k = 0; k < n; k++, c++) cols.push(Object.assign({ sec, si, k }, Object.fromEntries(FH_LANES.map(x => [x, L[x][c]])))); });
+  const secs = []; cols.forEach((x, i) => { const last = secs[secs.length - 1]; if (last && last.si === x.si) last.bars += 8; else secs.push({ sec: x.sec, si: x.si, a: i * 8, bars: 8 }); });
+  return { tid, name: T.name, cols, secs, bars: cols.length * 8 };
+}
+function fhWriteSong(P, st) {
+  const id = st.id, sty = FH_STY[id], cur = typeof PAL === 'object' && PAL && PAL.cur && PAL.cur.id === id ? PAL.cur : null, pre = FH.snd && FH.snd.P === P ? FH.snd : null;
+  const seed = pre ? pre.seed : 1, R = genRng(seed), v = cur ? cur.v : 'normal';
+  const tid = pre ? pre.tid : 'A', form = fhForm(tid), key = genKey(P), scl = P.scale === 'major' ? 'major' : 'minor', SC = SCALES[scl], prog = FH_PROGS[P.gen.prog] || FH_PROGS[sty.progs[0]];
+  const S = { P, id, sty, R, h: seed, v, tid, form, key, scl, SC, prog, tl: fhTimeline(prog, key), mut: [], fills: [], vPrev: null, cls: pre ? pre.cls : { BASS: 'fmbass', STAB: 'chords', PAD: 'organ', LEAD: 'pluck' }, vox: pre ? pre.vox : null };
+  S.monoLead = !!(P.tracks[6].synth && P.tracks[6].synth.mono);
+  S.top = R.pick(sty.tops); S.rim = !!sty.rim || R() < .25; S.chopR = R.pick(Object.keys(FH_CHOP)); S.gate = false;
+  const hooks = S.cls.LEAD === 'pluck' ? sty.hooks.filter(x => x !== 'M3') : sty.hooks; S.hook = R.pick(hooks.length ? hooks : ['M1']); S.hook2 = R.pick(sty.hook2.filter(x => x !== S.hook).length ? sty.hook2.filter(x => x !== S.hook) : sty.hook2);
+  S.chopHook = S.cls.LEAD === 'vox' ? 'M4' : R.pick(['M2', 'M4']);
+  S.stabRhy = prog.stab || R.pick([[2, 6, 10, 13], [2, 6, 10, 14], [0, 3, 6, 10, 13], [2, 5, 8, 11, 14]]);
+  // the register of a cell: the octave that fits it best in lo..hi
+  const bases = {}; S.leadBase = (cid, lo, hi) => { const k = cid + lo + ':' + hi; if (fhHas(bases, k)) return bases[k]; const ps = FH_MELS[cid].map(m => S.SC[m.d - 1] + 12 * m.o); let best = 0, bc = 1e9;
+    [-24, -12, 0, 12, 24].forEach(o => { const t = fhRootIn(key, lo) + o, c = ps.reduce((a, d) => a + Math.max(0, lo - (t + d), t + d - hi), 0) + .01 * Math.abs(t - lo); if (c < bc) { bc = c; best = t; } }); return (bases[k] = best); };
+  // the bass patterns: a pair per section and char (seeded), the second bar answering
+  const pats = {}; S.bassPat = (blk, ch) => { const k = blk.col.si + ch; if (!pats[k]) { const pool = (sty.bass[ch] || sty.bass.A).filter(x => fhHas(FH_BASSES, x)), a = R.pick(pool), bb = pool.length > 1 && R() < .6 ? R.pick(pool.filter(x => x !== a)) : a; pats[k] = [a, bb]; } return pats[k]; };
+  // the rows: one per column
+  const cols = form.cols, n = Math.min(MAX_SCENES, cols.length);
+  if (S.cls.BASS === 'organ' && S.cls.PAD !== 'organ') cols.forEach(c => { if (c.pd === 'o' && c.bs === '.') c.bs = 'o'; }); // an organ bass plays the groove's riff itself
+  while (P.scenes.length < n) P.scenes.push({ name: 'SCENE ' + (P.scenes.length + 1) });
+  P.tracks.forEach(tr => { tr.clips = Array(P.scenes.length).fill(null); });
+  const blocks = cols.map((col, k) => {
+    const nx = cols[k + 1], b = { k, a: k * 8, col, sec: col.sec, half: col.k % 2 === 1, fill: '' };
+    if ((col.dr === 'F' || col.dr === 'K') && (!nx || nx.dr !== col.dr || col.k % 2 === 1)) { b.fill = col.fx === 'G' ? 'gap' : R.pick(['claps', 'snare', 'claps']); S.fills.push([b.a, b.fill]); }
+    return b;
+  });
+  S.blocks = blocks;
+  blocks.forEach(b => { if (b.k < n) P.scenes[b.k].name = `${FH_SEC_LBL[b.sec] || b.sec.toUpperCase()} ${b.a + 1}`.slice(0, 24); });
+  const swD = Math.round(fhCl((sty.swingR - .5) * 3 + R() * .045, .12, .3) * 1000) / 1000;
+  const grooveOf = t => (t === 0 ? { swing: swD, on: 16, humanize: { t: .02, v: .25 } } : t === 2 || t === 3 ? { swing: 0, on: 16, humanize: { t: 0, v: .06 } } : t === 1 || t === 7 ? { swing: 0, on: 16, humanize: { t: 0, v: .08 } } : { swing: 0, on: 16, humanize: { t: .02, v: .1 } });
+  S.swing = swD;
+  const put = (t, b, notes) => {
+    if (b.k >= n || !notes || !notes.length) return;
+    const ns = dedupe(genGrid(notes.filter(x => [x.s, x.p, x.l, x.v].every(Number.isFinite) && x.s >= 0 && x.s < 128).map(x => { const m = { s: x.s, p: fhCl(Math.round(x.p), 0, 127), l: Math.max(1 / 48, Math.min(x.l, 128 - x.s)), v: fhCl(Math.round(x.v), 1, 127) }; if (x.b) m.b = x.b; return m; })))
+      .sort((x, y) => x.s - y.s || x.p - y.p);
+    if (ns.length) P.tracks[t].clips[b.k] = { name: `${FH_SEC_LBL[b.sec] || 'BLOCK'} ${b.a + 1} ${P.tracks[t].name}`.slice(0, 24), bars: 8, notes: ns, groove: grooveOf(t) };
+  };
+  S.kicks = []; S.bassOnKick = 0; S.intended = 0;
+  blocks.forEach(b => {
+    const d = fhDrumBlock(S, b); S.kicks.push(d.kicks);
+    const bs = fhBassBlock(S, b, 'BASS'), lanes = { 0: d.notes, 1: fhVoxBlock(S, b), 2: S.cls.BASS && b.col.bs !== '.' ? bs.mid : [], 3: bs.sub, 4: fhChordBlock(S, b), 5: fhPadBlock(S, b), 6: fhLeadBlock(S, b), 7: fhFxBlock(S, b) };
+    // the gap: the last beat of a build and of a 'G' column silent (the FX and the vocal tag play)
+    if (b.col.fx === 'b' || b.col.fx === 'G') [0, 2, 3, 4, 5, 6].forEach(t => { lanes[t] = lanes[t].filter(x => x.s < 124).map(x => (x.s + x.l > 124 ? Object.assign({}, x, { l: 124 - x.s }) : x)); });
+    if (b.col.fx === 'G' && S.vox) lanes[1] = lanes[1].filter(x => x.s < 124).concat([{ s: 124, p: S.vox.yeah, l: 2, v: 100 }]);
+    // the intended kick steps (P6, P9) and the bass on kicks (0 by construction)
+    [2, 3, 5].forEach(t => lanes[t].forEach(x => { const bar = Math.floor(x.s / 16); if (Number.isInteger(x.s) && d.kicks[bar] && d.kicks[bar].has(x.s % 16)) { if (x.kick) S.intended++; else if (t !== 5 || (b.col.pd === 'o' && S.cls.PAD === 'organ')) S.bassOnKick++; } }));
+    Object.entries(lanes).forEach(([t, ns]) => put(+t, b, ns));
+  });
+  const nm = [...new Set(S.tl.segs.map(g => g.ch.name))].slice(0, 8);
+  P.gen.chords = nm; P.gen.marks = {};
+  FH.cur = { P, S };
+  FH.last = { id, tpl: tid, tplName: FH_TPL[tid].name, bars: form.bars, secs: form.secs.map(s => [s.sec, s.a, s.bars]), prog: P.gen.prog, progName: prog.name, chords: nm, key, scale: scl,
+    hook: S.hook, hook2: S.hook2, chopHook: S.chopHook, top: S.top, chopR: S.chopR, swing: swD, fills: S.fills, mut: S.mut, cls: Object.assign({}, S.cls), bassOnKick: S.bassOnKick, intended: S.intended,
+    vox: S.vox ? S.vox.mode : '', user: S.vox && S.vox.user ? S.vox.user.slice() : [], cols: cols.map(c => FH_LANES.map(x => c[x]).join('')), pats: Object.assign({}, pats), seed };
+  return S;
+}
+
+// ---------- 10. the arrangement and its automation ----------
+function fhLayout(P, S) {
+  P.tracks.forEach(tr => { tr.arr = []; S.blocks.forEach(b => { if (tr.clips[b.k]) tr.arr.push({ start: b.a, slot: b.k, len: 8, off: 0 }); }); });
+  return S.form.secs.map(s => [s.sec, s.a, s.bars]);
+}
+const fhHz = hz => fhCl(Math.log(Math.max(20, hz) / 20) / Math.log(1000), 0, 1);
+const fhPts = pts => { const m = new Map(); pts.filter(q => q.every(Number.isFinite) && q[0] >= 0).forEach(q => m.set(Math.round(q[0] * 48) / 48, [Math.round(q[0] * 48) / 48, fhCl(q[1], 0, 1), q[2] | 0])); return [...m.values()].sort((a, b) => a[0] - b[0]); };
+// the filter sweeps (the intro's chords opening, the build's chords and lead from dark to open, the breakdown's pad sweep, the
+// bass opening at the drops and closing in the outro), the HPF riser on every lane but the bass and the sub in each build (off at
+// the drop), the reverb macro of the breaks and builds (back at the drop), the chords' pitch riser (macro 2) over the builds,
+// the reverb wash of the crossover's outro
+function fhAuto(P, S) {
+  if (typeof autoArrSet !== 'function' || typeof autoImpl !== 'function' || typeof autoDefault !== 'function') return [];
+  const done = [], cols = S.form.cols, bars = S.form.bars, tr = n => P.tracks[FH_T[n]];
+  const lane = (t, id, pts) => { if (!t || !autoImpl(t, id) || pts.length < 2) return; autoArrSet(t, id, fhPts(pts)); done.push(t.name + ':' + id); };
+  const runs = f => { const r = []; cols.forEach((c, i) => { if (f(c)) { if (r.length && r[r.length - 1][1] === i) r[r.length - 1][1] = i + 1; else r.push([i, i + 1]); } }); return r.map(([a, b]) => [a * 8, b * 8]); };
+  const builds = runs(c => c.fx === 'b'), drops = runs(c => c.dr === 'F' || c.dr === 'h');
+  // the chords
+  const St = tr('STAB');
+  if (St && autoImpl(St, 'cut')) {
+    const d = autoDefault(St, 'cut'), pts = [[0, d, 2]];
+    runs(c => c.ch === 'f').forEach(([a, e]) => pts.push([a * 16, fhCl(d - .35, .02, 1), 0], [e * 16 - 1, fhCl(d - .15, .02, 1), 0], [e * 16, d, 2]));
+    // the held chords before the builds: a build's start (the end of the run before it) keeps the build's dark point (fhPts
+    // keeps the last point of a step)
+    runs(c => c.ch === 's').forEach(([a, e]) => pts.push([a * 16, fhCl(d - .25, .02, 1), 1], [Math.min(e, a + 16) * 16, d, 2]));
+    builds.forEach(([a, e]) => pts.push([a * 16, fhCl(d - .3, .02, 1), 0], [e * 16 - 4, fhCl(d + .05, .02, 1), 0], [e * 16, d, 2]));
+    lane(St, 'cut', pts);
+    if (autoImpl(St, 'mac2')) { const m0 = autoDefault(St, 'mac2'), pm = [[0, m0, 2]]; builds.forEach(([a, e]) => pm.push([(e - 4) * 16, m0, 0], [e * 16 - 4, fhCl(m0 + 1, 0, 1), 2], [e * 16, m0, 2])); lane(St, 'mac2', pm); }
+  }
+  const Pd = tr('PAD'); if (Pd && autoImpl(Pd, 'cut') && S.cls.PAD !== 'organ') { const d = autoDefault(Pd, 'cut'), pts = [[0, d, 2]]; runs(c => c.pd === 's').forEach(([a, e]) => pts.push([a * 16, fhCl(d - .25, .02, 1), 1], [e * 16 - 1, fhCl(d + .05, .02, 1), 2], [e * 16, d, 2])); lane(Pd, 'cut', pts); }
+  const Ld = tr('LEAD'); if (Ld && autoImpl(Ld, 'cut')) { const d = autoDefault(Ld, 'cut'), pts = [[0, d, 2]]; runs(c => c.ld !== '.').forEach(([a, e], i) => { if (i === 0) pts.push([a * 16, fhCl(d - .12, .02, 1), 0], [(a + 8) * 16, d, 2]); }); lane(Ld, 'cut', pts); }
+  // the bass
+  const B = tr('BASS'); if (B && autoImpl(B, 'cut')) { const d = autoDefault(B, 'cut'), pts = [[0, d, 2]]; drops.forEach(([a]) => pts.push([a * 16, fhCl(d - .12, .02, 1), 0], [(a + 8) * 16, d, 2])); const o = runs(c => c.sec === 'outro')[0]; if (o) pts.push([o[0] * 16, d, 0], [o[1] * 16 - 1, fhCl(d - .3, .02, 1), 2]); lane(B, 'cut', pts); }
+  // the HPF riser (the master high-pass of the references, lane by lane): 20 -> 250 Hz over each build, off at the drop
+  ['DRUMS', 'VOX', 'STAB', 'PAD', 'LEAD'].forEach(nm => {
+    const t = tr(nm); if (!t || !t.fx || t.fx.ftype !== 'highpass' || !builds.length) return;
+    const lo = autoDefault(t, 'tfreq'), pts = [[0, lo, 2]]; builds.forEach(([a, e]) => pts.push([a * 16, lo, 0], [e * 16 - 2, Math.max(lo, fhHz(250)), 2], [e * 16, lo, 2])); lane(t, 'tfreq', pts);
+  });
+  // the reverb macro: up through the breaks (15 -> 35 % of the way to 0.7) and the builds, back at the drop
+  ['STAB', 'PAD', 'VOX', 'LEAD', 'FX'].forEach(nm => {
+    const t = tr(nm); if (!t || !autoImpl(t, 'sendA')) return;
+    const d = autoDefault(t, 'sendA'), m = x => d + x * Math.max(0, .7 - d), pts = [[0, d, 2]];
+    runs(c => c.sec === 'breakdown' || c.fx === 'b').forEach(([a, e]) => pts.push([a * 16, m(.15), 0], [e * 16 - 2, m(.5), 2], [e * 16, d, 2]));
+    const o = S.tid === 'B' ? runs(c => c.sec === 'outro')[0] : null; if (o && (nm === 'STAB' || nm === 'VOX')) pts.push([o[0] * 16, d, 0], [o[1] * 16 - 1, Math.max(d, .6), 2]);
+    lane(t, 'sendA', pts);
+  });
+  const D = tr('DRUMS'); if (D && autoImpl(D, 'sendA')) { const d = autoDefault(D, 'sendA'); autoArrSet(D, 'sendA', [[0, d, 2], [bars * 16, d, 2]]); done.push('DRUMS:sendA'); }
+  if (Ld && S.cls.LEAD === 'vox' && typeof autoSetLegato === 'function') autoSetLegato(Ld, true, 40, 'ms');
+  S.auto = done; if (FH.last) FH.last.auto = done.slice();
+  return done;
+}
+
+// ---------- 11. sounds, kits, mix of a song ----------
+const FH_MIX = {
+  DRUMS: [{ comp: .2, eq: true, eqHp: 30, eqB2F: 4500, eqB2G: 1, eqB2Q: .8, ftype: 'highpass', freq: 20, res: .7 }, { vol: .55, sendA: .05 }],
+  VOX: [{ eq: true, eqHp: 200, eqHpS: 12, eqLp: 14000, sc: .3, scHold: .01, scRel: .14, ftype: 'highpass', freq: 20, res: .7 }, { vol: .8, sendA: .26, sendB: .2 }],
+  fmbass: [{ sc: .72, scHold: .015, scRel: .14, comp: .15, eq: true, eqHp: 140, eqHpS: 12, eqLp: 9000 }, { vol: .6 }],
+  bass: [{ sc: .7, scHold: .015, scRel: .14, comp: .15, eq: true, eqHp: 110, eqHpS: 12, eqLp: 8000 }, { vol: .6 }],
+  organ: [{ sc: .6, scHold: .015, scRel: .14, eq: true, eqHp: 90, eqHpS: 12, eqLp: 7000 }, { vol: .6, sendA: .05 }],
+  sub: [{ ftype: 'lowpass', freq: 120, res: .7, sc: .8, scHold: .015, scRel: .14 }, { vol: .5 }],
+  chords: [{ eq: true, eqHp: 200, eqB1F: 150, eqB1G: -3, eqB1Q: 1, eqLp: 12000, sc: .68, scHold: .005, scRel: .2, width: true, widthAmt: 1.3, widthMono: 200, ftype: 'highpass', freq: 20, res: .7 }, { vol: .82, sendA: .16, sendB: .05 }],
+  pad: [{ eq: true, eqHp: 200, eqB1F: 400, eqB1G: -2, eqB1Q: 1, eqLp: 8000, chorus: .1, sc: .5, scHold: .01, scRel: .2, ftype: 'highpass', freq: 20, res: .7 }, { vol: .62, sendA: .38 }],
+  organPad: [{ eq: true, eqHp: 80, eqHpS: 12, eqLp: 7000, sc: .55, scHold: .012, scRel: .14, ftype: 'highpass', freq: 20, res: .7 }, { vol: .58, sendA: .1, sendB: .05 }],
+  pluck: [{ eq: true, eqHp: 220, sc: .3, scHold: .01, scRel: .13, ftype: 'highpass', freq: 20, res: .7 }, { vol: .9, sendA: .18, sendB: .2 }],
+  vox: [{ eq: true, eqHp: 200, eqLp: 13000, sc: .3, scHold: .01, scRel: .13, ftype: 'highpass', freq: 20, res: .7 }, { vol: .9, sendA: .2, sendB: .2 }],
+  lead: [{ eq: true, eqHp: 250, eqLp: 13000, sc: .3, scHold: .01, scRel: .13, ftype: 'highpass', freq: 20, res: .7 }, { vol: .95, sendA: .15, sendB: .12 }],
+  FX: [{ eq: true, eqHp: 150, eqLp: 16000, ftype: 'highpass', freq: 20, res: .7 }, { vol: .6, sendA: .3, sendB: .1 }],
+};
+function fhClassOf(name, lane) {
+  if (fhHas(FH_CLASS, name)) { const c = FH_CLASS[name]; if (lane === 'PAD' && c !== 'organ') return 'pad'; if (lane === 'STAB' && c !== 'chords') return c === 'pluck' ? 'pluck' : 'chords'; return c; }
+  const n = String(name || '');
+  if (lane === 'BASS') return /organ/i.test(n) ? 'organ' : /fm|metal|donk|talk|growl/i.test(n) ? 'fmbass' : 'bass';
+  if (lane === 'PAD') return /organ/i.test(n) ? 'organ' : 'pad';
+  if (lane === 'STAB') return /pluck|bell|mallet|marimba|kalimba|piano|keys|\bep\b/i.test(n) ? 'pluck' : 'chords';
+  if (lane === 'LEAD') return /pluck|bell|mallet|marimba|kalimba|piano|keys|glass/i.test(n) ? 'pluck' : /vox|vocal|chop|formant|talk|choir/i.test(n) ? 'vox' : 'lead';
+  return '';
+}
+const FH_DRUM_PADS = () => {
+  const p = makePads('swedish');
+  [0, 1, 2, 3].forEach(k => Object.assign(p[k], { swing: 0, hum: 0 })); Object.assign(p[2], { offset: -2 }); // the clap a little early (5 ms)
+  const more = [['GHOST PUMP', 'hkickp', { level: 0, duck: true, swing: 0, hum: 0 }], ['RIM', 'rim', { level: .35, pan: .15 }], ['SNARE', 'psnare', { level: .6, swing: 0, hum: 0 }],
+    ['SOFT KICK', 'hkick', { level: .8, duck: true, key: true, swing: 0, hum: 0 }], ['TAMB', 'tamb', { level: .3, pan: -.2 }], ['SHAKER 2', 'shaker2', { level: .3, pan: .25 }],
+    ['CLAP VERB', 'hclap', { level: .5, decay: 2.5, swing: 0, hum: 0 }], ['TICK', 'chat', { level: .18, offset: -2, swing: 0, hum: 0 }]];
+  return p.concat(more.map(([name, voice, o]) => Object.assign({ name, voice }, PAD_BASE, o)));
+};
+function fhFxPads(P, S0) {
+  const p = makePads('housefx'), beat = 60 / P.bpm, rise = fvId('riser', [fhRootIn(S0.key, 48)], 8 * 4 * beat - beat, S0.seed % 97);
+  p[7] = Object.assign({ name: 'NOISE RISE', voice: 'smp' }, PAD_BASE, SAMPLE_PAD, { sample: rise, slice: -1, start: 0, end: 1, rev: false, choke: 0, level: .5, decay: 1 });
+  Object.assign(p[2], { level: .45 }); Object.assign(p[3], { level: .3 }); Object.assign(p[0], { level: .45 }); Object.assign(p[5], { level: .5 }); Object.assign(p[4], { level: .45, decay: .75 });
+  const roll = (name, tune) => Object.assign({ name, voice: 'snare2' }, PAD_BASE, { level: .5, tune });
+  return p.concat([roll('ROLL +4', 4), roll('ROLL +8', 8), roll('ROLL +12', 12), Object.assign({ name: 'CLAP VERB', voice: 'hclap' }, PAD_BASE, { level: .45, decay: 3 }),
+    Object.assign({ name: 'IMPACT LO', voice: 'impact' }, PAD_BASE, { level: .4, tune: -5 }), Object.assign({ name: 'WHOOP UP', voice: 'whoop' }, PAD_BASE, { level: .35, tune: 5 }),
+    Object.assign({ name: 'CRASH 2', voice: 'crash' }, PAD_BASE, { level: .28, tune: -2 }), Object.assign({ name: 'UPLIFT 2', voice: 'uplift' }, PAD_BASE, { level: .4, decay: 2 })]);
+}
+// the CPU budget with the style's own sounds (sounds 'style'): the dearest lane steps down to a cheaper preset of the style's lists
+function fhBudget(P, st, snd) {
+  if (typeof palCost !== 'function' || typeof PAL_LANE_POLY !== 'object' || typeof PAL_BUDGET !== 'number') return null;
+  const T = { BASS: 2, SUB: 3, STAB: 4, PAD: 5, LEAD: 6 }, role = { BASS: 'bass', SUB: 'sub', STAB: 'stab', PAD: 'pad', LEAD: 'lead' };
+  const name = ln => (P.tracks[T[ln]] && P.tracks[T[ln]].synth && P.tracks[T[ln]].synth.preset) || '', cost = ln => palCost(name(ln)) * (PAL_LANE_POLY[ln] || 1);
+  const total = () => Object.keys(T).reduce((a, ln) => a + (name(ln) ? cost(ln) : 0), 0), out = { before: Math.round(total() * 10) / 10, swaps: [] };
+  for (let k = 0; k < 5 && total() > PAL_BUDGET; k++) {
+    const opts = Object.keys(T).map(ln => [ln, [...new Set([].concat((st.pick && st.pick[role[ln]]) || [], (st.presets && st.presets[role[ln]]) || []))].filter(n => fhHas(SYNTH_PRESETS, n) && palCost(n) < palCost(name(ln))).sort((a, b) => palCost(a) - palCost(b))])
+      .filter(([, o]) => o.length).sort((a, b) => cost(b[0]) - cost(a[0]));
+    if (!opts.length) break;
+    const [ln, own] = opts[0]; out.swaps.push([ln, name(ln), own[0]]); P.tracks[T[ln]].synth = makeSynth(own[0]); if (snd && snd.chosen) snd.chosen[ln] = own[0];
+  }
+  out.after = Math.round(total() * 10) / 10; FH.budget = out;
+  return out;
+}
+function fhSounds(P, st, snd, rng) {
+  const sty = FH_STY[st.id], cur = typeof PAL === 'object' && PAL && PAL.cur && PAL.cur.id === st.id ? PAL.cur : null;
+  FH.budget = null; if (!cur || cur.s !== 'bank') fhBudget(P, st, snd);
+  let ih = 2166136261; for (let k = 0; k < st.id.length; k++) ih = Math.imul(ih ^ st.id.charCodeAt(k), 16777619) >>> 0;
+  const seed = (rng.int(4294967296) ^ (cur ? cur.seed : 0) ^ ih) >>> 0, R0 = genRng(seed ^ 0x2545f491), tid = fhW(R0, Object.entries(sty.tpl));
+  const key = genKey(P), scl = P.scale === 'major' ? 'major' : 'minor', prog = FH_PROGS[P.gen.prog] || FH_PROGS[sty.progs[0]];
+  const pre = t => (P.tracks[t].synth && P.tracks[t].synth.preset) || '';
+  const cls = { BASS: fhClassOf(pre(2), 'BASS'), SUB: 'sub', STAB: fhClassOf(pre(4), 'STAB'), PAD: fhClassOf(pre(5), 'PAD'), LEAD: fhClassOf(pre(6), 'LEAD') };
+  const mixOf = (t, kind) => { const m = FH_MIX[kind] || [{}, {}], tr = P.tracks[t]; tr.fx = Object.assign({}, FX_BASE, m[0]); tr.mix = Object.assign({}, MIX_BASE, m[1]); if (typeof fxSanitize === 'function') fxSanitize(tr.fx); };
+  mixOf(0, 'DRUMS'); mixOf(1, 'VOX'); mixOf(2, cls.BASS); mixOf(3, 'sub'); mixOf(4, cls.STAB); mixOf(5, cls.PAD === 'organ' ? 'organPad' : 'pad'); mixOf(6, cls.LEAD); mixOf(7, 'FX');
+  const D = P.tracks[0]; D.kit = 'swedish'; D.pads = FH_DRUM_PADS(); D.name = 'DRUMS';
+  // the vocals: the user's (when loaded), else the singer (Synth vox Auto), else the old synthesized voices (Off)
+  const S0 = { key, scl, SC: SCALES[scl], prog, seed, st };
+  const mode = fhUserVox().length ? 'user' : FH.mode === 'off' ? 'off' : 'synth';
+  const V = fhVoxPads(P, S0, mode), Vt = P.tracks[1];
+  Vt.pads = V.pads; Vt.kit = mode === 'off' ? 'vox' : 'user'; Vt.name = 'VOCALS'; Vt.vox = true;
+  const F = P.tracks[7]; F.kit = 'housefx'; F.pads = fhFxPads(P, S0); F.name = 'FX';
+  Object.assign(P.ret, { revType: 'hall', revSize: 2.6, revLevel: .55, revPre: .02, revDamp: 7000, revLc: 250, delTime: '3/16', delFb: .3, delTone: 7000, delLevel: .55 });
+  if (typeof masterProFix === 'function' && typeof MASTER_PRESETS === 'object' && MASTER_PRESETS.club)
+    P.master.pro = masterProFix(Object.assign(clone(MASTER_PRESETS.club.set), { gain: -2, drive: 5, target: -8, on: true, preset: 'club', scope: 'drop', mono: 120, ceil: -1.5 }));
+  FH.snd = { P, seed, tid, cls, vox: V.map };
+}
+
+// ---------- 12. the hooks of the generator and the palette ----------
+if (typeof genHouseSounds === 'function') {
+  const fhSnd0 = genHouseSounds;
+  genHouseSounds = function (P, st, rng) { // eslint-disable-line no-func-assign
+    const snd = fhSnd0.apply(this, arguments);
+    if (st && fhIs(st.id)) { try { fhSounds(P, st, snd, rng); } catch (e) { console.error('[dnb808] future house sounds', e); FH.snd = null; } }
+    return snd;
+  };
+}
+if (typeof genHouseClips === 'function') {
+  const fhClips0 = genHouseClips;
+  genHouseClips = function (P, st, rng, snd) { // eslint-disable-line no-func-assign
+    if (!(st && fhIs(st.id) && FH.snd && FH.snd.P === P)) return fhClips0.apply(this, arguments);
+    try { fhWriteSong(P, st); } catch (e) { console.error('[dnb808] future house writer', e); FH.cur = null; return fhClips0.apply(this, arguments); }
+    return undefined;
+  };
+}
+if (typeof genHouseLayout === 'function') {
+  const fhLayout0 = genHouseLayout;
+  genHouseLayout = function (P, st, snd) { // eslint-disable-line no-func-assign
+    if (!(st && fhIs(st.id) && FH.cur && FH.cur.P === P)) return fhLayout0.apply(this, arguments);
+    const S = FH.cur.S, plan = fhLayout(P, S);
+    try { const cur = typeof PAL === 'object' && PAL ? PAL.cur : null; if (cur && cur.id === st.id) { cur.plan = plan; cur.secs = plan.map(([sec, , bars]) => ({ sec, bars, ptags: [] })); cur.tpl = 'fh' + S.tid; } } catch (e) { /* no palette */ }
+    return plan;
+  };
+}
+if (typeof genHouseAuto === 'function') {
+  const fhAuto0 = genHouseAuto;
+  genHouseAuto = function (P, st, plan) { // eslint-disable-line no-func-assign
+    if (!(st && fhIs(st.id) && FH.cur && FH.cur.P === P)) return fhAuto0.apply(this, arguments);
+    try { fhAuto(P, FH.cur.S); } catch (e) { console.error('[dnb808] future house automation', e); }
+    finally { FH.cur = null; FH.snd = null; }
+    return undefined;
+  };
+}
+if (typeof palCatalog === 'function') {
+  const fhCat0 = palCatalog;
+  palCatalog = function () { // eslint-disable-line no-func-assign
+    const c = fhCat0.apply(this, arguments);
+    if (!FH.hide || !c || !Array.isArray(c.presets)) return c;
+    if (FH.viewOf !== c) { const presets = c.presets.filter(e => !FH_NAMES.includes(e.name)); FH.view = Object.assign({}, c, { presets, by: new Map(presets.map(x => [x.name, x])) }); FH.viewOf = c; }
+    return FH.view;
+  };
+}
+if (typeof palDrawSounds === 'function') {
+  const fhDraw0 = palDrawSounds;
+  palDrawSounds = function (P, st, cur) { // eslint-disable-line no-func-assign
+    const prev = FH.hide; FH.hide = !(st && fhIs(st.id));
+    try { return fhDraw0.apply(this, arguments); } finally { FH.hide = prev; }
+  };
+}
+// GENERATE SONG: the Synth vox mode (o.svox, else the dialog's choice, else Auto for these styles and Off for the others: a song
+// made by code keeps its old sound); the vocal pads of the other styles become the singer in Auto when no user vocals are loaded
+if (typeof genSong === 'function') {
+  const fhSong0 = genSong;
+  genSong = function (id, o) { // eslint-disable-line no-func-assign
+    const oo = o && typeof o === 'object' ? o : {}, top = FH.depth === 0, prev = FH.mode;
+    const mode = oo.svox === 'auto' || oo.svox === 'off' ? oo.svox : FH.req ? FH.req.svox : fhIs(id) ? 'auto' : 'off';
+    FH.depth++; if (top) FH.mode = mode;
+    try {
+      const p = fhSong0.apply(this, arguments);
+      if (top && p && !fhIs(id) && FH.mode === 'auto' && !fhUserVox().length) { try { const k = fvReplaceVoxPads(p); if (p.gen) FH.lastSynthVox = { id, pads: k }; } catch (e) { console.error('[dnb808] synth vox', e); } }
+      return p;
+    } finally { FH.depth--; if (top) FH.mode = prev; }
+  };
+}
+if (typeof genSongGo === 'function') {
+  const fhGo0 = genSongGo;
+  genSongGo = function (id, groove) { // eslint-disable-line no-func-assign
+    FH.last = null; const prev = FH.req; FH.req = { svox: FH.pref.svox };
+    let r;
+    try { r = fhGo0.apply(this, arguments); }
+    finally { FH.req = prev; fvGc(); }
+    try { if (typeof P === 'object' && P) fvQueue(fvIdsOf(P)); } catch (e) { /* rendered on demand */ }
+    try {
+      const q = FH.last;
+      if (fhIs(id) && q && typeof P === 'object' && P && P.gen && P.gen.style === id) {
+        const min = q.bars * 4 * 60 / P.bpm, vx = q.vox === 'user' ? 'your vocals' : q.vox === 'synth' ? 'the synth vocalist' : 'the classic vox voices';
+        flash(`Generated "${P.name}": ${GEN_STYLES[id].name} at ${P.bpm} BPM, the ${q.tplName} form (${q.bars} bars, ${Math.floor(min / 60)}:${String(Math.round(min % 60)).padStart(2, '0')}), ${q.progName} (${q.chords.join(' ')}), vocals: ${vx}. CTRL+Z goes back`);
+      }
+    } catch (e) { /* the message is optional */ }
+    return r;
+  };
+}
+
+// ---------- 13. the GENERATE dialog: Synth vox, LOAD VOCAL PACK, the vocal count ----------
+async function fvVocalCount() {
+  try { const idx = typeof voxIndex === 'function' ? await voxIndex() : []; const ids = new Set(); (idx || []).forEach(pk => (pk.files || []).forEach(f => { if (f && voxIsVocal(f.name)) ids.add(f.id); })); return ids.size; } catch (e) { return 0; }
+}
+function fvDialogCount(ov) {
+  const box = ov && ov.querySelector('#gs-vcount'), btn = ov && ov.querySelector('#gs-vload'); if (!box) return;
+  fvVocalCount().then(n => {
+    if (!box.isConnected) return;
+    box.textContent = FV.auto ? FV.autoMsg : `${n} vocal file${n === 1 ? '' : 's'} loaded`;
+    if (btn) btn.hidden = n > 0 && !FV.auto;
+  });
+}
+// is a record in this browser's store? A key-only lookup (getKey: the 5 MB of audio are not read); false when the store fails
+const fvDbHas = id => (typeof smpDbDo === 'function' ? smpDbDo('readonly', st => st.getKey(id)) : Promise.resolve(false)).then(k => k === id, () => false);
+// one vocal file: hashed, decoded, kept in this browser (the LOAD PACK storage path) -> { info, skipped, kept }. A file already
+// stored (by its content hash) is decoded from the bytes in hand and not written again
+async function fvStoreOne(name, bytes) {
+  if (!bytes || bytes.byteLength > SMP_MAX_MB * 1e6) throw new Error('too large');
+  const nm = fvVocalName(name), id = 'user:' + await smpHash(bytes);
+  if (await fvDbHas(id)) {
+    if (!SMP.bufs.has(id)) {
+      const buf = await smpDecode(bytes); if (buf.duration > SMP_MAX_SEC) throw new Error('too long');
+      smpAdd(id, buf, { name: nm, kind: 'user', slices: smpOnsets(buf), credit: '', url: '' }); SMP.jobs.set(id, Promise.resolve());
+    }
+    return { info: voxFileInfo(id, nm, SMP.bufs.get(id)), skipped: true, kept: true };
+  }
+  const r = await voxStore(nm, bytes);
+  return { info: voxFileInfo(r.id, nm, r.buf), skipped: false, kept: r.kept };
+}
+// the pack index of these files (no lane changed)
+async function fvIndexFiles(packName, got) {
+  if (!got.length) return;
+  await voxIndexAdd(packName, got.map(f => ({ id: f.id, name: f.name, dur: f.dur, bpm: f.bpm, key: f.key }))); fvRefresh();
+}
+// register vocal files as a pack, one at a time (each file's bytes are let go once it is stored)
+async function fvRegisterFiles(list, packName, opt = {}) {
+  const got = [], bad = []; let full = 0;
+  for (let k = 0; k < list.length; k++) {
+    const it = list[k];
+    if (opt.progress) opt.progress(k, list.length, it.name);
+    try {
+      const r = await fvStoreOne(it.name, it.bytes || await it.file.arrayBuffer()); it.bytes = null;
+      if (!r.kept) full++;
+      got.push(r.info);
+    } catch (e) { bad.push(it.name); }
+  }
+  await fvIndexFiles(packName, got);
+  return { got, bad, full };
+}
+async function fvLoadVocalPack(files, ov) {
+  if (typeof VOX === 'object' && VOX.busy) return;
+  if (typeof VOX === 'object') VOX.busy = true;
+  try {
+    const list = []; let packName = '';
+    for (const f of files.slice(0, VOX_MAX_FILES)) {
+      if (/\.zip$/i.test(f.name) || f.type === 'application/zip') { if (f.size > 400e6) continue; flash(`Unzipping ${f.name}...`); list.push(...await voxUnzip(await f.arrayBuffer())); packName = packName || f.name.replace(/\.zip$/i, ''); }
+      else if (voxIsAudio(f.name) || /^audio\//.test(f.type)) list.push({ name: f.name, file: f });
+    }
+    const L = list.slice(0, VOX_MAX_FILES).sort((a, b) => a.name.localeCompare(b.name));
+    if (!L.length) { flash('No audio files found (WAV, MP3, OGG, FLAC, AIFF, or a .zip of them)'); return; }
+    packName = (packName || `Vocals ${new Date().toLocaleDateString()} (${L.length} files)`).slice(0, 60);
+    const r = await fvRegisterFiles(L, packName, { progress: (k, n, name) => flash(`Loading ${k + 1}/${n}: ${name}`) });
+    flash(r.got.length ? `${r.got.length} vocal file${r.got.length === 1 ? '' : 's'} loaded${r.bad.length ? `, ${r.bad.length} could not be decoded` : ''}${r.full ? `. The storage of this browser is full: ${r.full} of them last for this session only` : ''}. GENERATE SONG uses them instead of the synth vocalist` : 'Could not decode the files');
+  } catch (e) { flash(`Could not load the pack: ${(e && e.message) || e}`); }
+  finally { if (typeof VOX === 'object') VOX.busy = false; fvDialogCount(ov); }
+}
+if (typeof genSongOpen === 'function') {
+  const fhOpen0 = genSongOpen;
+  genSongOpen = function (...a) { // eslint-disable-line no-func-assign
+    const r = fhOpen0.apply(this, a);
+    try {
+      const ov = $('#gensong-dialog'), anchor = ov && (ov.querySelector('.gs-snd') || ov.querySelector('.gs-var') || ov.querySelector('.gs-groove'));
+      if (anchor && !ov.querySelector('#gs-svox')) {
+        const lb = document.createElement('label'); lb.className = 'gs-groove gs-svox';
+        lb.dataset.info = 'SYNTH VOX: Auto = when no vocal pack of yours is loaded, a synthesized vocalist sings the vocal chops, tags and choir pads of the song (ooh, aah, oh, hey, yeah) in its key, on its chord tones; your own vocals always come first. Off = the classic synthesized vox voices';
+        lb.innerHTML = 'Synth vox <select id="gs-svox"><option value="auto">Auto</option><option value="off">Off</option></select>';
+        const sel = lb.querySelector('select'); sel.value = FH.pref.svox;
+        sel.addEventListener('change', e => { const v = e.target.value; if (v === 'auto' || v === 'off') { FH.pref.svox = v; try { localStorage.setItem('dnb808.fhSvox', v); } catch (er) { /* private */ } } });
+        const box = document.createElement('span'); box.className = 'gs-groove gs-vpack';
+        box.dataset.info = 'VOCAL PACK: load your own vocal files (WAV, MP3, OGG, FLAC, AIFF or a .zip). They stay in this browser and GENERATE SONG puts them on the vocal moments instead of the synthesized vocalist';
+        box.innerHTML = '<button class="btn" id="gs-vload" type="button" data-info="LOAD VOCAL PACK: pick your vocal files or a .zip of them. They stay in this browser (a saved set keeps only their keys)">LOAD VOCAL PACK</button> <small id="gs-vcount" data-info="Your vocal files in this browser">...</small>';
+        box.querySelector('#gs-vload').addEventListener('click', e => { e.stopPropagation(); voxPickFiles(SMP_ACCEPT + ',.zip,application/zip', true, fs => fvLoadVocalPack(fs, ov)); });
+        anchor.after(lb); lb.after(box); fvDialogCount(ov);
+      }
+    } catch (e) { /* the dialog changed */ }
+    return r;
+  };
+}
+
+// ---------- 14. the private vocal autoload (client side): GET /api/vox, then each file, in a worker ----------
+// The network runs in a worker (the page stays responsive; a missing API is a quiet 404 there). Every name is checked (an audio
+// extension, no path separator, no control character, 160 characters at most), sent encoded, shown as text only.
+// Time limits: the list 30 s, a file 180 s, and 15 s without a byte (a stalled connection): the request is aborted, that file
+// counts as failed for this load only (a later load asks again), the others go on.
+// Each file is stored as soon as it arrives, and the manifest ('fvox:autoload': name|size -> the stored id, or the time of a
+// failure) is written after each one: a reload in the middle goes on where it stopped, and only one file's bytes are held at a
+// time. A file that failed (an HTTP error, a file that does not decode) is asked again 24 h later, not at every load. When the
+// browser's storage is full: one warning (again 24 h later at most), the files of this load last for this session; while the
+// mark of a full storage is younger than 24 h, a load downloads one file only (it finds out if space was freed).
+const FV_NET_SRC = `onmessage = async e => { const { id, url, bin, max, tmo, idle } = e.data; const ac = new AbortController(); let tA = 0, tI = 0;
+  const kick = () => { clearTimeout(tI); tI = setTimeout(() => ac.abort(), idle); };
+  const fail = status => postMessage({ id, ok: false, status });
+  tA = setTimeout(() => ac.abort(), tmo); kick();
+  try { const r = await fetch(url, { cache: 'no-store', credentials: 'same-origin', signal: ac.signal }); kick();
+    if (!r.ok) { fail(r.status); return; } const n = +(r.headers.get('content-length') || 0); if (max && n > max) { ac.abort(); fail(413); return; }
+    const rd = r.body.getReader(), parts = []; let got = 0;
+    for (;;) { const c = await rd.read(); if (c.done) break; kick(); got += c.value.byteLength; if (max && got > max) { ac.abort(); fail(413); return; } parts.push(c.value); }
+    const u = new Uint8Array(got); let o = 0; parts.forEach(p => { u.set(p, o); o += p.byteLength; }); parts.length = 0;
+    if (bin) postMessage({ id, ok: true, bytes: u.buffer }, [u.buffer]);
+    else postMessage({ id, ok: true, text: new TextDecoder().decode(u).slice(0, 2000000) });
+  } catch (er) { fail(ac.signal.aborted ? 'timeout' : 0); } finally { clearTimeout(tA); clearTimeout(tI); } };`;
+const FV_NET = { w: null, n: 0, wait: new Map() }, FV_TMO = { list: 30000, file: 180000, idle: 15000 };
+function fvNet(url, bin, max, tmo) {
+  try {
+    if (!FV_NET.w) { FV_NET.w = new Worker(URL.createObjectURL(new Blob([FV_NET_SRC], { type: 'text/javascript' }))); FV_NET.w.onmessage = e => { const f = FV_NET.wait.get(e.data.id); if (f) { FV_NET.wait.delete(e.data.id); f(e.data); } }; }
+    const id = ++FV_NET.n, T = tmo || FV_TMO.file;
+    return new Promise(res => {
+      // the backstop on this side (a worker that never answers): the request counts as timed out
+      const bk = setTimeout(() => { if (FV_NET.wait.delete(id)) res({ id, ok: false, status: 'timeout' }); }, T + 5000);
+      FV_NET.wait.set(id, d => { clearTimeout(bk); res(d); });
+      FV_NET.w.postMessage({ id, url, bin: !!bin, max: max || 0, tmo: T, idle: Math.min(T, FV_TMO.idle) });
+    });
+  } catch (e) { return Promise.resolve({ ok: false, status: 0 }); }
+}
+const fvSafeName = n => typeof n === 'string' && n.length >= 5 && n.length <= 160 && !/[\u0000-\u001f\u007f/\\]/.test(n) && n.trim() === n && typeof voxIsAudio === 'function' && voxIsAudio(n);
+const FV_RETRY = 24 * 3600 * 1000, FV_QKEY = 'dnb808.fvQuota';
+const fvQuotaAt = () => { try { return +(localStorage.getItem(FV_QKEY) || 0); } catch (e) { return 0; } };
+async function fvAutoload() {
+  if (FV.auto || typeof location !== 'object' || !/^https?:$/.test(location.protocol) || typeof Worker !== 'function') return null;
+  FV.auto = { state: 'list' };
+  const base = location.origin + '/api/vox', res = { listed: 0, loaded: 0, skipped: 0, bad: 0, rejected: 0, held: 0, full: 0 };
+  try {
+    const r = await fvNet(base, false, 0, FV_TMO.list); if (!r.ok) { res.status = r.status; return res; }
+    let j; try { j = JSON.parse(r.text); } catch (e) { res.status = 'json'; return res; }
+    const raw = j && Array.isArray(j.files) ? j.files.slice(0, 256) : [], seen = new Set(), files = [];
+    raw.forEach(f => { const ok = f && fvSafeName(f.name) && Number.isFinite(+f.size) && +f.size > 0 && +f.size <= SMP_MAX_MB * 1e6 && !seen.has(f.name); if (ok) { seen.add(f.name); files.push({ name: f.name, size: Math.round(+f.size) }); } else res.rejected++; });
+    res.listed = files.length; if (!files.length) return res;
+    const man = (await smpDbGet('fvox:autoload')) || {}, map = man && man.map && typeof man.map === 'object' ? man.map : {}, got = [], N = Math.min(files.length, VOX_MAX_FILES);
+    const keep = () => smpDbPut('fvox:autoload', { map });
+    const q0 = fvQuotaAt(), warned = Date.now() - q0 < FV_RETRY && Date.now() >= q0; let full = false;
+    for (let k = 0; k < N; k++) {
+      const f = files[k], mk = f.name + '|' + f.size, m = fhHas(map, mk) && map[mk] && typeof map[mk] === 'object' ? map[mk] : null;
+      FV.autoMsg = `private vocals ${k + 1}/${N}`;
+      if (m && typeof m.id === 'string' && /^user:[0-9a-f]{8,64}$/i.test(m.id) && await fvDbHas(m.id)) { got.push({ id: m.id, name: fvVocalName(f.name), dur: +m.dur || 0, bpm: +m.bpm || 0, key: String(m.key || '').slice(0, 4) }); res.skipped++; continue; }
+      if (m && Number.isFinite(+m.fail) && Date.now() - m.fail < FV_RETRY && Date.now() >= m.fail) { res.held++; continue; } // failed less than 24 h ago
+      if (full && warned) { res.full++; continue; } // the storage was already full at an earlier load: no more downloads
+      flash(`Private vocals: downloading ${k + 1}/${N}: ${f.name}`);
+      const d = await fvNet(base + '?f=' + encodeURIComponent(f.name), true, SMP_MAX_MB * 1e6, FV_TMO.file);
+      if (!d.ok || !d.bytes) { res.bad++; if (d.status !== 'timeout' && d.status !== 0) { map[mk] = { fail: Date.now(), status: d.status }; await keep(); } continue; }
+      let one = null;
+      try { one = await fvStoreOne(f.name, d.bytes); } catch (e) { res.bad++; map[mk] = { fail: Date.now(), status: 'decode' }; await keep(); continue; }
+      got.push(one.info);
+      if (one.skipped) res.skipped++; else res.loaded++;
+      if (one.kept) { map[mk] = { id: one.info.id, dur: one.info.dur, bpm: one.info.bpm, key: one.info.key }; await keep(); }
+      else { // the storage is full: this file lasts for this session; one warning; the next loads download one file only
+        full = true; delete map[mk]; res.quota = true;
+        console.warn('[dnb808] private vocals: the storage of this browser is full');
+        if (!warned) { try { localStorage.setItem(FV_QKEY, String(Date.now())); } catch (e) { /* private mode */ } }
+      }
+    }
+    if (!full && q0) { try { localStorage.removeItem(FV_QKEY); } catch (e) { /* private mode */ } }
+    await fvIndexFiles('Private vocals', got);
+    if (res.quota && !warned) flash(`Private vocals: the storage of this browser is full. ${res.loaded} file${res.loaded === 1 ? '' : 's'} last${res.loaded === 1 ? 's' : ''} for this session only, the next loads will not download them again. Free some space (other sites' data, old vocal packs) and reload`);
+    else if (res.quota) flash(`Private vocals: ${got.length} file${got.length === 1 ? '' : 's'} ready, the storage of this browser is still full (${res.full} not downloaded). GENERATE SONG uses them`);
+    else if (got.length) flash(`Private vocals: ${got.length} file${got.length === 1 ? '' : 's'} ready (${res.skipped} already in this browser). GENERATE SONG uses them`);
+    return res;
+  } catch (e) { res.error = String((e && e.message) || e).slice(0, 80); return res; }
+  finally { FV.last = res; FV.auto = null; FV.autoMsg = ''; }
+}
+if (typeof window === 'object' && typeof setTimeout === 'function') setTimeout(() => { FV.autoJob = fvAutoload(); }, 1200);
 
 // ===================== 9. MIDI IMPORT =====================
 // Reads a Standard MIDI File (format 0 or 1, PPQ timing) and turns it into a new set:
