@@ -25970,8 +25970,10 @@ if (typeof renderBrowser === 'function') {
 // afro_melody_bass.md, keine_arrangement.md (technique only; every pattern, chord loop and motif here is original).
 // - SOUNDS: 12 presets (Tidal Pro and the keys mallet / flute models): a one-note pluck that morphs, a triangle pluck, a warped
 //   sine arp pluck, an FM marimba (3.5:1) and a tine kalimba (7:1), a mono saw lead with glide, delayed vibrato and a tape drift,
-//   a chorus pad (saw + PWM square + sub + noise), a band-passed root drone, a breathy flute, a held sine sub and a saturated mid
-//   bass, a layered chord stab. Levels fitted to -18 LUFS on the house audition phrases (the wave-4 method), low end mono.
+//   a chorus pad (saw + a detuned PWM square into a chorus), a band-passed root drone, a breathy flute, a held sine sub and a saturated mid
+//   bass, a layered chord stab. Levels fitted to -18 LUFS on the house audition phrases (the wave-4 method), low end mono. Live CPU
+//   (rev26): one voice per oscillator (the width from a detune and the rack chorus), short releases, filter drive for the grit,
+//   the rack EQ and reverb set but off (the lane's EQ and its send to the hall do that), at most 3 stab and 4 pad voices.
 // - GROOVE: ten original 16-step patterns (core roll, conga talk, tom engine, 3 over 4, 12/8 ghosts, 3-step, sub lock, minimal,
 //   percussion bed); kick, clap and bass straight, swing only on the 16th percussion (56-62 %, groove.swing = (r - .5) x 3),
 //   micro offsets on congas, bongos, rims; velocity shuffle; the variation engine: a micro change every bar, call and answer
@@ -25987,7 +25989,8 @@ if (typeof renderBrowser === 'function') {
 //   the main drop, a reverb + delay macro over the breakdown (back at the drop), delay throws on phrase tails, the outro drops the
 //   melody, then the bass.
 // Four styles (GEN_STYLES): kmkeys, kmperc, kmarp, kmmono. Old styles generate as before (the palette hides these presets from
-// their draws). Hooks (guarded wrappers): genHouseClips, genHouseLayout, genHouseAuto, genSongGo, palCatalog, palDrawSounds.
+// their draws). Hooks (guarded wrappers): genHouseSounds (the CPU budget), genHouseClips, genHouseLayout, genHouseAuto, genSongGo,
+// palCatalog, palDrawSounds.
 
 const kmHas = (o, k) => o != null && typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
 const kmCl = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -25999,11 +26002,17 @@ const kmM = (s, d, a, b) => ({ s, d, a, b: !!b });
 const KM_SINE = [[0, .5, -.35], [.25, 1, .35], [.5, .5, -.35], [.75, 0, .35], [1, .5, 0]];
 const KM_TRI = [[0, 0, 0], [.5, 1, 0], [1, 0, 0]];
 const KM_SAW = 2 / 3, KM_TRW = 1 / 3; // Basic Shapes: sine 0, triangle 1/3, saw 2/3, square 1
-const kmEq = (lc, hc = 12000, g2 = -2) => ({ xeOn: true, xeLc: lc, xeM2F: 3000, xeM2G: g2, xeM2Q: 1, xeHc: hc });
+// the rack EQ is set but off: in a song the lane's own EQ (the house mix kinds: low cut 90-300 Hz, high cut) does this job, and a
+// rack EQ is 12 more biquads a lane on the audio thread (rev26: 180 biquads a render quantum against the house styles' 84)
+const kmEq = (lc, hc = 12000, g2 = -2) => ({ xeOn: false, xeLc: lc, xeM2F: 3000, xeM2G: g2, xeM2Q: 1, xeHc: hc });
 const kmCh = (mix, rate = .5, depth = .45, delay = 9) => ({ xcOn: true, xcRate: rate, xcDepth: depth, xcDelay: delay, xcMix: mix });
 const kmDl = (mix, time = '3/16', fb = .3, tone = 4500) => ({ xyOn: true, xyTime: time, xyFb: fb, xyTone: tone, xyMix: mix, xyLc: 300 });
-const kmRv = (mix, size = 1.2, pre = .012, damp = .5) => ({ xrOn: true, xrMode: 'smooth', xrSize: size, xrDamp: damp, xrPre: pre, xrMix: mix, xrLc: 300, xrHc: 9000 });
-const kmSat = (drive, mix) => ({ xdOn: true, xdMode: 'tube', xdDrive: drive, xdMix: mix });
+// the rack reverb is set but off: a convolver a lane cost about 450 us of the 2.9 ms render quantum with five Keine lanes playing
+// (rev26); in a song the lane's send to the shared hall (HOUSE_TRACK sendA below, raised to match) gives the room
+const kmRv = (mix, size = 1.2, pre = .012, damp = .5) => ({ xrOn: false, xrMode: 'smooth', xrSize: size, xrDamp: damp, xrPre: pre, xrMix: mix, xrLc: 300, xrHc: 9000 });
+// the saturation: the drive of filter 1 (a 2x shaper in the voice) in place of the rack's tube stage, which is an AudioWorklet at 4x
+// oversampling a lane (rev26: the dearest stage of the bass lane live); the rack's settings are kept, off
+const kmSat = (drive, mix) => ({ f1drive: Math.round(drive * mix * .14 * 100) / 100, xdOn: false, xdMode: 'tube', xdDrive: drive, xdMix: mix });
 const kmWt = (o, ...fx) => Object.assign({ engine: 'wtpro', level: .6, lowMono: 200 }, o, ...fx);
 const KM_PRESETS = {
   // the one-note pluck: two saws 9 cents apart, a 20 ms pitch spike, LP24 with its envelope, a slow pitch drift, a timbre morph over
@@ -26017,9 +26026,10 @@ const KM_PRESETS = {
   'Tri Hook Pluck': kmWt({ o1table: 'Basic Shapes', o1pos: KM_TRW, o1vol: .85, o1rand: 0, f1type: 'lp12', f1cut: 4200, f1res: .1, f1key: .3,
     e1a: .002, e1d: .22, e1s: 0, e1r: .15, e2a: .001, e2d: .12, e2s: 0, mods: [kmM('env2', 'f1cut', .15), kmM('vel', 'f1cut', .06)] },
   kmSat(4, .35), kmEq(220, 12000, -1), kmRv(.4, 1.2)),
-  // the arp pluck: a sine bent 30 % (the warp follows the envelope), decay 270 ms, sustain 30 %, release 500 ms, chorus and room
-  'Warp Arp Pluck': kmWt({ o1table: 'Basic Shapes', o1pos: 0, o1vol: .85, o1rand: 0, o1warp: 'bend+', o1wamt: .3, o2table: 'Basic Shapes', o2pos: 0, o2oct: 1, o2vol: .06, o2rand: 0,
-    f1type: 'lp12', f1cut: 6000, f1key: .2, e1a: .002, e1d: .27, e1s: .3, e1r: .5, e2a: .002, e2d: .27, e2s: .3, e2r: .5, mods: [kmM('env2', 'o1wamt', .3), kmM('vel', 'o1wamt', .08)] },
+  // the arp pluck: a sine bent 30 % (a little more with the velocity), a 12 dB LP at 3.5 kHz that the envelope opens, decay 270 ms,
+  // sustain 30 %, release 220 ms, chorus (a warp amount the envelope moved cost 5 oscillators a note: rev26)
+  'Warp Arp Pluck': kmWt({ o1table: 'Basic Shapes', o1pos: 0, o1vol: .85, o1rand: 0, o1warp: 'bend+', o1wamt: .3, o2table: 'Basic Shapes', o2pos: 0, o2oct: 1, o2vol: 0, o2rand: 0,
+    f1type: 'lp12', f1cut: 3500, f1key: .2, e1a: .002, e1d: .27, e1s: .3, e1r: .22, e2a: .002, e2d: .27, e2s: .3, e2r: .22, mods: [kmM('env2', 'f1cut', .25), kmM('vel', 'o1wamt', .08)] },
   kmEq(200), kmCh(.2), kmRv(.4, 1.6)),
   // the mono lead: one saw (a second 6 cents flat), LP24 at 850 Hz with resonance, the plucky filter envelope (sustain 14 %),
   // glide 90 ms, a vibrato that waits 0.4 s, a tape drift on the pitch, soft clip, HPF 275 Hz, plate 11.5 %, quarter echo
@@ -26028,30 +26038,30 @@ const KM_PRESETS = {
     l1pts: KM_SINE, l1rate: 'hz', l1hz: 5.2, l1dly: .4, l1fade: .4, l3pts: KM_SINE, l3rate: 'hz', l3hz: .5, l3mode: 'free',
     mods: [kmM('env2', 'f1cut', .35), kmM('vel', 'f1cut', .05), kmM('lfo1', 'pitch', .005, true), kmM('lfo3', 'o1fine', .05, true), kmM('lfo3', 'o2fine', .06, true), kmM('mac1', 'f1cut', .25)] },
   kmSat(3, .4), kmEq(275, 11000, -1.5), kmDl(.15, '1/4', .35, 4000), kmRv(.115, 2.2, .02)),
-  // the chorus pad: saw + a PWM square at half level + a square sub + noise, a slow pitch LFO a hair deep, LP opening on macro 1,
-  // a two-line chorus, a long room; breathing envelope
-  'Chorus Drift Pad': kmWt({ lowMono: 220, o1table: 'Basic Shapes', o1pos: KM_SAW, o1vol: .7, o1voices: 3, o1det: .14, o1width: .8, o2table: 'Basic Shapes', o2pos: 1, o2vol: .35, o2warp: 'pwm', o2wamt: .15,
-    sub: .25, subShape: 'square', subOct: -1, noise: .04, noiseTone: 0, f1type: 'lp24', f1cut: 1700, f1res: .1, f1key: .2, e1a: 1.2, e1d: 1, e1s: .8, e1r: 2.5,
-    l1pts: KM_TRI, l1rate: 'hz', l1hz: 1.1, l1mode: 'free', l2pts: KM_SINE, l2rate: 'hz', l2hz: .06, l2mode: 'free',
-    mods: [kmM('lfo1', 'o1fine', .03, true), kmM('lfo1', 'o2wamt', .15, true), kmM('lfo2', 'f1cut', .04, true), kmM('mac1', 'f1cut', .35)],
-  }, kmEq(150, 10000, -2), { xeMF: 400, xeMG: -2 }, kmCh(.35, .5, .5, 5), kmRv(.3, 4, .03, .6)),
-  // the drone: a supersaw band-passed into the mids (750 Hz), a very slow LFO on the band and the level
-  'Mid Root Drone': kmWt({ lowMono: 300, o1table: 'Basic Shapes', o1pos: KM_SAW, o1vol: .8, o1voices: 5, o1uni: 'super', o1det: .25, o1width: .7, noise: .03, noiseTone: -.2,
+  // the chorus pad: one saw + a PWM square at half level 7 cents sharp (the drift is their beating), LP opening on macro 1, a
+  // two-line chorus, wider and wetter (the width a 3-voice unison gave), the hall on the send; breathing envelope, release 1.2 s
+  'Chorus Drift Pad': kmWt({ lowMono: 220, o1table: 'Basic Shapes', o1pos: KM_SAW, o1vol: .7, o2table: 'Basic Shapes', o2pos: 1, o2vol: .35, o2warp: 'pwm', o2wamt: .15, o2fine: 7,
+    f1type: 'lp12', f1cut: 1700, f1res: .15, f1key: .2, e1a: 1.2, e1d: 1, e1s: .8, e1r: 1.2,
+    l2pts: KM_SINE, l2rate: 'hz', l2hz: .06, l2mode: 'free', mods: [kmM('lfo2', 'f1cut', .04, true), kmM('mac1', 'f1cut', .35)],
+  }, kmEq(150, 10000, -2), { xeMF: 400, xeMG: -2 }, kmCh(.45, .5, .6, 5), kmRv(.3, 4, .03, .6)),
+  // the drone: a 3-voice supersaw band-passed into the mids (750 Hz), a very slow LFO on the band and the level
+  'Mid Root Drone': kmWt({ lowMono: 300, o1table: 'Basic Shapes', o1pos: KM_SAW, o1vol: .8, o1voices: 3, o1uni: 'super', o1det: .25, o1width: .7, noise: .03, noiseTone: -.2,
     f1type: 'bp12', f1cut: 750, f1res: .2, f2type: 'lp12', f2cut: 2500, e1a: 2, e1d: 1, e1s: 1, e1r: 3,
     l1pts: KM_SINE, l1rate: 'hz', l1hz: .03, l1mode: 'free', mods: [kmM('lfo1', 'f1cut', .06, true), kmM('lfo1', 'amp', .1, true), kmM('mac1', 'f1cut', .3)] },
   kmEq(250, 6000, 0), kmCh(.25), kmRv(.35, 3.5, .03, .6)),
-  // the sub: a sine, a soft 8 ms attack, held, a little tube, the lowest 32 Hz cut so the kick owns them; mono
+  // the sub: a sine, a soft 8 ms attack, held; mono (its rack low cut at 32 Hz is off: the SUB lane's low-pass does the shaping)
   'Held Deep Sub': kmWt({ mono: true, glide: .03, lowMono: 400, o1table: 'Basic Shapes', o1pos: 0, o1vol: .9, o1rand: 0, o1phase: 0, f1type: 'lp12', f1cut: 320, f1res: .1, f1key: .4,
-    e1a: .008, e1d: .2, e1s: 1, e1r: .08 }, kmSat(1.6, .15), kmEq(32, 2000, 0)),
+    e1a: .008, e1d: .2, e1s: 1, e1r: .08 }, kmEq(32, 2000, 0)),
   // the mid bass: saw + a square an octave down, ladder LP 320 Hz with a short envelope, glide 45 ms (legato), tube drive, HPF 100 Hz
   'Grit Mid Bass': kmWt({ mono: true, glide: .045, lowMono: 400, o1table: 'Basic Shapes', o1pos: KM_SAW, o1vol: .8, o1rand: 0, o1phase: 0, o2table: 'Basic Shapes', o2pos: 1, o2oct: -1, o2vol: .4, o2rand: 0, o2phase: 0,
     f1type: 'ladder', f1cut: 320, f1res: .35, f1key: .3, e1a: .002, e1d: .3, e1s: .7, e1r: .06, e2a: .001, e2d: .2, e2s: .15, e2r: .08,
-    mods: [kmM('env2', 'f1cut', .3), kmM('vel', 'f1cut', .1), kmM('mac1', 'f1cut', .3)], xkOn: true, xkThr: -18, xkRatio: 3, xkAtt: .001, xkRel: .06 },
+    mods: [kmM('env2', 'f1cut', .3), kmM('vel', 'f1cut', .1), kmM('mac1', 'f1cut', .3)] },
   kmSat(5, .35), kmEq(100, 6000, -1)),
-  // the chord stab: a deep saw layer (LP 800), a bright square layer an octave up (HP 400 into its own filter), grit on top
-  'Layer Chord Stab': kmWt({ fRoute: 'parallel', o1table: 'Basic Shapes', o1pos: KM_SAW, o1vol: .7, o1voices: 2, o1det: .1, o1width: .3, o1to: 'f1', o2table: 'Basic Shapes', o2pos: 1, o2oct: 1, o2vol: .3, o2voices: 2, o2det: .12, o2width: .9, o2to: 'f2',
-    f1type: 'lp24', f1cut: 800, f1res: .15, f1key: .3, f2type: 'hp12', f2cut: 400, f2res: .1, e1a: .005, e1d: .35, e1s: .1, e1r: .2, e2a: .002, e2d: .2, e2s: 0,
-    mods: [kmM('env2', 'f1cut', .25), kmM('vel', 'f1cut', .08), kmM('mac1', 'f1cut', .3)], xkOn: true, xkThr: -22, xkRatio: 3, xkAtt: .003, xkRel: .12 }, kmSat(4, .15), kmEq(200, 10000, -2), kmCh(.2), kmRv(.25, 2)),
+  // the chord stab: a deep saw layer (LP 800 with its envelope), a bright square layer an octave up, 8 cents sharp and unfiltered at a
+  // lower level (the lane's EQ cuts its lows), the rack chorus for the width
+  'Layer Chord Stab': kmWt({ o1table: 'Basic Shapes', o1pos: KM_SAW, o1vol: .7, o1to: 'f1', o2table: 'Basic Shapes', o2pos: 1, o2oct: 1, o2vol: .22, o2fine: 8, o2to: 'dry',
+    f1type: 'lp12', f1cut: 800, f1res: .2, f1key: .3, e1a: .005, e1d: .35, e1s: .1, e1r: .2, e2a: .002, e2d: .2, e2s: 0,
+    mods: [kmM('env2', 'f1cut', .25), kmM('vel', 'f1cut', .08), kmM('mac1', 'f1cut', .3)] }, kmEq(200, 10000, -2), kmCh(.32, .5, .55), kmRv(.25, 2)),
   // keys engine: the FM marimba (ratio 3.5, index about 2, mod decay 130 ms, carrier 2.2 s), the tine kalimba (ratio 7: the ping)
   'Wood FM Marimba': { engine: 'keys', model: 'mallet', level: .6, tone: 0, vel: .75, a: .002, d: 2.2, s: 0, r: 1.2, mRatio: 3.5, mIndex: 2.2, mDecay: .13, width: .4, lc: 200 },
   'Tine FM Kalimba': { engine: 'keys', model: 'mallet', level: .5, tone: 0, vel: .7, a: .003, d: .7, s: 0, r: .3, mRatio: 7, mIndex: 1.3, mDecay: .05, bAmt: .1, bTime: .03, width: .45, lc: 250 },
@@ -26060,8 +26070,8 @@ const KM_PRESETS = {
     vib: .25, vibRate: 5.2, vDelay: .35, vFade: .35, bAmt: -.4, bTime: .05, mono: true, glide: .05, width: 0, lc: 250 },
 };
 // level fitted to -18 LUFS on the audition phrase of its role (c26tests/kmlevel.mjs fit, the wave-4 phrases): [level, xOut dB]
-const KM_FIT = {"Pulse One-Note Pluck":[1,0.95],"Tri Hook Pluck":[1,8.92],"Warp Arp Pluck":[1,1.5],"Wood FM Marimba":[0.378,0],"Tine FM Kalimba":[0.604,0],"Glide Mono Lead":[0.782,0],
-  "Chorus Drift Pad":[0.639,0],"Mid Root Drone":[1,7.93],"Breath Reed Flute":[0.291,0],"Held Deep Sub":[1,2.74],"Grit Mid Bass":[1,4.03],"Layer Chord Stab":[1,3.59]};
+const KM_FIT = {"Pulse One-Note Pluck":[1,0.39],"Tri Hook Pluck":[0.756,0],"Warp Arp Pluck":[1,1.22],"Wood FM Marimba":[0.378,0],"Tine FM Kalimba":[0.604,0],"Glide Mono Lead":[0.218,0],
+  "Chorus Drift Pad":[0.639,0],"Mid Root Drone":[1,8.28],"Breath Reed Flute":[0.291,0],"Held Deep Sub":[1,2.07],"Grit Mid Bass":[0.936,0],"Layer Chord Stab":[1,4.43]};
 Object.entries(KM_PRESETS).forEach(([n, p]) => {
   if (kmHas(KM_FIT, n)) { p.level = KM_FIT[n][0]; if (p.engine === 'wtpro') p.xOut = KM_FIT[n][1]; }
   if (typeof SYNTH_PRESETS === 'object' && !kmHas(SYNTH_PRESETS, n)) SYNTH_PRESETS[n] = p;
@@ -26073,18 +26083,21 @@ const KM_CLASS = { 'Pulse One-Note Pluck': 'onenote', 'Tri Hook Pluck': 'pluck',
 // the sends and the sidechain each one is voiced with (section 3g2 reads HOUSE_TRACK): plucks barely duck, pads 3 dB, the sub 10 dB
 try {
   if (typeof HOUSE_TRACK === 'object' && HOUSE_TRACK) Object.entries({
-    'Pulse One-Note Pluck': [.06, .08, .1, .08], 'Tri Hook Pluck': [.06, .1, .1, .08], 'Warp Arp Pluck': [.08, .1, .1, .08], 'Glide Mono Lead': [.08, .1, .08, .08],
-    'Chorus Drift Pad': [.18, .04, .32, .2], 'Mid Root Drone': [.2, .03, .32, .2], 'Held Deep Sub': [0, 0, .7, .14], 'Grit Mid Bass': [0, 0, .5, .12], 'Layer Chord Stab': [.16, .08, .25, .14],
+    'Pulse One-Note Pluck': [.14, .08, .1, .08], 'Tri Hook Pluck': [.16, .1, .1, .08], 'Warp Arp Pluck': [.17, .1, .1, .08], 'Glide Mono Lead': [.12, .1, .08, .08],
+    'Chorus Drift Pad': [.3, .04, .32, .2], 'Mid Root Drone': [.32, .03, .32, .2], 'Held Deep Sub': [0, 0, .7, .14], 'Grit Mid Bass': [0, 0, .5, .12], 'Layer Chord Stab': [.24, .08, .25, .14],
     'Wood FM Marimba': [.1, .14, .1, .08], 'Tine FM Kalimba': [.16, .14, .1, .08], 'Breath Reed Flute': [.2, .16, .08, .08],
   }).forEach(([n, [a, b, sc, rel]]) => { if (!kmHas(HOUSE_TRACK, n)) HOUSE_TRACK[n] = { mix: { sendA: a, sendB: b }, fx: { chorus: 0, sc, scHold: .012, scRel: rel } }; });
 } catch (e) { /* no house section */ }
-// the palette (section 3x): role and tags; the CPU estimate (ms per second of audio, the palette's scale)
+// the palette (section 3x): role and tags; the CPU estimate (ms per second of audio, the palette's scale): measured with the
+// palette's own method (review3/wave5/palette/test/cpu.mjs: 3-note chords on the 8ths or a 16th line at 174 BPM, offline, minus an
+// empty lane; the lower of two runs), times 2.5, the median ratio of PAL_CPU_MS to the same run for six house presets (Deep House
+// Pad, House Pluck Saw, Afro Plug Lead, Swede Saw Chords, Afro EP Warm, House Rolling Bass); 30 the table's floor
 const KM_TAGS = { 'Pulse One-Note Pluck': ['pluck', 'house', 'modern', 'clean'], 'Tri Hook Pluck': ['pluck', 'house', 'clean', 'bright'], 'Warp Arp Pluck': ['pluck', 'house', 'clean', 'modern'],
   'Wood FM Marimba': ['pluck', 'house', 'ethnic', 'organic'], 'Tine FM Kalimba': ['pluck', 'house', 'ethnic', 'bright'], 'Glide Mono Lead': ['lead', 'house', 'vintage', 'soul'],
   'Chorus Drift Pad': ['pad', 'house', 'vintage', 'wide', 'soul'], 'Mid Root Drone': ['pad', 'house', 'dark', 'organic'], 'Breath Reed Flute': ['lead', 'house', 'ethnic', 'organic', 'soul'],
   'Held Deep Sub': ['sub', 'house', 'clean'], 'Grit Mid Bass': ['midbass', 'house', 'vintage'], 'Layer Chord Stab': ['stab', 'house', 'vintage', 'soul'] };
-const KM_CPU = { 'Pulse One-Note Pluck': 420, 'Tri Hook Pluck': 260, 'Warp Arp Pluck': 300, 'Wood FM Marimba': 60, 'Tine FM Kalimba': 60, 'Glide Mono Lead': 380, 'Chorus Drift Pad': 1300,
-  'Mid Root Drone': 900, 'Breath Reed Flute': 40, 'Held Deep Sub': 90, 'Grit Mid Bass': 300, 'Layer Chord Stab': 700 };
+const KM_CPU = { 'Pulse One-Note Pluck': 95, 'Tri Hook Pluck': 198, 'Warp Arp Pluck': 80, 'Wood FM Marimba': 88, 'Tine FM Kalimba': 30, 'Glide Mono Lead': 30, 'Chorus Drift Pad': 483,
+  'Mid Root Drone': 3455, 'Breath Reed Flute': 30, 'Held Deep Sub': 30, 'Grit Mid Bass': 30, 'Layer Chord Stab': 138 };
 try {
   if (typeof window === 'object') { const t = window.LEAD_PALETTE_TAGS || (window.LEAD_PALETTE_TAGS = {}); Object.entries(KM_TAGS).forEach(([n, x]) => { if (!kmHas(t, n)) t[n] = x; }); }
   if (typeof PAL_CPU_MS === 'object' && PAL_CPU_MS) Object.entries(KM_CPU).forEach(([n, v]) => { if (!kmHas(PAL_CPU_MS, n)) PAL_CPU_MS[n] = v; });
@@ -26217,14 +26230,17 @@ function kmTones(c, key, lv) {
   const f = KM_FAM[c.f] || KM_FAM.m, L = f[kmCl(lv + (c.up || 0), 0, 3)], root = kmMod(key + c.r, 12);
   return L.map(([i, k]) => ({ pc: kmMod(root + i, 12), k }));
 }
-// the number of voices of a lane at a level (stabs 2-4, pads 2-5)
-const kmVoices = (lane, lv, n) => Math.min(n, lane === 'PAD' ? [2, 3, 4, 5][lv] : [2, 3, 4, 4][lv]);
-// voice-leading distance: every new voice near an old one AND every old one near a new one (common tones = 0), max over both
+// the number of voices of a lane at a level (stabs 2-3, pads 2-4: rev26, the stab lane was the dearest live: 10 notes a second)
+const kmVoices = (lane, lv, n) => Math.min(n, lane === 'PAD' ? [2, 3, 4, 4][lv] : [2, 3, 3, 3][lv]);
+// voice-leading distance: every new voice near an old one AND every old one near a new one (common tones = 0), max over both; when
+// the voice count drops, the old voices farthest from the new ones are the ones that stop (one per missing voice), not moves
 function kmVL(a, b) {
   if (!a || !b || !a.length || !b.length) return 0;
   let m = 0;
   for (const x of b) { let n = 99; for (const y of a) { const d = x > y ? x - y : y - x; if (d < n) n = d; } if (n > m) m = n; }
-  for (const x of a) { let n = 99; for (const y of b) { const d = x > y ? x - y : y - x; if (d < n) n = d; } if (n > m) m = n; }
+  const drop = a.length > b.length, old = drop ? [] : null;
+  for (const x of a) { let n = 99; for (const y of b) { const d = x > y ? x - y : y - x; if (d < n) n = d; } if (drop) old.push(n); else if (n > m) m = n; }
+  if (drop) { old.sort((x, y) => x - y); for (let k = 0; k < b.length; k++) if (old[k] > m) m = old[k]; }
   return m;
 }
 // The candidate voicings of a chord (n voices in lo..hi), each with its own cost: the tones of its level first (pref), any other tone
@@ -26624,6 +26640,8 @@ function kmLeadBlock(S, blk) {
   }
   return res.filter(n => n.s < 128).map(n => { const m = { s: n.s, p: n.p, l: Math.min(n.l, 128 - n.s), v: n.v }; if (n.g) m.g = n.g; return m; });
 }
+// the intervals of a chord segment's tones (every level, the root, a My MIDI chord's own tones) over its bass note, cached on the segment
+const kmBassIv = (S, g) => g.iv || (g.iv = new Set(kmPool(g.c, S.key).map(t => t.pc).concat([g.root]).map(pc => kmMod(pc - g.bass, 12))));
 // the bass of one block: the group's pattern on the chord roots (or the pedal), mid bass + a sub on the main notes; nothing starts on a
 // step the kick plays (moved a 16th later or left out); one weighted mutation per 4-bar unit at most
 function kmBassBlock(S, blk, kicks) {
@@ -26644,10 +26662,13 @@ function kmBassBlock(S, blk, kicks) {
     else if (kind === 'fifth') { const r = notes.filter((n, i) => i > 0 && !n.g && kmMod(n.d, 12) === 0); if (r.length) r[Math.floor(S.rng() * r.length)].d += 7; }
     notes.forEach(n => {
       if (c === 'p' && n.g) return;
-      const st = blk.a * 16 + n.b * 16 + n.s, g = kmSegAt(S, n.next ? Math.min(S.form.bars * 16 - 1, st + 1) : st), maj = ['M', 'D', 'tM', 'L', 'X'].includes(g.c.f);
+      const st = blk.a * 16 + n.b * 16 + n.s, g = kmSegAt(S, n.next ? Math.min(S.form.bars * 16 - 1, st + 1) : st), iv = kmBassIv(S, g);
       let s = n.s; const kk = kicks[n.b] || new Set();
       if (kk.has(s)) { if (n.g) return; if (s + 1 < 16 && !kk.has(s + 1) && !notes.some(o => o !== n && o.b === n.b && o.s === s + 1)) s += 1; else return; }
-      const l = Math.max(1, Math.min(n.l - (s - n.s), 16 * (8 - n.b) - s)), dd = maj && kmMod(n.d, 12) === 3 ? n.d + 1 : n.d;
+      // the pattern's minor colours follow the chord (its tones over the bass note, My MIDI's too): the b3 becomes the 3 on a major
+      // chord, the b7 the 5 on a maj7 or a 6 chord (a b7 a semitone off the 6 or the maj7, a maj7 a semitone under the root)
+      const x12 = kmMod(n.d, 12), dd = x12 === 3 && iv.has(4) && !iv.has(3) ? n.d + 1 : x12 === 10 && !iv.has(10) && (iv.has(11) || iv.has(9)) ? n.d - 3 : n.d;
+      const l = Math.max(1, Math.min(n.l - (s - n.s), 16 * (8 - n.b) - s));
       const p = kmFold(kmRootIn(g.bass, 45) + dd, 40, 60), v = n.g ? 40 + Math.floor(kmRand(S.h, st, 5) * 15) : n.a ? 112 : 98;
       const m = { s: n.b * 16 + s, p, l: n.g ? 1 : l, v }; if (n.gl && mid.length) { const pv = mid[mid.length - 1]; if (pv.s + pv.l >= m.s - 1) { pv.l = m.s - pv.s; pv.g = Math.min(1, pv.l / 3); } }
       mid.push(m);
@@ -26695,7 +26716,7 @@ function kmArpBlock(S, blk, vo) {
   }
   return out;
 }
-// the pad of a block: the PAD voicings held (F 4-5 voices, s the two lowest), or the drone: the root held, a 5th above in the peaks
+// the pad of a block: the PAD voicings held (F up to 4 voices, s the two lowest), or the drone: the root held, a 5th above in the peaks
 function kmPadBlock(S, blk, vo) {
   const c = blk.col.pd; if (c === '.') return [];
   const A = blk.a * 16, out = [], v0 = c === 'F' ? 76 : c === 'p' ? 66 : 58;
@@ -26704,12 +26725,17 @@ function kmPadBlock(S, blk, vo) {
     if (c === 'F' && /drop|final/.test(blk.sec)) out.push({ s: 0, p: S.droneP + 7, l: 128, v: v0 - 18 });
     return out;
   }
-  let run = null;
+  // the common tones of two chords are held through the change (one voice, no new attack): only the voices that move start again
+  let held = new Map(), end = -1;
   S.segs.filter(g => g.s < A + 128 && g.s + g.l > A).forEach(g => {
     let vv = vo.get(g) || []; if (c === 's') vv = vv.slice(0, 2);
-    const s = Math.max(0, g.s - A), e = Math.min(128, g.s + g.l - A);
-    if (run && run.key === vv.join() && run.end === s) { run.notes.forEach(n => { n.l += e - s; }); run.end = e; return; }
-    run = { key: vv.join(), end: e, notes: vv.map(p => ({ s, p, l: e - s, v: v0 })) }; out.push(...run.notes);
+    const s = Math.max(0, g.s - A), e = Math.min(128, g.s + g.l - A), next = new Map();
+    vv.forEach(p => {
+      const n = end === s && held.get(p);
+      if (n) n.l += e - s; else { const m = { s, p, l: e - s, v: v0 }; out.push(m); next.set(p, m); return; }
+      next.set(p, n);
+    });
+    held = next; end = e;
   });
   return out;
 }
@@ -26739,7 +26765,14 @@ function kmFxBlock(S, blk) {
 // ---------- 10. one song ----------
 // a My MIDI loop (section 3z: the bound chords) as a progression of this engine: its tones, roots and bass notes, its lengths
 function kmMmProg(b, key) {
-  const ch = b.chordsA.map((c, i) => ({ mm: true, croot: c.croot != null ? c.croot : c.root, bassPc: b.chords[i] ? b.chords[i].root : c.root, tones: c.tones.map(t => ({ pc: t.pc, k: t.k })), name: c.name, l: c.mmL, f: 'mm' }));
+  const all = b.chordsA.map((c, i) => ({ mm: true, croot: c.croot != null ? c.croot : c.root, bassPc: b.chords[i] ? b.chords[i].root : c.root, tones: c.tones.map(t => ({ pc: t.pc, k: t.k })), name: c.name, l: c.mmL, f: 'mm' }));
+  // a chord of fewer than 2 pitch classes (an empty or a one-note chord) is no chord to voice: its time goes to the chord before it
+  const ch = []; let carry = 0;
+  all.forEach(c => {
+    if (new Set(c.tones.map(t => t.pc)).size < 2) { if (ch.length) ch[ch.length - 1].l += c.l; else carry += c.l; return; }
+    c.l += carry; carry = 0; ch.push(c);
+  });
+  if (!ch.length) return null;
   ch.forEach(c => { c.r = kmMod(c.croot - key, 12); });
   return { name: 'My MIDI: ' + (b.rec && b.rec.name ? String(b.rec.name).slice(0, 40) : 'progression'), scale: b.scale, ch, mm: true };
 }
@@ -26752,8 +26785,8 @@ function kmWriteSong(P, st, rng) {
   const tid = kmW(R, Object.entries(sty.tpl)), form = kmForm(tid, R, v, P.bpm), key = genKey(P), scale = genScaleId(P);
   const S = { P, id, sty, rng: R, h: seed, form, key, scale, vl: [], mut: [], fills: [], layers: [], tpl: tid, progs: Object.assign({}, KM_PROGS) };
   // the progressions: My MIDI's bound loop, or the style's (a generated one: built here from the seed), and the breakdown's reveal
-  const mm = typeof mmBound === 'function' ? mmBound(P) : null;
-  if (mm) { S.progs.mm = kmMmProg(mm, key); S.main = 'mm'; S.mm = true; }
+  const mm0 = typeof mmBound === 'function' ? mmBound(P) : null, mmp = mm0 ? kmMmProg(mm0, key) : null, mm = mmp ? mm0 : null;
+  if (mm) { S.progs.mm = mmp; S.main = 'mm'; S.mm = true; }
   else {
     S.main = P.gen.prog;
     if (kmHas(KM_GEN, S.main)) S.progs[S.main] = kmGenProg(KM_GEN[S.main].scale, R, key);
@@ -26889,10 +26922,14 @@ function kmAuto(P, S) {
       const d = autoDefault(t, id), m = x => d + x * Math.max(0, cap - d), pts = [[0, d, 2], [K[0] * 16, d, 0], [(D - 1) * 16, m(.65), 0], [D * 16 - 2, m(.8), 2], [D * 16, d, 2]];
       // the second, short wash in the bridge (20 -> 60 %, cut at the next section)
       S.form.secs.filter(s => s.sec === 'bridge' && s.a >= D).forEach(s => pts.push([s.a * 16, m(.2), 0], [(s.a + s.bars) * 16 - 2, m(.6), 2], [(s.a + s.bars) * 16, d, 2]));
-      // delay throws: the last beat of every 8-bar phrase the lead (or the chops) plays, outside the wash
+      // delay throws: the last beat of every 8-bar phrase the lead (or the chops) plays, outside the wash; a phrase that ends where a
+      // wash starts (the kick-out, the bridge) throws nothing: kmPts keeps one point a step, the throw's return would replace the
+      // wash's start and hold the lane flat
+      const taken = new Set(pts.map(x => Math.round(x[0] * 48)));
       if (id === 'sendB' && (n === 'LEAD' || n === 'FX')) S.blocks.forEach(b => {
         const on = n === 'LEAD' ? b.col.ld === 'F' || b.col.ld === 'p' : b.col.vx === 'F' || b.col.vx === 'p', e = (b.a + 8) * 16;
-        if (on && !(b.a >= K[0] && b.a < D) && !S.form.secs.some(s => s.sec === 'bridge' && b.a >= s.a && b.a < s.a + s.bars) && e < bars * 16) pts.push([e - 4, Math.max(.45, d + .3), 2], [e, d, 2]);
+        if (on && !(b.a >= K[0] && b.a < D) && !S.form.secs.some(s => s.sec === 'bridge' && b.a >= s.a && b.a < s.a + s.bars) && e < bars * 16
+          && !taken.has(Math.round(e * 48)) && !taken.has(Math.round((e - 4) * 48))) pts.push([e - 4, Math.max(.45, d + .3), 2], [e, d, 2]);
       });
       lane(t, id, pts);
     });
@@ -26958,6 +26995,38 @@ if (typeof palDrawSounds === 'function') {
   palDrawSounds = function (P, st, cur) { // eslint-disable-line no-func-assign
     const prev = KM.hide; KM.hide = !(st && kmIs(st.id));
     try { return kmDraw0.apply(this, arguments); } finally { KM.hide = prev; }
+  };
+}
+// the CPU budget with the style's own sounds too (sounds 'style', or no palette request: the palette's budget runs on its 'bank'
+// draws only): the dearest lane steps down to a cheaper preset of the style's own lists for its role until the set fits PAL_BUDGET
+function kmBudget(P, st, snd) {
+  if (typeof palCost !== 'function' || typeof PAL_LANE_POLY !== 'object' || typeof PAL_BUDGET !== 'number') return null;
+  const T = { BASS: 2, SUB: 3, STAB: 4, PAD: 5, LEAD: 6 }, role = { BASS: 'bass', SUB: 'sub', STAB: 'stab', PAD: 'pad', LEAD: 'lead' };
+  const name = ln => (P.tracks[T[ln]] && P.tracks[T[ln]].synth && P.tracks[T[ln]].synth.preset) || '', cost = ln => palCost(name(ln)) * (PAL_LANE_POLY[ln] || 1);
+  const total = () => Object.keys(T).reduce((a, ln) => a + (name(ln) ? cost(ln) : 0), 0), out = { before: Math.round(total() * 10) / 10, swaps: [] };
+  for (let k = 0; k < 5 && total() > PAL_BUDGET; k++) {
+    const opts = Object.keys(T).map(ln => { const own = [...new Set([].concat((st.pick && st.pick[role[ln]]) || [], (st.presets && st.presets[role[ln]]) || []))].filter(n => kmHas(SYNTH_PRESETS, n) && palCost(n) < palCost(name(ln)));
+      return [ln, own.sort((a, b) => palCost(a) - palCost(b) || (a < b ? -1 : 1))]; }).filter(([, o]) => o.length).sort((a, b) => cost(b[0]) - cost(a[0]));
+    if (!opts.length) break;
+    const [ln, own] = opts[0], tr = P.tracks[T[ln]], was = name(ln), n = own[0];
+    tr.synth = makeSynth(n); out.swaps.push([ln, was, n]);
+    const h = typeof HOUSE_TRACK === 'object' && HOUSE_TRACK && kmHas(HOUSE_TRACK, n) ? HOUSE_TRACK[n] : null;
+    if (h && h.mix) Object.assign(tr.mix, { sendA: h.mix.sendA, sendB: h.mix.sendB });
+    if (h && h.fx && Number.isFinite(h.fx.chorus)) tr.fx.chorus = h.fx.chorus;
+    if (snd && snd.chosen) snd.chosen[ln] = n;
+  }
+  out.after = Math.round(total() * 10) / 10; KM.budget = out;
+  return out;
+}
+if (typeof genHouseSounds === 'function') {
+  const kmSnd0 = genHouseSounds;
+  genHouseSounds = function (P, st, rng) { // eslint-disable-line no-func-assign
+    const snd = kmSnd0.apply(this, arguments);
+    if (st && kmIs(st.id)) {
+      KM.budget = null;
+      try { const cur = typeof PAL === 'object' && PAL && PAL.cur && PAL.cur.id === st.id ? PAL.cur : null; if (!cur || cur.s !== 'bank') kmBudget(P, st, snd); } catch (e) { console.error('[dnb808] keine budget', e); }
+    }
+    return snd;
   };
 }
 // GENERATE SONG: the info line says the form, the loop and the groove
