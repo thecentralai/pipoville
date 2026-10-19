@@ -841,6 +841,33 @@ harmony families, sounds and growl feel, loops in the loop library and a song te
   song key; regenerating a single lane uses the app's harmony
 - Imports are capped per file (too big for a MIDI file is skipped) and a long import can be stopped with Cancel
 
+## Afro house in the style of the Keinemusik scene
+
+- Four styles in GENERATE SONG: Organic Keys Afro House, Tribal Perc Afro House, Melodic Arp Afro House and Hypnotic
+  One-Note House (118-124 BPM, 7-9 minute DJ forms; inspired by &ME, Rampa, Adam Port and Keinemusik)
+- 12 sounds: one-note and triangle plucks, arp pluck, FM marimba, kalimba, glide mono lead, chorus pad, root drone, breath
+  flute, layered chord stab, deep sub and grit mid bass, level-matched with the house presets
+- Groove: kick, clap and bass stay on the grid, swing and small delays only on the percussion; a change every bar, call
+  and response every 2 bars, a rotating fill every 8 (never the same twice in a row), a new layer every 16
+- Chord evolution: rootless m7 / m9 / m11 voicings, voices move 2 semitones at most, new chords only on 16-bar
+  boundaries, one change per 16-bar block, faster harmony after the breakdown. Harmony: My MIDI uses the same engine
+- Arrangement and automation: subtractive forms, the bass filter opening over 16-32 bars, a high-pass rise before the
+  main drop, reverb and delay up in the breakdown and back at the drop, delay throws on phrase ends
+
+## Warp and vocal tracks
+
+- AUTO WARP finds the tempo, the transients, the key and the phrases of an audio clip and puts warp markers on the
+  grid. Drag a marker (snap 1/16, Alt = free), double-click to add one, Delete or right-click to remove it, RESET
+- Warp modes: BEATS (keeps the transients, for drums), TONES (voices; old sets in STRETCH use it), COMPLEX (full mixes
+  and pads), RE-PITCH and OFF. FORMANTS keeps the voice natural when it is transposed
+- Long vocals: full acapellas up to 8.5 minutes, clips up to 256 bars, START offset and LOOP on / off. Long files are
+  stretched in a worker with a progress line
+- + VOCAL TRACK adds an audio track with a vocal chain (high-pass, de-esser, compressor, reverb and delay sends).
+  Drop a vocal on the arrangement: tempo and key are found and the clip follows the song key. THROWS opens the delay
+  and reverb sends on the end of each phrase
+- GENERATE SONG: with vocal phrases in your loaded packs, full phrases go into the breakdowns and drops (option Vocal
+  phrases). The audio stays in this browser and is never bundled
+
 ## Shortcuts
 
 | Key | Action |

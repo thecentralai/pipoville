@@ -9062,7 +9062,11 @@ const AUD_JOIN = .003;        // the crossfade where one segment continues the o
 const AUD_CUT = .005;         // the fade when a clip stops or jumps
 const AUD_DECLICK = .0015;    // the fade-in of a segment that does not continue another one
 const AUD_FIT_MAX = 32, AUD_FIT_MB = 400; // cached stretched buffers
-const AUD_PACK_FILES = 128, AUD_PACK_MB = 600;
+const AUD_PACK_FILES = 128, AUD_PACK_MB = 1000; // a pack: 4 full acapellas at the file limit of the warp (section 3z) fit
+// the largest file a song pack may hold: the warp's limit (a full acapella) when section 3z is in, else AUD_MAX_MB
+const audFileMB = () => { try { return Math.max(AUD_MAX_MB, +WARP_MAX_FILE_MB || 0); } catch (e) { return AUD_MAX_MB; } };
+// the longest clip a song pack may set: the warp's limit when section 3z is in, else 32 bars
+const audMaxBars = () => { try { return Math.max(32, +WARP_MAX_BARS || 0); } catch (e) { return 32; } };
 const AUD_COLORS = ['#ff8f6b', '#5fe3b0', '#d6a6ff', '#ffd36b'];
 const AUD_MODES = [['stretch', 'STRETCH'], ['repitch', 'REPITCH'], ['off', 'OFF']];
 const AUD_MODE_INFO = { stretch: 'STRETCH: the loop follows the set tempo and keeps its pitch (moved to the set key when TO KEY is on)',
@@ -9545,7 +9549,7 @@ async function audZipDropped(f, tg) {
 // ---------- zip: read (stored and deflate entries) and write (stored) ----------
 async function audUnzip(ab) {
   const u = new Uint8Array(ab), dv = new DataView(ab), out = [], td = new TextDecoder();
-  let e = -1, tot = 0;
+  let e = -1, tot = 0; const maxB = audFileMB() * 1e6;
   for (let k = u.length - 22; k >= Math.max(0, u.length - 65557); k--) if (dv.getUint32(k, true) === 0x06054b50) { e = k; break; }
   if (e < 0) throw new Error('not a zip file');
   const n = dv.getUint16(e + 10, true); let p = dv.getUint32(e + 16, true);
@@ -9556,7 +9560,7 @@ async function audUnzip(ab) {
     const path = td.decode(u.subarray(p + 46, Math.min(u.length, p + 46 + nl))).replace(/\\/g, '/'); p += 46 + nl + xl + cl;
     const name = path.split('/').pop();
     if (!name || /(^|\/)__MACOSX\//.test(path) || name.startsWith('._') || !(audIsAudioName(name) || /\.json$/i.test(name))) continue;
-    if (flags & 1 || csize === 0xffffffff || usize > AUD_MAX_MB * 1e6 || lo + 30 > u.length || dv.getUint32(lo, true) !== 0x04034b50) continue;
+    if (flags & 1 || csize === 0xffffffff || usize > maxB || lo + 30 > u.length || dv.getUint32(lo, true) !== 0x04034b50) continue;
     const d0 = lo + 30 + dv.getUint16(lo + 26, true) + dv.getUint16(lo + 28, true);
     if (d0 + csize > u.length || (tot += usize) > AUD_PACK_MB * 1e6) continue;
     const comp = u.subarray(d0, d0 + csize);
@@ -9629,7 +9633,7 @@ async function audImportPack(f, ents) {
             if (!(+a.bpm > 0)) a.bpm = auto.audio.bpm;
             if (a.key == null) a.key = auto.audio.key;
             if (a.mode == null && !(+a.bpm > 0)) a.mode = 'off';
-            if (!AUD_BARS.includes(c.bars)) c.bars = auto.bars;
+            if (!(Number.isInteger(c.bars) && c.bars >= 1 && c.bars <= audMaxBars())) c.bars = auto.bars; // a free length (FIT) stays
             if (!c.name) c.name = auto.name;
           }
         }
@@ -9681,6 +9685,7 @@ async function audExportPack() {
     const r = await audPackBlob(clone(savedSet()));
     download(r.blob, fileBase() + '.songpack.zip');
     flash(`Saved ${fileBase()}.songpack.zip: the set and ${r.files} audio file${r.files === 1 ? '' : 's'} (${(r.blob.size / 1e6).toFixed(1)} MB). Open it in any browser with OPEN SONG PACK` +
+      (r.blob.size > AUD_PACK_MB * 1e6 ? `. It is larger than ${AUD_PACK_MB} MB: OPEN SONG PACK loads its first ${AUD_PACK_MB} MB of audio only` : '') +
       (r.missing.length ? `. Not in this browser, left out: ${r.missing.slice(0, 3).join(', ')}` : ''));
   } catch (err) { flash('Could not save the song pack: ' + ((err && err.message) || err)); }
   finally { AUD.busy = false; }
@@ -25959,6 +25964,2280 @@ if (typeof renderBrowser === 'function') {
 @media (max-width:640px){.lib-head{gap:4px}.lib-panel .lib-tabs .btn{padding:0 5px;font-size:10px}.lib-panel.mm .lib-count{font-size:10px}.mm-opts select{max-width:48%}}`;
   try { const s = document.createElement('style'); s.id = 'mm-css'; s.textContent = css; document.head.append(s); } catch (e) { /* no document */ }
 })();
+// ===================== 3z2. KEINE: ORGANIC AFRO HOUSE SOUNDS, GROOVE, HARMONY, MELODY, FORM AND AUTOMATION (wave 6) =====================
+// The owner: "Keinemusik-like synths, arrangements, automation and projects, with chord-evolution systems and progressions designed
+// like afro house, so we capture that addictive groove". Research: research6/keine_synths.md, afro_chords.md, afro_groove.md,
+// afro_melody_bass.md, keine_arrangement.md (technique only; every pattern, chord loop and motif here is original).
+// - SOUNDS: 12 presets (Tidal Pro and the keys mallet / flute models): a one-note pluck that morphs, a triangle pluck, a warped
+//   sine arp pluck, an FM marimba (3.5:1) and a tine kalimba (7:1), a mono saw lead with glide, delayed vibrato and a tape drift,
+//   a chorus pad (saw + PWM square + sub + noise), a band-passed root drone, a breathy flute, a held sine sub and a saturated mid
+//   bass, a layered chord stab. Levels fitted to -18 LUFS on the house audition phrases (the wave-4 method), low end mono.
+// - GROOVE: ten original 16-step patterns (core roll, conga talk, tom engine, 3 over 4, 12/8 ghosts, 3-step, sub lock, minimal,
+//   percussion bed); kick, clap and bass straight, swing only on the 16th percussion (56-62 %, groove.swing = (r - .5) x 3),
+//   micro offsets on congas, bongos, rims; velocity shuffle; the variation engine: a micro change every bar, call and answer
+//   every 2, an event every 4, a rotating fill every 8 (never the same twice in a row), a layer every 16, the form every 32.
+// - HARMONY: 12 original progressions (aeolian, dorian, phrygian, one major) and a generator; rootless voicings in MIDI 52-72,
+//   voice-led (common tones held, the other voices 2 semitones at most), off-beat stab rhythms, the bVII pushed an 8th early, a
+//   tonic pedal, extensions that grow (m7 -> m9 -> m11), one dimension changed per 16 bars, new chords on 16-bar edges only, the
+//   harmonic rhythm doubled after the breakdown. My MIDI (section 3z): its bound chords go through the same voicing and evolution.
+// - MELODY + BASS: the motif and bassline banks with weighted mutations (1 per 4 bars at most, the original back every 16), the
+//   lead answers the vocal chops in bars 2 and 4, the bass avoids the kick's steps, ghost notes, a sub + mid layer.
+// - FORM + AUTOMATION: three long templates (subtractive grids, 8-bar columns), varied by the seed and the palette's Variation;
+//   percussion pairs in and out on 8-bar edges, one kick-out, the bass LPF opening over 16-32 bars, an HPF riser 2-4 bars before
+//   the main drop, a reverb + delay macro over the breakdown (back at the drop), delay throws on phrase tails, the outro drops the
+//   melody, then the bass.
+// Four styles (GEN_STYLES): kmkeys, kmperc, kmarp, kmmono. Old styles generate as before (the palette hides these presets from
+// their draws). Hooks (guarded wrappers): genHouseClips, genHouseLayout, genHouseAuto, genSongGo, palCatalog, palDrawSounds.
+
+const kmHas = (o, k) => o != null && typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
+const kmCl = (v, a, b) => Math.min(b, Math.max(a, v));
+const kmMod = (a, n) => ((a % n) + n) % n;
+const KM = { last: null, cur: null, hide: false, view: null, viewOf: null };
+
+// ---------- 1. the presets ----------
+const kmM = (s, d, a, b) => ({ s, d, a, b: !!b });
+const KM_SINE = [[0, .5, -.35], [.25, 1, .35], [.5, .5, -.35], [.75, 0, .35], [1, .5, 0]];
+const KM_TRI = [[0, 0, 0], [.5, 1, 0], [1, 0, 0]];
+const KM_SAW = 2 / 3, KM_TRW = 1 / 3; // Basic Shapes: sine 0, triangle 1/3, saw 2/3, square 1
+const kmEq = (lc, hc = 12000, g2 = -2) => ({ xeOn: true, xeLc: lc, xeM2F: 3000, xeM2G: g2, xeM2Q: 1, xeHc: hc });
+const kmCh = (mix, rate = .5, depth = .45, delay = 9) => ({ xcOn: true, xcRate: rate, xcDepth: depth, xcDelay: delay, xcMix: mix });
+const kmDl = (mix, time = '3/16', fb = .3, tone = 4500) => ({ xyOn: true, xyTime: time, xyFb: fb, xyTone: tone, xyMix: mix, xyLc: 300 });
+const kmRv = (mix, size = 1.2, pre = .012, damp = .5) => ({ xrOn: true, xrMode: 'smooth', xrSize: size, xrDamp: damp, xrPre: pre, xrMix: mix, xrLc: 300, xrHc: 9000 });
+const kmSat = (drive, mix) => ({ xdOn: true, xdMode: 'tube', xdDrive: drive, xdMix: mix });
+const kmWt = (o, ...fx) => Object.assign({ engine: 'wtpro', level: .6, lowMono: 200 }, o, ...fx);
+const KM_PRESETS = {
+  // the one-note pluck: two saws 9 cents apart, a 20 ms pitch spike, LP24 with its envelope, a slow pitch drift, a timbre morph over
+  // about 8 bars; macro 1 opens the cutoff (the tail rings longer); 3/16 echo
+  'Pulse One-Note Pluck': kmWt({ mono: true, o1table: 'Basic Shapes', o1pos: KM_SAW, o1vol: .8, o1rand: 0, o2table: 'Basic Shapes', o2pos: KM_SAW, o2fine: 9, o2vol: .45, o2rand: 0,
+    f1type: 'lp24', f1cut: 700, f1res: .32, f1key: .35, e1a: .004, e1d: .26, e1s: 0, e1r: .12, e2a: .002, e2d: .19, e2s: 0, e2r: .1, e3a: .001, e3d: .022, e3s: 0, e3r: .02,
+    l1pts: KM_SINE, l1rate: 'hz', l1hz: .7, l1mode: 'free', l2pts: KM_SINE, l2rate: 'hz', l2hz: .064, l2mode: 'free',
+    mods: [kmM('env2', 'f1cut', .4), kmM('vel', 'f1cut', .06), kmM('env3', 'pitch', .5), kmM('lfo1', 'o1fine', .07, true), kmM('lfo1', 'o2fine', .09, true), kmM('lfo2', 'f1cut', .05, true), kmM('mac1', 'f1cut', .3)], xkOn: true, xkThr: -20, xkRatio: 3, xkAtt: .003, xkRel: .1 },
+  kmEq(180), kmCh(.2), kmDl(.17), kmRv(.3, 1.2)),
+  // the triangle pluck: a little drive, a short envelope, no sustain, a short wide room (1.2 s, 40 %)
+  'Tri Hook Pluck': kmWt({ o1table: 'Basic Shapes', o1pos: KM_TRW, o1vol: .85, o1rand: 0, f1type: 'lp12', f1cut: 4200, f1res: .1, f1key: .3,
+    e1a: .002, e1d: .22, e1s: 0, e1r: .15, e2a: .001, e2d: .12, e2s: 0, mods: [kmM('env2', 'f1cut', .15), kmM('vel', 'f1cut', .06)] },
+  kmSat(4, .35), kmEq(220, 12000, -1), kmRv(.4, 1.2)),
+  // the arp pluck: a sine bent 30 % (the warp follows the envelope), decay 270 ms, sustain 30 %, release 500 ms, chorus and room
+  'Warp Arp Pluck': kmWt({ o1table: 'Basic Shapes', o1pos: 0, o1vol: .85, o1rand: 0, o1warp: 'bend+', o1wamt: .3, o2table: 'Basic Shapes', o2pos: 0, o2oct: 1, o2vol: .06, o2rand: 0,
+    f1type: 'lp12', f1cut: 6000, f1key: .2, e1a: .002, e1d: .27, e1s: .3, e1r: .5, e2a: .002, e2d: .27, e2s: .3, e2r: .5, mods: [kmM('env2', 'o1wamt', .3), kmM('vel', 'o1wamt', .08)] },
+  kmEq(200), kmCh(.2), kmRv(.4, 1.6)),
+  // the mono lead: one saw (a second 6 cents flat), LP24 at 850 Hz with resonance, the plucky filter envelope (sustain 14 %),
+  // glide 90 ms, a vibrato that waits 0.4 s, a tape drift on the pitch, soft clip, HPF 275 Hz, plate 11.5 %, quarter echo
+  'Glide Mono Lead': kmWt({ mono: true, glide: .09, o1table: 'Basic Shapes', o1pos: KM_SAW, o1vol: .8, o1rand: 0, o2table: 'Basic Shapes', o2pos: KM_SAW, o2fine: -6, o2vol: .25, o2rand: 0,
+    f1type: 'lp24', f1cut: 850, f1res: .35, f1key: .3, e1a: .004, e1d: .6, e1s: .75, e1r: .22, e2a: .008, e2d: .5, e2s: .14, e2r: .2,
+    l1pts: KM_SINE, l1rate: 'hz', l1hz: 5.2, l1dly: .4, l1fade: .4, l3pts: KM_SINE, l3rate: 'hz', l3hz: .5, l3mode: 'free',
+    mods: [kmM('env2', 'f1cut', .35), kmM('vel', 'f1cut', .05), kmM('lfo1', 'pitch', .005, true), kmM('lfo3', 'o1fine', .05, true), kmM('lfo3', 'o2fine', .06, true), kmM('mac1', 'f1cut', .25)] },
+  kmSat(3, .4), kmEq(275, 11000, -1.5), kmDl(.15, '1/4', .35, 4000), kmRv(.115, 2.2, .02)),
+  // the chorus pad: saw + a PWM square at half level + a square sub + noise, a slow pitch LFO a hair deep, LP opening on macro 1,
+  // a two-line chorus, a long room; breathing envelope
+  'Chorus Drift Pad': kmWt({ lowMono: 220, o1table: 'Basic Shapes', o1pos: KM_SAW, o1vol: .7, o1voices: 3, o1det: .14, o1width: .8, o2table: 'Basic Shapes', o2pos: 1, o2vol: .35, o2warp: 'pwm', o2wamt: .15,
+    sub: .25, subShape: 'square', subOct: -1, noise: .04, noiseTone: 0, f1type: 'lp24', f1cut: 1700, f1res: .1, f1key: .2, e1a: 1.2, e1d: 1, e1s: .8, e1r: 2.5,
+    l1pts: KM_TRI, l1rate: 'hz', l1hz: 1.1, l1mode: 'free', l2pts: KM_SINE, l2rate: 'hz', l2hz: .06, l2mode: 'free',
+    mods: [kmM('lfo1', 'o1fine', .03, true), kmM('lfo1', 'o2wamt', .15, true), kmM('lfo2', 'f1cut', .04, true), kmM('mac1', 'f1cut', .35)],
+  }, kmEq(150, 10000, -2), { xeMF: 400, xeMG: -2 }, kmCh(.35, .5, .5, 5), kmRv(.3, 4, .03, .6)),
+  // the drone: a supersaw band-passed into the mids (750 Hz), a very slow LFO on the band and the level
+  'Mid Root Drone': kmWt({ lowMono: 300, o1table: 'Basic Shapes', o1pos: KM_SAW, o1vol: .8, o1voices: 5, o1uni: 'super', o1det: .25, o1width: .7, noise: .03, noiseTone: -.2,
+    f1type: 'bp12', f1cut: 750, f1res: .2, f2type: 'lp12', f2cut: 2500, e1a: 2, e1d: 1, e1s: 1, e1r: 3,
+    l1pts: KM_SINE, l1rate: 'hz', l1hz: .03, l1mode: 'free', mods: [kmM('lfo1', 'f1cut', .06, true), kmM('lfo1', 'amp', .1, true), kmM('mac1', 'f1cut', .3)] },
+  kmEq(250, 6000, 0), kmCh(.25), kmRv(.35, 3.5, .03, .6)),
+  // the sub: a sine, a soft 8 ms attack, held, a little tube, the lowest 32 Hz cut so the kick owns them; mono
+  'Held Deep Sub': kmWt({ mono: true, glide: .03, lowMono: 400, o1table: 'Basic Shapes', o1pos: 0, o1vol: .9, o1rand: 0, o1phase: 0, f1type: 'lp12', f1cut: 320, f1res: .1, f1key: .4,
+    e1a: .008, e1d: .2, e1s: 1, e1r: .08 }, kmSat(1.6, .15), kmEq(32, 2000, 0)),
+  // the mid bass: saw + a square an octave down, ladder LP 320 Hz with a short envelope, glide 45 ms (legato), tube drive, HPF 100 Hz
+  'Grit Mid Bass': kmWt({ mono: true, glide: .045, lowMono: 400, o1table: 'Basic Shapes', o1pos: KM_SAW, o1vol: .8, o1rand: 0, o1phase: 0, o2table: 'Basic Shapes', o2pos: 1, o2oct: -1, o2vol: .4, o2rand: 0, o2phase: 0,
+    f1type: 'ladder', f1cut: 320, f1res: .35, f1key: .3, e1a: .002, e1d: .3, e1s: .7, e1r: .06, e2a: .001, e2d: .2, e2s: .15, e2r: .08,
+    mods: [kmM('env2', 'f1cut', .3), kmM('vel', 'f1cut', .1), kmM('mac1', 'f1cut', .3)], xkOn: true, xkThr: -18, xkRatio: 3, xkAtt: .001, xkRel: .06 },
+  kmSat(5, .35), kmEq(100, 6000, -1)),
+  // the chord stab: a deep saw layer (LP 800), a bright square layer an octave up (HP 400 into its own filter), grit on top
+  'Layer Chord Stab': kmWt({ fRoute: 'parallel', o1table: 'Basic Shapes', o1pos: KM_SAW, o1vol: .7, o1voices: 2, o1det: .1, o1width: .3, o1to: 'f1', o2table: 'Basic Shapes', o2pos: 1, o2oct: 1, o2vol: .3, o2voices: 2, o2det: .12, o2width: .9, o2to: 'f2',
+    f1type: 'lp24', f1cut: 800, f1res: .15, f1key: .3, f2type: 'hp12', f2cut: 400, f2res: .1, e1a: .005, e1d: .35, e1s: .1, e1r: .2, e2a: .002, e2d: .2, e2s: 0,
+    mods: [kmM('env2', 'f1cut', .25), kmM('vel', 'f1cut', .08), kmM('mac1', 'f1cut', .3)], xkOn: true, xkThr: -22, xkRatio: 3, xkAtt: .003, xkRel: .12 }, kmSat(4, .15), kmEq(200, 10000, -2), kmCh(.2), kmRv(.25, 2)),
+  // keys engine: the FM marimba (ratio 3.5, index about 2, mod decay 130 ms, carrier 2.2 s), the tine kalimba (ratio 7: the ping)
+  'Wood FM Marimba': { engine: 'keys', model: 'mallet', level: .6, tone: 0, vel: .75, a: .002, d: 2.2, s: 0, r: 1.2, mRatio: 3.5, mIndex: 2.2, mDecay: .13, width: .4, lc: 200 },
+  'Tine FM Kalimba': { engine: 'keys', model: 'mallet', level: .5, tone: 0, vel: .7, a: .003, d: .7, s: 0, r: .3, mRatio: 7, mIndex: 1.3, mDecay: .05, bAmt: .1, bTime: .03, width: .45, lc: 250 },
+  // the flute: breath tuned to the note's harmonics, a chiff before the tone, a waiting vibrato, a small scoop, legato glide
+  'Breath Reed Flute': { engine: 'keys', model: 'flute', level: .35, tone: -.1, vel: .45, a: .06, d: .3, s: 1, r: .12, h2: .2, drive: .12, breath: .4, bA: .02, bD: .06, bS: .25, bTone: 3,
+    vib: .25, vibRate: 5.2, vDelay: .35, vFade: .35, bAmt: -.4, bTime: .05, mono: true, glide: .05, width: 0, lc: 250 },
+};
+// level fitted to -18 LUFS on the audition phrase of its role (c26tests/kmlevel.mjs fit, the wave-4 phrases): [level, xOut dB]
+const KM_FIT = {"Pulse One-Note Pluck":[1,0.95],"Tri Hook Pluck":[1,8.92],"Warp Arp Pluck":[1,1.5],"Wood FM Marimba":[0.378,0],"Tine FM Kalimba":[0.604,0],"Glide Mono Lead":[0.782,0],
+  "Chorus Drift Pad":[0.639,0],"Mid Root Drone":[1,7.93],"Breath Reed Flute":[0.291,0],"Held Deep Sub":[1,2.74],"Grit Mid Bass":[1,4.03],"Layer Chord Stab":[1,3.59]};
+Object.entries(KM_PRESETS).forEach(([n, p]) => {
+  if (kmHas(KM_FIT, n)) { p.level = KM_FIT[n][0]; if (p.engine === 'wtpro') p.xOut = KM_FIT[n][1]; }
+  if (typeof SYNTH_PRESETS === 'object' && !kmHas(SYNTH_PRESETS, n)) SYNTH_PRESETS[n] = p;
+});
+const KM_NAMES = Object.keys(KM_PRESETS);
+// what each preset plays in a song (the lane writers read it: a pluck on LEAD is a hook, on STAB a pacer)
+const KM_CLASS = { 'Pulse One-Note Pluck': 'onenote', 'Tri Hook Pluck': 'pluck', 'Warp Arp Pluck': 'arp', 'Glide Mono Lead': 'glide', 'Chorus Drift Pad': 'pad', 'Mid Root Drone': 'drone',
+  'Held Deep Sub': 'sub', 'Grit Mid Bass': 'bass', 'Layer Chord Stab': 'keys', 'Wood FM Marimba': 'mallet', 'Tine FM Kalimba': 'bell', 'Breath Reed Flute': 'flute' };
+// the sends and the sidechain each one is voiced with (section 3g2 reads HOUSE_TRACK): plucks barely duck, pads 3 dB, the sub 10 dB
+try {
+  if (typeof HOUSE_TRACK === 'object' && HOUSE_TRACK) Object.entries({
+    'Pulse One-Note Pluck': [.06, .08, .1, .08], 'Tri Hook Pluck': [.06, .1, .1, .08], 'Warp Arp Pluck': [.08, .1, .1, .08], 'Glide Mono Lead': [.08, .1, .08, .08],
+    'Chorus Drift Pad': [.18, .04, .32, .2], 'Mid Root Drone': [.2, .03, .32, .2], 'Held Deep Sub': [0, 0, .7, .14], 'Grit Mid Bass': [0, 0, .5, .12], 'Layer Chord Stab': [.16, .08, .25, .14],
+    'Wood FM Marimba': [.1, .14, .1, .08], 'Tine FM Kalimba': [.16, .14, .1, .08], 'Breath Reed Flute': [.2, .16, .08, .08],
+  }).forEach(([n, [a, b, sc, rel]]) => { if (!kmHas(HOUSE_TRACK, n)) HOUSE_TRACK[n] = { mix: { sendA: a, sendB: b }, fx: { chorus: 0, sc, scHold: .012, scRel: rel } }; });
+} catch (e) { /* no house section */ }
+// the palette (section 3x): role and tags; the CPU estimate (ms per second of audio, the palette's scale)
+const KM_TAGS = { 'Pulse One-Note Pluck': ['pluck', 'house', 'modern', 'clean'], 'Tri Hook Pluck': ['pluck', 'house', 'clean', 'bright'], 'Warp Arp Pluck': ['pluck', 'house', 'clean', 'modern'],
+  'Wood FM Marimba': ['pluck', 'house', 'ethnic', 'organic'], 'Tine FM Kalimba': ['pluck', 'house', 'ethnic', 'bright'], 'Glide Mono Lead': ['lead', 'house', 'vintage', 'soul'],
+  'Chorus Drift Pad': ['pad', 'house', 'vintage', 'wide', 'soul'], 'Mid Root Drone': ['pad', 'house', 'dark', 'organic'], 'Breath Reed Flute': ['lead', 'house', 'ethnic', 'organic', 'soul'],
+  'Held Deep Sub': ['sub', 'house', 'clean'], 'Grit Mid Bass': ['midbass', 'house', 'vintage'], 'Layer Chord Stab': ['stab', 'house', 'vintage', 'soul'] };
+const KM_CPU = { 'Pulse One-Note Pluck': 420, 'Tri Hook Pluck': 260, 'Warp Arp Pluck': 300, 'Wood FM Marimba': 60, 'Tine FM Kalimba': 60, 'Glide Mono Lead': 380, 'Chorus Drift Pad': 1300,
+  'Mid Root Drone': 900, 'Breath Reed Flute': 40, 'Held Deep Sub': 90, 'Grit Mid Bass': 300, 'Layer Chord Stab': 700 };
+try {
+  if (typeof window === 'object') { const t = window.LEAD_PALETTE_TAGS || (window.LEAD_PALETTE_TAGS = {}); Object.entries(KM_TAGS).forEach(([n, x]) => { if (!kmHas(t, n)) t[n] = x; }); }
+  if (typeof PAL_CPU_MS === 'object' && PAL_CPU_MS) Object.entries(KM_CPU).forEach(([n, v]) => { if (!kmHas(PAL_CPU_MS, n)) PAL_CPU_MS[n] = v; });
+} catch (e) { /* no palette */ }
+
+// ---------- 2. the styles ----------
+const KM_BY = '&ME, Rampa, Adam Port and Keinemusik';
+const KM_STY = {
+  kmkeys: { name: 'Organic Keys Afro House', short: 'Organic Keys', bpms: [120, 121, 122, 123], keys: [9, 2, 7, 4, 5], swingR: .57, tpl: { A: .6, C: .2, B: .2 },
+    desc: `Inspired by ${KM_BY}: a long DJ form led by soft layered chord stabs that grow from a two-note shell to minor 9ths and 11ths, voice-led in one octave, an FM marimba or kalimba motif that mutates slowly and answers the chants, a chorus pad, a held sub under a saturated mid bass that avoids the kick, and swung congas, bongos and toms in answering pairs`,
+    progs: ['km-dor-vamp', 'km-dor-ii', 'km-aeo-desc', 'km-aeo-rel', 'km-dor-wheel', 'km-gen-dor', 'km-gen-aeo', 'km-maj-sun'],
+    presets: { bass: ['Grit Mid Bass'], sub: ['Held Deep Sub'], stab: ['Layer Chord Stab', 'Tri Hook Pluck'], pad: ['Chorus Drift Pad', 'Mid Root Drone'], lead: ['Wood FM Marimba', 'Tine FM Kalimba', 'Tri Hook Pluck'] },
+    pick: { lead: ['Wood FM Marimba', 'Tine FM Kalimba'], stab: ['Layer Chord Stab'] }, mixKind: { STAB: 'keys', PAD: 'pad', LEAD: 'mallet' }, grooves: ['core', 'conv', 'tom', 'three'] },
+  kmperc: { name: 'Tribal Perc Afro House', short: 'Tribal Perc', bpms: [120, 121, 122], keys: [4, 9, 2, 7], swingR: .58, tpl: { B: .65, A: .35 },
+    desc: `Inspired by ${KM_BY}: the percussion carries the track: rolling toms in key, conga talk, a 3-over-4 shaker and a 12/8 ghost lane over a straight kick, chants that call and a breathy flute that answers, a warped arp pluck and a root drone, phrygian and aeolian loops, the energy moved by percussion pairs and filters`,
+    progs: ['km-phr-tribal', 'km-aeo-flash', 'km-dor-vamp', 'km-gen-phr', 'km-gen-aeo', 'km-aeo-call'],
+    presets: { bass: ['Grit Mid Bass'], sub: ['Held Deep Sub'], stab: ['Warp Arp Pluck', 'Pulse One-Note Pluck'], pad: ['Mid Root Drone', 'Chorus Drift Pad'], lead: ['Breath Reed Flute', 'Wood FM Marimba'] },
+    pick: { lead: ['Breath Reed Flute'], stab: ['Warp Arp Pluck'], pad: ['Mid Root Drone'] }, mixKind: { STAB: 'pluck', PAD: 'pad', LEAD: 'flute' }, grooves: ['tom', 'conv', 'three', 'ghost', 'step3'] },
+  kmarp: { name: 'Melodic Arp Afro House', short: 'Melodic Arp', bpms: [122, 123, 124], keys: [9, 2, 7, 0, 4], swingR: .56, tpl: { C: .65, A: .35 },
+    desc: `Inspired by ${KM_BY}: a melodic, late-night form with a long breakdown: a warped arp pluck on the chord tones, a mono saw lead that glides and bends like a voice, quartal and minor-to-major loops on a chorus pad, an offbeat sub lock, the filters opening over 16 and 32 bars and a reverb and delay wash that cuts at the drop`,
+    progs: ['km-aeo-rel', 'km-dor-quartal', 'km-aeo-desc', 'km-maj-sun', 'km-gen-aeo', 'km-gen-dor'],
+    presets: { bass: ['Grit Mid Bass'], sub: ['Held Deep Sub'], stab: ['Warp Arp Pluck', 'Layer Chord Stab'], pad: ['Chorus Drift Pad'], lead: ['Glide Mono Lead', 'Tine FM Kalimba'] },
+    pick: { lead: ['Glide Mono Lead'], stab: ['Warp Arp Pluck'] }, mixKind: { STAB: 'pluck', PAD: 'pad', LEAD: 'sawlead' }, grooves: ['lock', 'core', 'three'] },
+  kmmono: { name: 'Hypnotic One-Note House', short: 'One-Note', bpms: [118, 119, 120, 121], keys: [9, 2, 7, 5, 0], swingR: .56, tpl: { B: .5, A: .5 },
+    desc: `Inspired by ${KM_BY}: one note that morphs (the filter, the decay and the pitch drift make the melody), one chord or a tonic pedal for minutes with the top voice moving, a band-passed root drone, a minimal swung groove with a rim instead of a clap, a 3-over-4 shaker and 12/8 ghosts, patient changes every 16 bars`,
+    progs: ['km-one-oblique', 'km-aeo-pedal', 'km-dor-vamp', 'km-aeo-flash', 'km-gen-dor'],
+    presets: { bass: ['Grit Mid Bass'], sub: ['Held Deep Sub'], stab: ['Layer Chord Stab', 'Tri Hook Pluck'], pad: ['Mid Root Drone', 'Chorus Drift Pad'], lead: ['Pulse One-Note Pluck'] },
+    pick: { lead: ['Pulse One-Note Pluck'], pad: ['Mid Root Drone'] }, mixKind: { STAB: 'keys', PAD: 'pad', LEAD: 'pluck' }, grooves: ['minimal', 'three', 'ghost', 'core'] },
+};
+const KM_IDS = Object.keys(KM_STY);
+const kmIs = id => typeof id === 'string' && KM_IDS.includes(id);
+const KM_ARR_TXT = { A: [['intro', 32], ['groove', 32], ['theme', 32], ['breakdown', 32], ['drop', 48], ['bridge', 16], ['outro', 32]],
+  B: [['intro', 48], ['groove', 32], ['theme', 32], ['groove2', 32], ['bridge', 16], ['final', 24], ['outro', 24]],
+  C: [['intro', 32], ['groove', 32], ['theme', 32], ['breakdown', 64], ['drop', 48], ['bridge', 16], ['outro', 32]] };
+if (typeof GEN_STYLES === 'object' && GEN_STYLES) Object.entries(KM_STY).forEach(([id, x]) => {
+  if (kmHas(GEN_STYLES, id)) return;
+  const t = Object.entries(x.tpl).sort((a, b) => b[1] - a[1])[0][0];
+  GEN_STYLES[id] = { name: x.name, short: x.short, by: KM_BY, genre: 'afro', house: 'afro', keine: true, bpm: x.bpms[Math.floor(x.bpms.length / 2)], bpms: x.bpms, swing: 0, swingR: x.swingR, keys: x.keys,
+    desc: x.desc, progs: x.progs, drums: ['afro', 'afrotom'], percAlt: ['afrotom'], dens: 'mid', rhythm: { bass: ['afroroll'], sub: ['long'], stab: ['afrokeys'], pad: ['hold'], lead: ['hook'] },
+    harm: { stab: 'ninth', pad: 'ninth', lead: 'seventh' }, presets: x.presets, pick: x.pick, mixKind: x.mixKind, chant: false, chops: true,
+    kits: { DRUMS: 'afro', BREAK: 'afroperc' }, breakName: 'PERC', master: 'afro', arr: KM_ARR_TXT[t].map(s => s.slice()) };
+});
+// the palette's profile of the four styles: house and organic first, the own presets weigh most, never gritty, rave or cinematic
+try {
+  if (typeof PAL_PROFILE === 'object' && PAL_PROFILE) KM_IDS.forEach(id => {
+    if (!kmHas(PAL_PROFILE, id)) PAL_PROFILE[id] = { aff: { house: 1.2, ethnic: .8, soul: .7, clean: .6, organic: .6, vintage: .3, dark: .1, wide: .2, gritty: -1.5, rave: -1.2, cinematic: -.6 }, own: 2.6,
+      never: ['gritty', 'rave', 'cinematic'], roles: { STAB: ['stab', 'keys', 'pluck'], PAD: ['pad'], LEAD: ['lead', 'pluck'] }, kits: null, mix: null };
+  });
+} catch (e) { /* no palette */ }
+
+// ---------- 3. the progressions ----------
+// A chord: r = semitones over the tonic, f = family (m minor 7/9/11, M major 7/9, D dominant 9/13, S4 7sus4, S2 sus2/add9, Q quartal,
+// X six (6, 6/9), tm / tM plain triads (add9 later), L major 7 #11), l = length in 16ths (at the slow harmonic rhythm), b = bass
+// (semitones over the tonic, the pedal), top = the top voice's interval over the root (a hidden melody), push = an 8th early.
+const KM_PROGS = {
+  'km-dor-vamp': { name: 'Dorian vamp i9 - IV9', scale: 'dorian', ch: [{ r: 0, f: 'm', l: 32 }, { r: 5, f: 'D', l: 32 }] },
+  'km-dor-ii': { name: 'Dorian i9 - ii7 - IV9 - i11', scale: 'dorian', pedal: true, ch: [{ r: 0, f: 'm', l: 16 }, { r: 2, f: 'm', l: 16 }, { r: 5, f: 'D', l: 16 }, { r: 0, f: 'm', l: 16, up: 1 }] },
+  'km-aeo-desc': { name: 'Aeolian i9 - bVImaj9 - bVII6 - i', scale: 'minor', ch: [{ r: 0, f: 'm', l: 16 }, { r: 8, f: 'M', l: 16 }, { r: 10, f: 'X', l: 16 }, { r: 0, f: 'm', l: 16 }] },
+  'km-phr-tribal': { name: 'Phrygian i11 - bIImaj7 - i7 - bVIIsus2', scale: 'phrygian', ch: [{ r: 0, f: 'm', l: 32 }, { r: 1, f: 'M', l: 16, push: 1 }, { r: 0, f: 'm', l: 16 }, { r: 0, f: 'm', l: 32 }, { r: 1, f: 'M', l: 16 }, { r: 10, f: 'S2', l: 16 }] },
+  'km-one-oblique': { name: 'One chord, the top voice moves', scale: 'dorian', ch: [{ r: 0, f: 'm', l: 16, top: 7 }, { r: 0, f: 'm', l: 16, top: 5 }, { r: 0, f: 'm', l: 16, top: 7 }, { r: 0, f: 'm', l: 16, top: 9 }] },
+  'km-dor-quartal': { name: 'Quartal planing Isus - bVIIsus - IVsus - V7sus4', scale: 'dorian', ch: [{ r: 0, f: 'Q', l: 16 }, { r: 10, f: 'Q', l: 16 }, { r: 5, f: 'S4', l: 16 }, { r: 7, f: 'S4', l: 16 }] },
+  'km-aeo-rel': { name: 'Minor to its relative major i9 - iv9 - bVII9 - bIIImaj9', scale: 'minor', ch: [{ r: 0, f: 'm', l: 16 }, { r: 5, f: 'm', l: 16 }, { r: 10, f: 'D', l: 16 }, { r: 3, f: 'M', l: 16 }] },
+  'km-maj-sun': { name: 'Major Imaj9 - vi9 - IVmaj7#11 - V7sus4', scale: 'major', ch: [{ r: 0, f: 'M', l: 16 }, { r: 9, f: 'm', l: 16 }, { r: 5, f: 'L', l: 16 }, { r: 7, f: 'S4', l: 16 }] },
+  'km-aeo-pedal': { name: 'Tonic pedal i - bVII/i - bVI/i - bVII/i', scale: 'minor', pedal: true, ch: [{ r: 0, f: 'tm', l: 16 }, { r: 10, f: 'tM', l: 16 }, { r: 8, f: 'tM', l: 16 }, { r: 10, f: 'tM', l: 16 }] },
+  'km-dor-wheel': { name: 'Dorian wheel i11 - bIIImaj9 - IV9 - bVIIsus2', scale: 'dorian', ch: [{ r: 0, f: 'm', l: 32 }, { r: 3, f: 'M', l: 16 }, { r: 5, f: 'D', l: 16 }, { r: 0, f: 'm', l: 32 }, { r: 3, f: 'M', l: 16 }, { r: 10, f: 'S2', l: 16 }] },
+  'km-aeo-call': { name: 'Call and push i9 - bVIIadd9', scale: 'minor', call: true, ch: [{ r: 0, f: 'm', l: 30 }, { r: 10, f: 'S2', l: 2 }] },
+  'km-aeo-flash': { name: 'Aeolian i9 with a bII flash', scale: 'minor', ch: [{ r: 0, f: 'm', l: 60 }, { r: 1, f: 'M', l: 4 }] },
+};
+// the reveal of the breakdown (one other loop; then home again)
+const KM_BDOWN = { dorian: ['km-dor-ii', 'km-dor-wheel', 'km-aeo-desc'], minor: ['km-aeo-desc', 'km-aeo-rel', 'km-dor-ii'], phrygian: ['km-aeo-flash', 'km-aeo-desc'], major: ['km-maj-sun'] };
+// the generator's modes (GEN_PROGS entries; the chords come from kmGenProg with the song's seed)
+const KM_GEN = { 'km-gen-dor': { name: 'Generated dorian loop', scale: 'dorian' }, 'km-gen-aeo': { name: 'Generated aeolian loop', scale: 'minor' }, 'km-gen-phr': { name: 'Generated phrygian loop', scale: 'phrygian' } };
+// families: the tones per extension level (0 shell, 1 seventh, 2 ninth, 3 eleventh): [interval, role k] (k: 2 the 3rd, 1/3 sus, 4 the
+// 5th, 5 the 6th, 6 the 7th, 8 the 9th, 10 the 11th, 12 the 13th, 0 the root); req: the roles a voicing keeps
+const KM_FAM = {
+  m: [[[3, 2], [10, 6]], [[3, 2], [7, 4], [10, 6]], [[3, 2], [7, 4], [10, 6], [14, 8]], [[3, 2], [10, 6], [14, 8], [17, 10], [7, 4]]],
+  M: [[[4, 2], [11, 6]], [[4, 2], [7, 4], [11, 6]], [[4, 2], [7, 4], [11, 6], [14, 8]], [[4, 2], [11, 6], [14, 8], [9, 12], [7, 4]]],
+  D: [[[4, 2], [10, 6]], [[4, 2], [7, 4], [10, 6]], [[4, 2], [7, 4], [10, 6], [14, 8]], [[4, 2], [10, 6], [14, 8], [21, 12], [7, 4]]],
+  S4: [[[5, 3], [10, 6]], [[5, 3], [7, 4], [10, 6]], [[5, 3], [7, 4], [10, 6], [14, 8]], [[5, 3], [10, 6], [14, 8], [7, 4], [0, 0]]],
+  S2: [[[2, 1], [7, 4]], [[0, 0], [2, 1], [7, 4]], [[0, 0], [2, 1], [5, 3], [7, 4]], [[0, 0], [2, 1], [5, 3], [7, 4], [10, 6]]],
+  Q: [[[2, 8], [7, 4]], [[2, 8], [7, 4], [5, 10]], [[2, 8], [7, 4], [0, 0], [5, 10]], [[2, 8], [7, 4], [0, 0], [5, 10]]],
+  X: [[[4, 2], [9, 5]], [[4, 2], [7, 4], [9, 5]], [[4, 2], [7, 4], [9, 5], [14, 8]], [[4, 2], [9, 5], [14, 8], [7, 4]]],
+  tm: [[[3, 2], [7, 4]], [[0, 0], [3, 2], [7, 4]], [[0, 0], [3, 2], [7, 4], [14, 8]], [[0, 0], [3, 2], [7, 4], [14, 8]]],
+  tM: [[[4, 2], [7, 4]], [[0, 0], [4, 2], [7, 4]], [[0, 0], [4, 2], [7, 4], [14, 8]], [[0, 0], [4, 2], [7, 4], [14, 8]]],
+  L: [[[4, 2], [11, 6]], [[4, 2], [7, 4], [11, 6]], [[4, 2], [11, 6], [6, 10], [7, 4]], [[4, 2], [11, 6], [6, 10], [14, 8], [7, 4]]],
+};
+const KM_FAM_LBL = { m: ['m7', 'm7', 'm9', 'm11'], M: ['maj7', 'maj7', 'maj9', 'maj13'], D: ['7', '7', '9', '13'], S4: ['7sus4', '7sus4', '9sus4', '9sus4'], S2: ['sus2', 'sus2', 'sus2(11)', 'sus2(11)'],
+  Q: ['sus', 'sus', '(quartal)', '(quartal)'], X: ['6', '6', '6/9', '6/9'], tm: ['m', 'm', 'm(add9)', 'm(add9)'], tM: ['', '', 'add9', 'add9'], L: ['maj7', 'maj7', 'maj7#11', 'maj9#11'] };
+// GEN_PROGS / GEN_HOUSE_HX: the house song builder (and its info line) reads a scale-degree outline of each loop
+(() => {
+  if (typeof GEN_PROGS !== 'object' || !GEN_PROGS) return;
+  const kind = f => ({ m: '9', M: '9', D: '9', S4: '7sus4', S2: 'sus2', Q: 'sus49', X: '69', tm: 'tri', tM: 'tri', L: 'm7' })[f] || 'm7';
+  const deg = (sc, r) => { const s = SCALES[sc] || SCALES.minor; let best = 0; s.forEach((x, i) => { if (Math.abs(x - r) < Math.abs(s[best] - r)) best = i; }); return best; };
+  const put = (id, name, sc, chs) => {
+    if (kmHas(GEN_PROGS, id)) return;
+    const bars = []; chs.forEach(c => { for (let k = 0; k < Math.max(1, Math.round(c.l / 16)); k++) bars.push(c); });
+    while (bars.length < 8) bars.push(...bars.slice(0, 8 - bars.length));
+    GEN_PROGS[id] = { name, fam: 'afro', scale: sc, deg: bars.slice(0, 8).map(c => deg(sc, c.r)), per: 1, harm: 'ninth', note: name + ': an organic afro house loop (section 3z2 writes and evolves it)' };
+    if (typeof GEN_HOUSE_HX === 'object' && GEN_HOUSE_HX && !kmHas(GEN_HOUSE_HX, id)) GEN_HOUSE_HX[id] = bars.slice(0, 8).map(c => [deg(sc, c.r), kind(c.f)]);
+  };
+  Object.entries(KM_PROGS).forEach(([id, p]) => put(id, p.name, p.scale, p.ch));
+  Object.entries(KM_GEN).forEach(([id, p]) => put(id, p.name, p.scale, [{ r: 0, f: 'm', l: 32 }, { r: p.scale === 'phrygian' ? 1 : p.scale === 'dorian' ? 5 : 10, f: 'D', l: 32 }]));
+})();
+// the generator: a loop of functions per mode (1-7-6-4 and its turns, the Dorian vamps, the bII), bars per chord and colours seeded;
+// a loop is kept only when every chord change voice-leads within 2 semitones (kmVoice below)
+const KM_GEN_TPL = {
+  minor: [[[0, 'm'], [10, 'S2'], [8, 'M'], [5, 'm']], [[0, 'm'], [8, 'M'], [10, 'X'], [7, 'm']], [[0, 'm'], [10, 'D']], [[0, 'm'], [5, 'm']], [[0, 'm'], [8, 'M'], [5, 'm'], [10, 'S4']], [[0, 'm'], [3, 'M'], [10, 'X'], [8, 'M']]],
+  dorian: [[[0, 'm'], [5, 'D']], [[0, 'm'], [2, 'm'], [5, 'D']], [[0, 'm'], [3, 'M'], [5, 'D'], [10, 'S2']], [[0, 'm'], [10, 'X'], [5, 'D']], [[0, 'Q'], [5, 'D']], [[0, 'm'], [7, 'm'], [5, 'D'], [3, 'M']]],
+  phrygian: [[[0, 'm'], [1, 'M']], [[0, 'm'], [1, 'M'], [0, 'm'], [10, 'S2']], [[0, 'm'], [10, 'tM'], [1, 'L']], [[0, 'tm'], [1, 'tM']]],
+};
+const KM_ALT = { m: ['m', 'm', 'S2'], M: ['M', 'L', 'X'], D: ['D', 'S4'], S4: ['S4', 'D'], S2: ['S2', 'Q'], X: ['X', 'M'], Q: ['Q', 'S2'], tm: ['tm'], tM: ['tM', 'S2'], L: ['L', 'M'] };
+function kmGenProg(scale, rng, key = 9) {
+  const pool = KM_GEN_TPL[scale] || KM_GEN_TPL.minor;
+  for (let tries = 0; tries < 24; tries++) {
+    const t = rng.pick(pool), long = t.length <= 2 ? 32 : rng() < .3 ? 32 : 16;
+    const ch = t.map(([r, f], i) => ({ r, f: i === 0 ? f : rng.pick(KM_ALT[f] || [f]), l: long }));
+    if (t.length === 3) ch[0].l = 32; // 2 + 1 + 1
+    if (kmProgOk(ch, key)) return { name: 'Generated ' + scale + ' loop', scale, ch, gen: true };
+  }
+  return Object.assign({ gen: true }, KM_PROGS[scale === 'phrygian' ? 'km-phr-tribal' : scale === 'dorian' ? 'km-dor-vamp' : 'km-aeo-rel']);
+}
+
+// ---------- 4. voicing and voice leading ----------
+// The tones of chord c at extension level lv, for a key: [{ pc, k }]; the root only where the family needs it
+function kmTones(c, key, lv) {
+  if (c.mm) { // a My MIDI chord: its own tones; level 0-1 keep the 3rd, 5th, 7th, higher levels add its colours
+    const t = c.tones.filter(x => x.k !== 0 || c.tones.length <= 3), keep = t.filter(x => [1, 2, 3, 4, 6].includes(x.k));
+    return lv >= 2 || keep.length < 2 ? t : keep;
+  }
+  const f = KM_FAM[c.f] || KM_FAM.m, L = f[kmCl(lv + (c.up || 0), 0, 3)], root = kmMod(key + c.r, 12);
+  return L.map(([i, k]) => ({ pc: kmMod(root + i, 12), k }));
+}
+// the number of voices of a lane at a level (stabs 2-4, pads 2-5)
+const kmVoices = (lane, lv, n) => Math.min(n, lane === 'PAD' ? [2, 3, 4, 5][lv] : [2, 3, 4, 4][lv]);
+// voice-leading distance: every new voice near an old one AND every old one near a new one (common tones = 0), max over both
+function kmVL(a, b) {
+  if (!a || !b || !a.length || !b.length) return 0;
+  let m = 0;
+  for (const x of b) { let n = 99; for (const y of a) { const d = x > y ? x - y : y - x; if (d < n) n = d; } if (n > m) m = n; }
+  for (const x of a) { let n = 99; for (const y of b) { const d = x > y ? x - y : y - x; if (d < n) n = d; } if (n > m) m = n; }
+  return m;
+}
+// The candidate voicings of a chord (n voices in lo..hi), each with its own cost: the tones of its level first (pref), any other tone
+// of the chord (pool) at a price, the 3rd (or the sus) from 3 voices up, one octave, no cluster under C4, the wanted top (top pc)
+function kmCands(pref, pool, lo, hi, n, top) {
+  const all = pool.slice(); pref.forEach(x => { if (!all.some(y => y.pc === x.pc)) all.push(x); });
+  const isPref = x => pref.some(y => y.pc === x.pc), N = Math.max(1, Math.min(n, all.length)), subsets = [], out = [];
+  const pick = (from, k, acc) => { if (acc.length === k) { subsets.push(acc); return; } for (let i = 0; i < from.length; i++) pick(from.slice(i + 1), k, acc.concat([from[i]])); };
+  pick(all, N, []);
+  subsets.forEach(set => {
+    const third = set.some(x => [1, 2, 3].includes(x.k)), sev = !pref.some(x => x.k === 6) || set.some(x => x.k === 6), base = set.filter(x => !isPref(x)).length * 1.6 + (N >= 3 && !third ? 2.5 : 0) + (N >= 3 && !sev ? 2.2 : 0) - .3 * set.filter(x => x.k >= 8).length + (set.some(x => x.k === 0) && all.length > N ? .8 : 0);
+    const pos = set.map(x => { const r = []; for (let p = lo + kmMod(x.pc - lo, 12); p <= hi; p += 12) r.push(p); return r; });
+    const walk = (i, acc) => {
+      if (i === pos.length) {
+        const v = acc.slice().sort((a, b) => a - b); if (new Set(v).size !== v.length) return;
+        const span = v[v.length - 1] - v[0], gaps = v.slice(1).map((p, j) => p - v[j]);
+        let c = base + (span > 14 ? 2 * (span - 14) : 0) + (gaps.some((g, j) => g <= 2 && v[j] < 58) ? 3 : 0) + .08 * Math.abs((v[0] + v[v.length - 1]) / 2 - 62);
+        if (top != null) { const t = kmMod(v[v.length - 1] - top, 12); c += .8 * Math.min(t, 12 - t); }
+        out.push({ v, c });
+        return;
+      }
+      pos[i].forEach(p => walk(i + 1, acc.concat([p])));
+    };
+    walk(0, []);
+  });
+  return out.sort((x, y) => x.c - y.c).slice(0, 60);
+}
+// the move from one voicing to the next: over 2 semitones costs much more than any colour; then the distance, the common tones
+const kmMove = (a, b) => {
+  let mv = 0, com = 0; for (const x of b) { let n = 99; for (const y of a) { const d = x > y ? x - y : y - x; if (d < n) n = d; } mv += n; if (!n) com++; }
+  const d = kmVL(a, b); return (d > 2 ? 60 + 20 * (d - 2) : 0) + .4 * mv - .6 * com;
+};
+// the best voicings of a chord sequence (Viterbi over the candidates: the voice leading is planned for the whole line, so a voicing
+// never paints itself into the edge of the range); list: [{ pref, pool, n, top }] -> [voicing]
+function kmVoiceLine(list, lo, hi, prev0) {
+  if (!list.length) return [];
+  const cc = new Map(), tc = new Map(), keys = list.map(x => [x.pref.map(t => t.pc + ':' + t.k).join(','), x.pool.map(t => t.pc + ':' + t.k).join(','), x.n, x.top].join('|'));
+  const C = list.map((x, i) => { if (!cc.has(keys[i])) cc.set(keys[i], kmCands(x.pref, x.pool, lo, hi, x.n, x.top)); return cc.get(keys[i]); }), cost = [], from = [];
+  const trans = (i) => { const k = keys[i - 1] + '>' + keys[i]; if (!tc.has(k)) tc.set(k, C[i].map(x => C[i - 1].map(y => (y.v.join() === x.v.join() ? -1 : kmMove(y.v, x.v))))); return tc.get(k); };
+  C.forEach((cs, i) => {
+    cost[i] = []; from[i] = [];
+    const T = i ? trans(i) : null;
+    cs.forEach((x, j) => {
+      if (i === 0) { cost[i][j] = x.c + (prev0 && prev0.length ? kmMove(prev0, x.v) : 0); from[i][j] = -1; return; }
+      let best = 1e12, bk = 0; const row = T[j], pc = cost[i - 1]; for (let k = 0; k < row.length; k++) { const t = pc[k] + row[k]; if (t < best) { best = t; bk = k; } }
+      cost[i][j] = best + x.c; from[i][j] = bk;
+    });
+  });
+  const last = C.length - 1; let j = 0; cost[last].forEach((c, k) => { if (c < cost[last][j]) j = k; });
+  const out = []; for (let i = last; i >= 0; i--) { out[i] = C[i].length ? C[i][j].v : []; j = from[i][j] >= 0 ? from[i][j] : 0; }
+  return out;
+}
+// the tones a chord may use (its level's first, then every other one of the family / the file)
+const kmPool = (c, key) => { if (c.mm) return c.tones.slice(); const m = new Map(); [3, 2, 1].forEach(lv => kmTones(c, key, lv).forEach(t => { if (!m.has(t.pc)) m.set(t.pc, t); })); return [...m.values()]; };
+// a loop voice-leads within 2 semitones at every level (stab lane), cyclic (two passes), in the song's key
+function kmProgOk(ch, key) {
+  for (let lv = 1; lv <= 3; lv++) {
+    const seq = ch.concat(ch).map(c => ({ pref: kmTones(c, key, lv), pool: kmPool(c, key), n: kmVoices('STAB', lv, 9), top: null }));
+    const v = kmVoiceLine(seq, 52, 72, null); if (v.some(x => !x.length)) return false;
+    for (let i = 1; i < v.length; i++) if (kmVL(v[i - 1], v[i]) > 2) return false;
+  }
+  return true;
+}
+// a chord's name (the info line)
+function kmChordName(c, key, lv) {
+  if (c.mm) return c.name;
+  const root = kmMod(key + c.r, 12), nm = typeof NOTE_NAMES === 'object' ? NOTE_NAMES : ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+  return nm[root] + (KM_FAM_LBL[c.f] || KM_FAM_LBL.m)[kmCl(lv, 0, 3)] + (c.b != null && c.b !== c.r ? '/' + nm[kmMod(key + c.b, 12)] : '');
+}
+
+// ---------- 5. notation: degrees, rhythm strings, motif and bassline banks ----------
+const KM_DEG = { 1: 0, b2: 1, 2: 2, b3: 3, 3: 4, 4: 5, b5: 6, 5: 7, b6: 8, 6: 9, b7: 10, 7: 11 };
+// 'step:degree(len)' (steps 1-16, ' octave up, , octave down, ~ glide in, g ghost, > accent), bars split by |
+function kmParse(str) {
+  const out = [];
+  str.split('|').forEach((bar, b) => bar.trim().split(/\s+/).filter(Boolean).forEach(tok => {
+    const m = /^(\d+):(~?)(b?[1-7])(['`,]*)\(([\d.]+)\)(g|>)?$/.exec(tok); if (!m) return;
+    const oct = (m[4].match(/['`]/g) || []).length - (m[4].match(/,/g) || []).length;
+    out.push({ s: b * 16 + (+m[1] - 1), d: KM_DEG[m[3]] + 12 * oct, l: +m[5], gl: !!m[2], g: m[6] === 'g', a: m[6] === '>' });
+  }));
+  return out;
+}
+// the motifs (afro_melody_bass.md 5): bars, the class of the part, the mode they need ('' any minor)
+const KM_MOTIF = {
+  M1: ['3:5(2) 6:5(1) 8:b7(2) 11:5(1) 14:4(2)', 1, ''], M2: ["3:1'(2) 6:b7(1) 8:5(3) 12:b3(2) | 3:1'(2) 6:b7(1) 8:5(2) 11:4(1) 13:b3(3)", 2, ''],
+  M3: ['1:1(1) 4:1(1)> 7:1(2) 10:1(1) 12:1(1)> 15:1(1)', 1, ''], M4: ['1:b3(2) 4:4(1) 6:6(3) 11:5(2) 14:4(1) | 1:b3(2) 4:4(1) 6:5(4) 12:b3(1) 14:1(2)', 2, 'dorian'],
+  M5: ['3:1(1) 5:b2(2) 8:1(1) 11:b7,(2) 14:1(2)', 1, 'phrygian'], M6: ["1:1(1) 3:5(1) 4:b3'(1) 7:5(1) 9:1(1) 11:4(1) 12:b3'(1) 15:5(1)", 1, ''],
+  M7: ["1:5(6) 8:~b7(2) 11:~1'(6) | 9:b7(2) 12:5(4) | 1:5(6) 8:~b7(2) 11:~1'(6) | 9:4(2) 12:b3(3) 15:~1(2)", 4, ''], M8: ['| 5:b3(1) 7:4(1) 8:5(3) 12:b7(1) 14:5(2)', 2, ''],
+  M9: ["1:1'(1) 4:b3'(1) 7:5(1) 10:1'(1) 13:b3'(1) 16:5(1)", 1, ''], M10: ["3:5(1) 7:1'(2) 11:b7(1) 15:1'(1)", 1, ''], M11: ['1:b3(2) 4:4(2) 7:5(1) 9:b7(2) 12:5(2) 15:4(1)', 1, ''],
+};
+// the motif bank of each class of lead
+const KM_MOTIF_OF = { onenote: ['M3'], mallet: ['M1', 'M6', 'M11', 'M2'], bell: ['M9', 'M1', 'M6'], pluck: ['M1', 'M11', 'M2', 'M10'], glide: ['M7', 'M2', 'M4'], flute: ['M7', 'M2', 'M11'], lead: ['M1', 'M2', 'M11'] };
+// the basslines (afro_melody_bass.md 6)
+const KM_BASS = {
+  B1: '3:1(2)> 7:1(2) 11:1(2)> 15:1(2)', B2: "2:1(1)g 3:1(1)> 4:1(1)g 6:1(1)g 7:1(1)> 8:5(1)g 10:1(1)g 11:1(1)> 12:1'(1)g 14:1(1)g 15:1(1)> 16:5(1)g",
+  B3: '3:1(2)> 6:1(1) 8:5,(1) 11:1(2)> 14:b7,(1) 16:1(1)g', B4: '2:1(10) 13:~5(4) | 2:1(8) 11:b7,(2) 14:~1(3)', B5: "2:1(1) 4:1(2)> 7:5(2) 10:1'(1) 12:1(2)> 15:b7(1)",
+  B6: '1:1(2) 4:1(2)> 7:5,(1) 9:1(2) 12:1(2)> 15:b3(1)', B7: '3:1(3)> 7:1(2) 11:b3(2) 14:4(2) | 3:5(3)> 7:4(2) 11:b3(2) 15:b7,(2)', B8: "3:1(3)> 6:1'(1)g 9:5(1)g 11:1(3)> 14:1'(1)g 16:b7(1)g",
+  B10: '3:1(2)> 7:1(2) 10:b2(1) 11:1(2)> 15:1(1) 16:b2(1)g', B11: '1:~1,(12) | 3:1(2) 11:1(2)', BS: '2:1(14)',
+};
+const KM_MOTIFS = Object.fromEntries(Object.entries(KM_MOTIF).map(([k, [s, bars, mode]]) => [k, { notes: kmParse(s), bars, mode }]));
+const KM_BASSES = Object.fromEntries(Object.entries(KM_BASS).map(([k, s]) => [k, { notes: kmParse(s), bars: s.includes('|') ? 2 : 1 }]));
+// the chord stab rhythms (afro_chords.md 4): X accent, x ghost, - held, . rest
+const KM_RHY = { R1: '..X-..X-..X-..X-', R2: 'X--X--X-X--X--X-', R3: 'X..X..X...X.X...', R4: '..X..X...X..X.X.', R6: '...X--------....', R7: '..X.x.X..xX...X.',
+  R8: 'X-------..X---..', R9: '..X-..X-.X-.....', R10: '.x.X..X.x..X..X.' };
+// the drum velocity letters
+const KM_V = { X: 118, x: 92, o: 68, g: 40 };
+const kmHits = (str, off = 0) => { const out = []; [...str].forEach((c, i) => { if (kmHas(KM_V, c)) out.push([off + i, KM_V[c]]); }); return out; };
+// the drum patterns (afro_groove.md 4), as lane role -> 16 steps (A/B bars: arrays). Roles: K kick, C clap, M rim, H hat, O open hat,
+// T shaker, TB tambourine (the rattle), QH/QL congas, BH/BL bongos, AT/AU toms (in key), BE bell, CV clave, WD wood, DB/DT djembe
+const KM_DRUM = {
+  core: { bars: [{ K: 'X...X...X...X...', C: '....x.......x...', T: 'goXogoXogoXogoXg', O: '..x...x...x...x.', M: '.......g.....o..', QH: '......o..x....o.', QL: '...x.......x....', TB: '..o...o...o...o.' }] },
+  conv: { bars: [{ K: 'X...X...X...X...', C: '....o.......o...', T: 'xgogxgogxgogxgog', QH: 'x..x..o.........', BH: '..........x.o.x.', O: '..o...o...o...o.' },
+    { K: 'X...X...X...X...', C: '....o.......o...', T: 'xgogxgogxgogxgox', QH: 'x..x............', BH: '..........x.....', QL: '......x..x...o.X', O: '..o...o...o...o.' }] },
+  tom: { bars: [{ K: 'X...X...X...X...', C: '....x.......x...', T: 'xoxoxoxoxoxoxoxo', O: '..o...o...o...o.', AT: '..x.....o.x.....', AU: '.....x.g.....x.o', M: '...g.......g....' }] },
+  three: { poly: true, bars: [{ K: 'X...X...X...X...', C: '....x.......x...', H: 'g.o.g.o.g.o.g.o.', QH: 'X..x..o.x..x..o.', O: '..x...x...x...x.', BL: '...........o....' }] },
+  ghost: { trip: true, bars: [{ K: 'X...X...X...X...', C: '............x...', M: '....g.......o...', O: '..o...o...o...o.', T: 'g.o.g.o.g.o.g.o.', QL: '...o.......o....' }] },
+  step3: { bars: [{ K: 'X...X...X.......', C: '....x.......x...', T: 'xgoxxgoxxgoxxgox', O: '..o...o...o...o.', DB: '......x..x....oX', QH: '...........o.x..' },
+    { K: 'X.....X...X.....', C: '....x.......x...', T: 'xgoxxgoxxgoxxgox', O: '..o...o...o...o.', DB: 'X.......x..x..o.', QH: '...o.........x..' }] },
+  lock: { bars: [{ K: 'X...X...X...X...', C: '....x.......x...', T: 'gxogxxogxxogxxog', O: '..x...x...x...x.', QL: '...o.......o....', QH: '......o.......o.', CV: '..o.....o..o....' }] },
+  minimal: { bars: [{ K: 'X...X...X...X...', M: '...g..x.....g.x.', T: 'g.o.g.X.g.o.g.Xo', WD: '..........o.....', QL: '...o.......o....', BH: '......o.......x.' }] },
+  bed: { bars: [{ T: 'goXogoXogoXogoXo', TB: '..x...x...x...x.', WD: '..o.......o.....', QH: '......o.......x.', QL: '...x.......x....' }] },
+};
+// the answering pairs: muted and returned as one, on 8-bar edges
+const KM_PAIRS = { shaker: ['T', 'TB'], conga: ['QH', 'QL'], bongo: ['BH', 'BL'], tom: ['AT', 'AU'], bell: ['BE', 'CV', 'WD'], djembe: ['DB', 'DT'] };
+const KM_PAIR_OF = Object.fromEntries(Object.entries(KM_PAIRS).flatMap(([p, rs]) => rs.map(r => [r, p])));
+const KM_DRUM_LANE = new Set(['K', 'C', 'M', 'H', 'O', 'T', 'T2', 'TB']); // the rest is the PERC lane
+const KM_FILLS = ['tomRoll', 'congaRun', 'percDrop', 'gap', 'shakerSwell', 'chopFill'];
+// the micro timing of the hand drums and rims (1/48 of a 16th: about 2.5 ms at 122): behind the beat
+const KM_OFFSET = { QH: 3, QL: 4, QS: 3, QM: 3, BH: 2, BL: 3, M: 2, CV: 2, WD: 2, BE: 1, AT: 1, AU: 1 };
+
+// ---------- 6. the form: three subtractive templates, one char per lane and 8-bar column ----------
+// drums: F full, p no clap, k kick only, h heartbeat (the kick on 1 and 3, high-passed), . none (the one kick-out); perc: F all
+// pairs, p one pair out, s one pair; bass: F mid + sub, p mid (filtered) + sub, s sub only; chords / lead / pad / vox: F, p, s, .
+const KM_TPL = {
+  A: { name: 'one long break', secs: [['intro', 4], ['groove', 4], ['theme', 4], ['breakdown', 4], ['drop', 6], ['bridge', 2], ['outro', 4]],
+    dr: 'kpFF FFFF FFFF ...h FFFFFF pp FFFp', pc: 'sspp pFFF FFFF ss.p FFFFFF FF Fpps', bs: '...s ppFF FFFp .... FFFFFF .p Fp..', ch: '.... sspp FFFF FFFF FFFFFF pp ps..',
+    ld: '.... ..ss FFFF FFFF FFFFFF .. s...', pd: '.sss pppp ppFF FFFF ppFFFF FF ps..', vx: '.... ...s pppp FFFF ppFFFp sp ....', fx: '...s ...p ...p sppF ...p.p pF ...s' },
+  B: { name: 'percussion plateau', secs: [['intro', 6], ['groove', 4], ['theme', 4], ['groove2', 4], ['bridge', 2], ['final', 3], ['outro', 3]],
+    dr: 'kFFFFF FFFF FFFF FFFF .h FFF FFp', pc: 'sppFFF FFFF FFFF FFFF FF FFF Fps', bs: '....sp FFFF FFpF FFFF .. FFF p..', ch: '...... .spp FFFF ppFF pp FFp ...',
+    ld: '...... sssp pFFF ..pF .. FFp ...', pd: '...sss sspp pppp FFFF FF pps ...', vx: '.....s .p.p FFFF pFpF FF Fpp s..', fx: '.....s ...p ...p ...p pF ..s ...' },
+  C: { name: 'long break and bass break', secs: [['intro', 4], ['groove', 4], ['theme', 4], ['breakdown', 8], ['drop', 6], ['bridge', 2], ['outro', 4]],
+    dr: 'FFFF FFFF FFFF ......hp FFFFFF hp FFFp', pc: '.spp pFFF FFFF ..sssppF FFFFFF pF Fpss', bs: '.... pFFF FFFF ........ FFFFFF FF pp..', ch: '...s sppp FFFF FFFFFFFF FFFFFp pp s...',
+    ld: '..ss ppFF FFFF ..sppFFF FFFFFF .s p...', pd: 'sssp pppp ppFF FFFFFFFF ppFFFF FF ps..', vx: '.... .... sppp pFFFFFpp ppFFFp ss ....', fx: '...p ...p ...p s..p..pF ...p.p pF ...s' },
+};
+const KM_LANES = ['dr', 'pc', 'bs', 'ch', 'ld', 'pd', 'vx', 'fx'];
+const KM_SEC_LBL = { intro: 'INTRO', groove: 'GROOVE', theme: 'MAIN', breakdown: 'BREAKDOWN', drop: 'DROP', groove2: 'PERC DROP', bridge: 'BRIDGE', final: 'FINAL', outro: 'OUTRO' };
+const kmW = (rng, list) => { const tot = list.reduce((a, x) => a + Math.max(0, x[1]), 0); let r = rng() * tot; for (const [x, w] of list) { r -= Math.max(0, w); if (r <= 0) return x; } return list[list.length - 1][0]; };
+// the columns of a template, then the seeded variation (Subtle 1 move, Normal 2-3, Wild 4-5): a 16-bar pair of columns more or less in a
+// groove section, a longer DJ intro or outro, a shorter breakdown, the hook resting for 8 bars, a percussion step; 6-9 minutes at bpm
+function kmForm(tid, rng, v, bpm) {
+  const T = KM_TPL[tid], cols = [], L = Object.fromEntries(KM_LANES.map(k => [k, T[k].replace(/\s+/g, '')]));
+  let c = 0; T.secs.forEach(([sec, n], si) => { for (let k = 0; k < n; k++, c++) cols.push(Object.assign({ sec, si, k }, Object.fromEntries(KM_LANES.map(x => [x, L[x][c]])))); });
+  const moves = [], secCols = si => cols.filter(x => x.si === si), idxOf = x => cols.indexOf(x);
+  const dup = (si, at) => { const s = secCols(si); if (s.length < 2) return false; const a = kmCl(at, 0, s.length - 2), cp = s.slice(a, a + 2).map(x => Object.assign({}, x)); cols.splice(idxOf(s[a + 1]) + 1, 0, ...cp); return true; };
+  const drop = (si, min) => { const s = secCols(si); if (s.length < min + 2) return false; const a = 1 + Math.floor(rng() * (s.length - 3)); cols.splice(idxOf(s[a]), 2); return true; };
+  const siOf = name => T.secs.findIndex(x => x[0] === name), body = ['groove', 'theme', 'drop', 'groove2', 'final'].map(siOf).filter(i => i >= 0);
+  const n = v === 'subtle' ? 1 : v === 'wild' ? 4 + Math.floor(rng() * 2) : 2 + Math.floor(rng() * 2);
+  for (let k = 0; k < n; k++) {
+    const mv = kmW(rng, [['longIntro', 1], ['longOutro', .8], ['moreGroove', 1.6], ['lessGroove', 1], ['shortBreak', tid === 'B' ? 0 : .8], ['hookRest', 1.2], ['percStep', 1.2], ['padSwell', .6]]);
+    let ok = false;
+    if (mv === 'longIntro') ok = secCols(0).length < 8 && dup(0, 1);
+    else if (mv === 'longOutro') { const si = siOf('outro'); ok = secCols(si).length < 6 && dup(si, 0); }
+    else if (mv === 'moreGroove') ok = dup(body[Math.floor(rng() * body.length)], 99);
+    else if (mv === 'lessGroove') ok = drop(body[Math.floor(rng() * body.length)], 2);
+    else if (mv === 'shortBreak') { const si = siOf('breakdown'); ok = si >= 0 && drop(si, 4); }
+    else if (mv === 'hookRest') { const s = cols.filter((x, i) => ['drop', 'theme', 'final', 'groove2'].includes(x.sec) && x.ld === 'F' && cols[i - 1] && cols[i - 1].ld === 'F' && cols[i + 1] && cols[i + 1].ld === 'F'); if (s.length) { const x = s[Math.floor(rng() * s.length)]; x.ld = '.'; if (x.vx !== '.') x.vx = 'F'; ok = true; } }
+    else if (mv === 'percStep') { const s = cols.filter(x => ['groove', 'drop', 'theme', 'final', 'groove2'].includes(x.sec) && x.pc === 'F'); if (s.length) { s[Math.floor(rng() * s.length)].pc = 'p'; ok = true; } }
+    else if (mv === 'padSwell') { const s = cols.filter(x => x.pd === 'p' && x.sec !== 'intro'); if (s.length) { s[Math.floor(rng() * s.length)].pd = 'F'; ok = true; } }
+    if (ok) moves.push(mv);
+  }
+  // 6-9 minutes: groove columns in or out
+  const mins = () => cols.length * 8 * 4 / bpm;
+  for (let g = 0; g < 8 && mins() < 6.05; g++) if (dup(body[g % body.length], 99)) moves.push('fit+');
+  for (let g = 0; g < 8 && mins() > 8.95; g++) if (drop(body[g % body.length], 2) || drop(0, 4)) moves.push('fit-');
+  // the sections again (a section is a run of one si)
+  const secs = []; cols.forEach((x, i) => { const last = secs[secs.length - 1]; if (last && last.si === x.si) last.n++; else secs.push({ sec: x.sec, si: x.si, a: i * 8, n: 1 }); });
+  secs.forEach(s => { s.bars = s.n * 8; });
+  return { tid, name: T.name, cols, secs, moves, bars: cols.length * 8 };
+}
+
+// ---------- 7. the harmony plan: one state per 16 bars ----------
+const KM_SEC_EXT = { intro: 0, groove: 1, theme: 2, breakdown: 3, drop: 2, groove2: 2, bridge: 2, final: 3, outro: 1 };
+const KM_SEC_RHY = { intro: ['R6'], groove: ['R1', 'R4'], theme: ['R4', 'R2', 'R7'], breakdown: ['R6', 'R8'], drop: ['R7', 'R4', 'R10'], groove2: ['R4', 'R10', 'R3'], bridge: ['R8', 'R6'], final: ['R4', 'R7', 'R2'], outro: ['R1', 'R6'] };
+const KM_SEC_BASS = { intro: ['BS'], groove: ['B1', 'B3', 'B5'], theme: ['B3', 'B5', 'B8'], breakdown: ['BS'], drop: ['B2', 'B5', 'B8'], groove2: ['B8', 'B3', 'B6'], bridge: ['B4', 'BS'], final: ['B5', 'B2', 'B7'], outro: ['B1', 'BS'] };
+const KM_DIMS = ['ext', 'rhy', 'bass', 'filt'];
+// S: the song context (form, progs, rng); -> groups [{ g, a, sec, prog, per, ext, rhy, bass, filt, pedal, changed }]
+function kmHarmPlan(S) {
+  const F = S.form, out = [], G = Math.ceil(F.bars / 16), order = KM_DIMS.slice().sort(() => S.rng() - .5);
+  let st = null, dimK = 0;
+  for (let g = 0; g < G; g++) {
+    const a = g * 16, col = F.cols[a / 8], sec = col.sec, prog = sec === 'breakdown' && S.reveal ? S.reveal : S.main;
+    const per = a >= S.mainDrop ? .5 : 1, rl = KM_SEC_RHY[sec] || ['R1'], bl = KM_SEC_BASS[sec] || ['B1'];
+    const outroK = sec === 'outro' ? F.secs.find(s => s.sec === 'outro') : null;
+    const base = { g, a, sec, si: col.si, prog, per, ext: KM_SEC_EXT[sec], rhy: rl[0], bass: bl[0], filt: 0, pedal: !!(S.progs[prog] && S.progs[prog].pedal) || (sec === 'intro' || sec === 'bridge') && S.pedalOpt };
+    if (outroK) base.ext = Math.max(0, 1 - Math.floor((a - outroK.a) / 16)); // the outro mirrors the intro: extensions come off
+    if (!st || st.si !== col.si) { st = Object.assign({}, base, { changed: ['section'] }); }
+    else {
+      st = Object.assign({}, st, { g, a, prog, per, changed: [] });
+      if (sec === 'outro') { st.ext = base.ext; st.changed.push('ext'); }
+      else {
+        const d = order[dimK++ % order.length];
+        if (d === 'ext') st.ext = kmCl(st.ext + (st.ext >= 3 ? -1 : 1), 0, 3);
+        else if (d === 'rhy') st.rhy = rl[(rl.indexOf(st.rhy) + 1) % rl.length];
+        else if (d === 'bass') st.bass = bl[(bl.indexOf(st.bass) + 1) % bl.length];
+        else st.filt++;
+        st.changed.push(d);
+      }
+    }
+    out.push(st);
+  }
+  return out;
+}
+// the chord segments of the whole song (song steps): the group's loop from its first bar; at the harmonic rhythm per; the bII flash
+// every other loop before the main drop; a new loop at a group edge is marked first
+function kmSegs(S) {
+  const segs = [], key = S.key;
+  S.groups.forEach((gr, gi) => {
+    const pr = S.progs[gr.prog], a = gr.a * 16, end = Math.min(S.form.bars, gr.a + 16) * 16;
+    const ch = pr.ch.map(c => Object.assign({}, c, { l: c.l >= 16 ? c.l * gr.per : c.l }));
+    const newProg = gi > 0 && S.groups[gi - 1].prog !== gr.prog;
+    for (let s = a, loop = 0, first = true; s < end; loop++) {
+      for (const c0 of ch) {
+        if (s >= end) break;
+        let c = c0; if (c0.r === 1 && pr.ch.length === 2 && loop % 2 === 0 && gr.a < S.mainDrop && c0.l <= 4) c = Object.assign({}, ch[0], { l: c0.l }); // the flash: every other loop at first
+        const l = Math.min(c.l, end - s), root = c.mm ? c.croot : kmMod(key + c.r, 12), bass = gr.pedal ? key : c.mm ? c.bassPc : kmMod(key + (c.b != null ? c.b : c.r), 12);
+        const prev = segs[segs.length - 1];
+        if (prev && prev.c === c && prev.lv === gr.ext && prev.s + prev.l === s) prev.l += l;
+        else segs.push({ s, l, c, lv: gr.ext, root, bass, prog: gr.prog, first: first && newProg, g: gi, rel: c.mm ? kmMod(c.croot - key, 12) : c.r });
+        first = false; s += l;
+      }
+    }
+  });
+  return segs;
+}
+const kmSegAt = (S, s) => { const L = S.segs; let lo = 0, hi = L.length - 1; while (lo < hi) { const m = (lo + hi + 1) >> 1; if (L[m].s <= s) lo = m; else hi = m - 1; } return L[lo]; };
+// the voicings of a chord lane over the song (voice-led from chord to chord); vl: the voice-leading log the tests read
+function kmVoicings(S, lane) {
+  const out = new Map(), list = S.segs.map(g => { const pref = kmTones(g.c, S.key, g.lv); return { pref, pool: kmPool(g.c, S.key), n: kmVoices(lane, g.lv, pref.length + 1), top: g.c.top != null ? kmMod(g.root + g.c.top, 12) : null }; });
+  const vs = kmVoiceLine(list, 52, 72, null);
+  S.segs.forEach((g, i) => {
+    const v = vs[i], prev = i ? vs[i - 1] : null;
+    if (prev && prev.length && v.length) S.vl.push({ lane, s: g.s, d: kmVL(prev, v), first: !!g.first, prev: prev.slice(), v: v.slice(), lv: g.lv, f: g.c.f, r: g.rel, prog: g.prog });
+    out.set(g, v);
+  });
+  return out;
+}
+
+// ---------- 8. the drums ----------
+const kmRand = (h, a, b) => { let x = Math.imul((h ^ (a * 0x9e3779b1) ^ (b * 0x85ebca77)) >>> 0, 0x27d4eb2d); x ^= x >>> 15; x = Math.imul(x, 0x165667b1); x ^= x >>> 13; return (x >>> 0) / 4294967296; };
+// one 8-bar block of DRUMS and PERC: -> { D, B, kicks: [Set of steps per bar], fill, layer }
+function kmDrumBlock(S, blk) {
+  const D = [], B = [], kicks = [], col = blk.col, sec = S.form.secs[blk.secI], pat = KM_DRUM[blk.pat] || KM_DRUM.core, h = S.h;
+  const pairs = blk.pairs, layer = blk.layer, put = (role, s, v) => {
+    const lane = KM_DRUM_LANE.has(role) ? 'D' : 'B', kit = lane === 'D' ? S.kitD : S.kitB, p = genPadFor(kit, role); if (p < 0) return;
+    (lane === 'D' ? D : B).push({ s: genQt(s), p, l: 1, v: kmCl(Math.round(v), 1, 127), r: role });
+  };
+  for (let b = 0; b < 8; b++) {
+    const G = blk.a + b, o = b * 16, bars = pat.bars, def = bars[kmMod(G - sec.a, bars.length)], answer = bars.length === 1 && b % 2 === 1;
+    const hits = [];
+    Object.entries(def).forEach(([role, str]) => {
+      let r = role;
+      kmHits(str).forEach(([s, v]) => {
+        if (answer && s >= 8) r = role === 'QH' ? 'QL' : role === 'BH' ? 'BL' : role === 'AU' ? 'AT' : role; // the call in the first half, the low drum answers
+        hits.push([r, s, v]); r = role;
+      });
+    });
+    // the extra layers: the 3-over-4 shaker (a hit every 3 steps from the section's start: it realigns every 3 bars), the 12/8 bell lane
+    if (pat.poly || layer === 'poly') for (let s = 0; s < 16; s++) { const x = (G - sec.a) * 16 + s; if (x % 3 === 0) hits.push(['T2', s, x % 48 === 0 ? 116 : 78]); }
+    if (pat.trip || layer === 'trip') { [...'X.ox.ox.o.x.'].forEach((c, k) => { if (kmHas(KM_V, c)) hits.push(['BE', k * 4 / 3, KM_V[c] - 10]); }); [...'xgoxgoxgoxgo'].forEach((c, k) => { if (kmHas(KM_V, c)) hits.push(['TB', k * 4 / 3, KM_V[c] - 16]); }); }
+    if (layer === 'bell') kmHits('..o.....o..o....').forEach(([s, v]) => hits.push(['CV', s, v]));
+    // the event of every 4 bars: a pickup into the next bar, a tom on the downbeat, a 2-hit roll, a single shaker at the bar's end
+    const ev = S.events[kmMod(Math.floor(G / 4), S.events.length)];
+    if (b % 4 === 3) { if (ev === 'pickup') hits.push(['QH', 15, 104]); else if (ev === 'roll2') hits.push(['AU', 14, 92], ['AU', 15, 116]); else if (ev === 'shaker') hits.push(['T', 15, 70]); }
+    if (b % 4 === 0 && ev === 'tomDown' && G > sec.a) hits.push(['AT', 0, 96]);
+    // the micro variation of every bar: one soft hit moves a 16th or leaves
+    const soft = hits.map((x, i) => [x, i]).filter(([x]) => x[2] <= 72 && !['K', 'C'].includes(x[0]) && Number.isInteger(x[1]));
+    if (soft.length && b !== 7) { const [x] = soft[Math.floor(kmRand(h, G, 7) * soft.length)], u = kmRand(h, G, 11); if (u < .4) x[2] = 0; else if (u < .7) x[1] = kmCl(x[1] + 1, 0, 15); else x[1] = kmCl(x[1] - 1, 0, 15); }
+    // the fill of the 8th bar
+    let fh = hits;
+    if (b === 7 && blk.fill) {
+      const f = blk.fill;
+      if (f === 'tomRoll') { fh = hits.filter(x => !(x[1] >= 12 && x[0] !== 'K' && x[0] !== 'T')); [12, 13, 14, 15].forEach((s, k) => fh.push([k % 2 ? 'AT' : 'AU', s, 72 + 15 * k])); }
+      else if (f === 'congaRun') { fh = hits.filter(x => !(x[1] >= 8 && /^(Q|B)/.test(x[0]))); [[8, 'QH', 80], [10, 'QL', 84], [11, 'QH', 88], [12, 'QL', 96], [13, 'QH', 104], [14, 'QL', 112], [15, 'QH', 120]].forEach(([s, r, v]) => fh.push([r, s, v])); }
+      else if (f === 'percDrop') fh = hits.filter(x => KM_DRUM_LANE.has(x[0]) || x[1] < 8);
+      else if (f === 'gap') fh = hits.filter(x => x[1] < 12);
+      else if (f === 'shakerSwell') { fh = hits.filter(x => !(x[0] === 'T' && x[1] >= 12)); [12, 13, 14, 15].forEach((s, k) => fh.push(['T', s, 80 + 12 * k])); }
+      else if (f === 'chopFill') fh = hits.filter(x => KM_DRUM_LANE.has(x[0]) || x[1] < 12);
+    }
+    const kk = new Set();
+    fh.forEach(([role, s, v]) => {
+      if (!(v > 0)) return;
+      const pr = KM_PAIR_OF[role], dl = KM_DRUM_LANE.has(role);
+      if (pr && !pairs.has(pr)) return;
+      if (dl) { // the drum column
+        const c = col.dr;
+        if (c === '.') return;
+        if (c === 'k' && role !== 'K') return;
+        if (c === 'h') { if (role === 'K') { if (s !== 0 && s !== 8) return; v = s ? 70 : 96; } else if (role === 'C' || role === 'T2') return; else v *= .7; }
+        if (c === 'p' && role === 'C') return;
+        if (c === 's' && (role === 'K' || role === 'C')) return;
+      } else if (col.pc === '.') return;
+      if (role === 'K') kk.add(s);
+      put(role, o + s, v + (kmRand(h, G * 16 + Math.round(s * 3), role.charCodeAt(0)) - .5) * 8);
+    });
+    kicks.push(kk);
+  }
+  return { D, B, kicks };
+}
+// the pairs a block plays: F all of the pattern's (one rotates out for 8 bars every 32 in a long run), p one out, s one, . none
+function kmPairs(S, blk, prevSet) {
+  const pat = KM_DRUM[blk.pat] || KM_DRUM.core, have = new Set();
+  pat.bars.forEach(d => Object.keys(d).forEach(r => { if (KM_PAIR_OF[r]) have.add(KM_PAIR_OF[r]); }));
+  if (blk.layer === 'bell' || pat.trip || blk.layer === 'trip') have.add('bell');
+  have.add('shaker'); if (pat.poly || blk.layer === 'poly') have.add('shaker');
+  const list = [...have].sort(), c = blk.col.pc, n = list.length, rot = Math.floor(S.rng() * n);
+  if (c === '.') return new Set(list.filter(p => p === 'shaker'));
+  if (c === 's') return new Set([list.includes('shaker') ? 'shaker' : list[rot % n]]);
+  if (c === 'p') return new Set(list.filter((p, i) => i !== (rot % n) || p === 'shaker'));
+  if (blk.runK > 0 && blk.runK % 4 === 3 && n > 2) { const out = list[(blk.a / 32 | 0) % n]; return new Set(list.filter(p => p !== out || p === 'shaker')); }
+  return new Set(list);
+}
+
+// ---------- 9. melody and bass ----------
+const KM_PENT = [0, 3, 5, 7, 10];
+const kmMapDeg = (d, major) => { if (!major) return d; const o = Math.floor(d / 12) * 12, x = kmMod(d, 12); return o + ({ 3: 4, 10: 9, 8: 9, 1: 2 }[x] ?? x); };
+const kmPentNb = (d, dir) => { const o = Math.floor(d / 12) * 12, x = kmMod(d, 12); let i = KM_PENT.findIndex(y => y >= x); if (i < 0) i = 0; const j = i + dir; return j < 0 ? o - 12 + KM_PENT[KM_PENT.length - 1] : j >= KM_PENT.length ? o + 12 : o + KM_PENT[j]; };
+// the weighted melody mutations (afro_melody_bass.md 7): one statement of the motif -> a changed copy (the original is kept)
+const KM_MEL_MUT = [['tail', .25], ['drop', .15], ['add', .1], ['shift', .1], ['oct', .1], ['sub', .1], ['modal', .05], ['len', .05], ['acc', .05], ['timbre', .05]];
+function kmMutMel(notes, kind, rng, L, mode) {
+  const n = notes.map(x => Object.assign({}, x)); if (!n.length) return n;
+  const pick = () => n[Math.floor(rng() * n.length)];
+  if (kind === 'tail') n.filter(x => x.s >= L / 2).forEach(x => { x.d = kmPentNb(x.d, rng() < .5 ? -1 : 1); });
+  else if (kind === 'drop' && n.length > 2) n.splice(1 + Math.floor(rng() * (n.length - 1)), 1);
+  else if (kind === 'add') { const free = [2, 6, 10, 14, 3, 7, 11].filter(s => s < L && !n.some(x => Math.abs(x.s - s) < 1)); if (free.length) { const s = free[Math.floor(rng() * free.length)], pv = n.filter(x => x.s < s).pop() || n[0]; n.push({ s, d: kmPentNb(pv.d, rng() < .5 ? -1 : 1), l: 1, g: false, a: false }); n.sort((a, b) => a.s - b.s); } }
+  else if (kind === 'shift') { const k = rng() < .5 ? -2 : 2; n.forEach(x => { x.s = kmMod(x.s + k, L); }); n.sort((a, b) => a.s - b.s); }
+  else if (kind === 'oct') { const x = pick(); x.d += x.d > 6 ? -12 : 12; }
+  else if (kind === 'sub') { const x = pick(); x.d = kmPentNb(x.d, rng() < .5 ? -1 : 1); }
+  else if (kind === 'modal') { const x = n.find(y => kmMod(y.d, 12) === 3 || kmMod(y.d, 12) === 7); if (x) x.d += mode === 'phrygian' ? -6 + (kmMod(x.d, 12) === 7 ? 0 : 4) : kmMod(x.d, 12) === 7 ? 2 : -1; } // the 6 (dorian) or the 2 / b2 colour
+  else if (kind === 'len') { const lg = n.reduce((a, x) => (x.l > a.l ? x : a)), sh = n.find(x => x !== lg && x.l <= 2); if (sh) { const t = lg.l; lg.l = sh.l; sh.l = t; } }
+  else if (kind === 'acc') { n.forEach(x => { x.a = false; }); pick().a = true; }
+  else if (kind === 'timbre') n.forEach((x, i) => { x.vk = .8 + .4 * ((i + 1) % 3) / 2; }); // no pitch change: a velocity (brightness) contour
+  return n;
+}
+const KM_BASS_MUT = [['dropout', .2], ['ghost', .2], ['pickup', .15], ['oct', .15], ['fifth', .1], ['filter', .15], ['dense', .05]];
+// the class of the instrument on a lane (what it plays)
+function kmClassOf(name, lane) {
+  if (kmHas(KM_CLASS, name)) { const c = KM_CLASS[name]; if (lane === 'STAB' && ['onenote', 'pluck', 'mallet', 'bell', 'arp'].includes(c)) return 'arp'; if (lane === 'LEAD' && c === 'keys') return 'pluck'; return c; }
+  const s = String(name || '');
+  if (lane === 'PAD') return /drone/i.test(s) ? 'drone' : 'pad';
+  if (lane === 'STAB') return /pluck|marimba|kalimba|bell|mallet|balafon|mbira|harp|celesta|glock|arp/i.test(s) ? 'arp' : 'keys';
+  return /marimba|balafon/i.test(s) ? 'mallet' : /kalimba|mbira|bell|glock|celesta|tine/i.test(s) ? 'bell' : /flute|ney|pipe|whistle/i.test(s) ? 'flute'
+    : /vox|vocal|choir|glide|siren|hoover|saw lead/i.test(s) ? 'glide' : /pluck/i.test(s) ? 'pluck' : 'lead';
+}
+const KM_REG = { onenote: [62, 74], pluck: [64, 79], mallet: [64, 79], bell: [72, 88], glide: [57, 74], flute: [64, 81], lead: [64, 79] };
+const kmRootIn = (pc, lo) => lo + kmMod(pc - lo, 12);
+const kmFold = (p, lo, hi) => { while (p > hi) p -= 12; while (p < lo) p += 12; return p; };
+// the lead of one 8-bar block: the motif repeated in 4-bar units, one weighted mutation per unit at most (the first unit of every 16
+// bars is the original), thinned (p) or a fragment (s); with the vocal chops on, it answers in bars 2, 4, 6 and 8 (3 notes at most)
+function kmLeadBlock(S, blk) {
+  const c = blk.col.ld; if (c === '.') return [];
+  const cls = S.cls.LEAD, [lo, hi] = KM_REG[cls] || KM_REG.lead, bd = blk.sec === 'breakdown', id = bd && S.motifBd ? S.motifBd : blk.sec === 'intro' && S.motifIn ? S.motifIn : S.motif;
+  const M = KM_MOTIFS[id], L = M.bars * 16, mode = bd && S.revealScale ? S.revealScale : S.scale, major = mode === 'major', vox = S.hasVox && blk.col.vx !== '.' && c !== 's';
+  const T = S.leadT[id], out = [];
+  for (let u = 0; u < 2; u++) {
+    const a0 = u * 64, abs = blk.a + u * 4, orig = abs % 16 === 0;
+    let notes = M.notes;
+    if (!orig && S.rng() < .55) { const kind = kmW(S.rng, KM_MEL_MUT); notes = kmMutMel(M.notes, kind, S.rng, L, mode); S.mut.push({ lane: 'LEAD', bar: abs, kind }); }
+    const reps = Math.max(1, 64 / L);
+    for (let r = 0; r < reps; r++) notes.forEach(n => {
+      let s = a0 + r * L + n.s; if (s >= a0 + 64) return;
+      if (c === 's' && (r > 0 || n.s >= 16)) return; // a fragment: the head once a unit
+      out.push({ s, d: n.d, l: n.l, v: (n.a ? 112 : n.g ? 60 : 96) * (n.vk || 1), gl: n.gl });
+    });
+  }
+  let notes = out;
+  if (vox) { // the call bars (the chops) are the vocal's; the bar after each one answers: 3 notes at most, from step 3 on
+    const calls = blk.col.vx === 'F' ? [0, 2, 4, 6] : [0, 4];
+    notes = out.filter(n => !calls.includes(Math.floor(n.s / 16)));
+    calls.forEach(b0 => { const b = b0 + 1, inBar = notes.filter(n => Math.floor(n.s / 16) === b); notes = notes.filter(n => !inBar.includes(n));
+      inBar.slice(0, 3).forEach((n, k) => { const st = Math.max(2 + 2 * k, n.s % 16); if (st < 16) notes.push(Object.assign({}, n, { s: b * 16 + st, l: Math.min(n.l, 16 - st) })); }); });
+    notes.sort((x, y) => x.s - y.s);
+  }
+  if (c === 'p') { const keep = []; for (let b = 0; b < 8; b++) keep.push(...notes.filter(n => Math.floor(n.s / 16) === b).sort((x, y) => y.l - x.l || x.s - y.s).slice(0, 3)); notes = keep.sort((x, y) => x.s - y.s).map(n => Object.assign(n, { v: n.v * .85 })); }
+  const res = notes.map(n => ({ s: n.s, p: kmFold(T + kmMapDeg(n.d, major), lo, hi), l: Math.max(1, n.l), v: kmCl(Math.round(n.v + (kmRand(S.h, blk.a * 16 + n.s, 3) - .5) * 10), 30, 127), gl: n.gl }));
+  // a chord change: the first note on or after it is a chord tone (within 2 semitones)
+  S.segs.filter(g => g.s >= blk.a * 16 && g.s < blk.a * 16 + 128).forEach(g => {
+    const x = res.find(n => n.s >= g.s - blk.a * 16); if (!x) return;
+    const pcs = new Set(kmTones(g.c, S.key, 2).map(t => t.pc).concat([g.root])); if (pcs.has(kmMod(x.p, 12))) return;
+    for (const dd of [1, -1, 2, -2]) if (pcs.has(kmMod(x.p + dd, 12)) && x.p + dd >= lo && x.p + dd <= hi) { x.p += dd; break; }
+  });
+  // one line; the voice-like leads glide into the marked notes (legato: the note before reaches it)
+  res.sort((x, y) => x.s - y.s);
+  for (let k = 0; k + 1 < res.length; k++) {
+    const n = res[k], nx = res[k + 1];
+    if (n.s + n.l > nx.s) n.l = Math.max(.5, nx.s - n.s);
+    if ((cls === 'glide' || cls === 'flute') && nx.gl && nx.s - (n.s + n.l) <= 2) { n.l = nx.s - n.s; n.g = Math.min(1.5, n.l / 2); }
+  }
+  return res.filter(n => n.s < 128).map(n => { const m = { s: n.s, p: n.p, l: Math.min(n.l, 128 - n.s), v: n.v }; if (n.g) m.g = n.g; return m; });
+}
+// the bass of one block: the group's pattern on the chord roots (or the pedal), mid bass + a sub on the main notes; nothing starts on a
+// step the kick plays (moved a 16th later or left out); one weighted mutation per 4-bar unit at most
+function kmBassBlock(S, blk, kicks) {
+  const c = blk.col.bs, mid = [], sub = []; if (c === '.') return { mid, sub };
+  const gr = S.groups[Math.floor(blk.a / 16)], pid = c === 's' ? (gr.sec === 'bridge' ? 'B4' : 'BS') : gr.bass, pat0 = KM_BASSES[pid] || KM_BASSES.B1;
+  for (let u = 0; u < 2; u++) {
+    const abs = blk.a + u * 4, orig = abs % 16 === 0, kind = !orig && S.rng() < .5 ? kmW(S.rng, KM_BASS_MUT) : '';
+    if (kind) S.mut.push({ lane: 'BASS', bar: abs, kind });
+    const pat = kind === 'dense' ? KM_BASSES.B2 : pat0, notes = [];
+    for (let b = u * 4; b < u * 4 + 4; b++) {
+      const bi = kmMod(blk.a + b, pat.bars);
+      pat.notes.filter(n => Math.floor(n.s / 16) === bi).forEach(n => notes.push({ b, s: n.s % 16, d: n.d, l: n.l, g: n.g, a: n.a, gl: n.gl }));
+    }
+    if (kind === 'dropout' && u === 1) { for (let k = notes.length - 1; k >= 0; k--) if (notes[k].b >= 7 - (S.rng() < .5 ? 1 : 0)) notes.splice(k, 1); }
+    else if (kind === 'ghost') { if (S.rng() < .5) { for (let q = 0; q < 1 + S.rng() * 3; q++) { const b = u * 4 + Math.floor(S.rng() * 4), s = [1, 3, 5, 7, 9, 11, 13, 15][Math.floor(S.rng() * 8)]; if (!notes.some(n => n.b === b && Math.abs(n.s - s) < 1)) notes.push({ b, s, d: S.rng() < .5 ? 12 : 7, l: 1, g: true }); } } else for (let k = notes.length - 1, q = 0; k >= 0 && q < 2; k--) if (notes[k].g) { notes.splice(k, 1); q++; } }
+    else if (kind === 'pickup') { const b = u * 4 + 3; for (let k = notes.length - 1; k >= 0; k--) if (notes[k].b === b && notes[k].s + notes[k].l > 15) notes[k].l = Math.max(1, 15 - notes[k].s); notes.push({ b, s: 15, d: 0, l: 1, a: false, next: true }); }
+    else if (kind === 'oct') { const off = notes.filter(n => !n.g && n.s % 4 === 2); if (off.length) off[Math.floor(S.rng() * off.length)].d += 12; }
+    else if (kind === 'fifth') { const r = notes.filter((n, i) => i > 0 && !n.g && kmMod(n.d, 12) === 0); if (r.length) r[Math.floor(S.rng() * r.length)].d += 7; }
+    notes.forEach(n => {
+      if (c === 'p' && n.g) return;
+      const st = blk.a * 16 + n.b * 16 + n.s, g = kmSegAt(S, n.next ? Math.min(S.form.bars * 16 - 1, st + 1) : st), maj = ['M', 'D', 'tM', 'L', 'X'].includes(g.c.f);
+      let s = n.s; const kk = kicks[n.b] || new Set();
+      if (kk.has(s)) { if (n.g) return; if (s + 1 < 16 && !kk.has(s + 1) && !notes.some(o => o !== n && o.b === n.b && o.s === s + 1)) s += 1; else return; }
+      const l = Math.max(1, Math.min(n.l - (s - n.s), 16 * (8 - n.b) - s)), dd = maj && kmMod(n.d, 12) === 3 ? n.d + 1 : n.d;
+      const p = kmFold(kmRootIn(g.bass, 45) + dd, 40, 60), v = n.g ? 40 + Math.floor(kmRand(S.h, st, 5) * 15) : n.a ? 112 : 98;
+      const m = { s: n.b * 16 + s, p, l: n.g ? 1 : l, v }; if (n.gl && mid.length) { const pv = mid[mid.length - 1]; if (pv.s + pv.l >= m.s - 1) { pv.l = m.s - pv.s; pv.g = Math.min(1, pv.l / 3); } }
+      mid.push(m);
+      if (!n.g) sub.push({ s: m.s, p: kmRootIn(g.bass, 33), l, v: Math.min(110, v) });
+    });
+  }
+  // the sub: one note per main onset, held to the next one; 's' (sub only): the mid rests
+  sub.sort((x, y) => x.s - y.s).forEach((n, k) => { const nx = sub[k + 1]; n.l = Math.max(1, Math.min(nx ? nx.s - n.s : 128 - n.s, Math.max(n.l, 6))); });
+  const held = []; sub.forEach(n => { const pv = held[held.length - 1]; if (pv && pv.p === n.p && pv.s + pv.l >= n.s - 1 && Math.floor(pv.s / 16) === Math.floor(n.s / 16)) pv.l = n.s + n.l - pv.s; else held.push(Object.assign({}, n)); }); // the same root held, a new attack each bar
+  return { mid: c === 's' ? [] : mid, sub: held };
+}
+// the chord stabs of a block: the group's rhythm (the call loop: a call bar and a pushed answer), the bVII and a new loop pushed
+// an 8th early and held over the bar line; the voicings of the STAB lane
+function kmStabBlock(S, blk, vo) {
+  const c = blk.col.ch; if (c === '.') return [];
+  const gr = S.groups[Math.floor(blk.a / 16)], pr = S.progs[gr.prog], A = blk.a * 16, out = [], vk = c === 'p' ? .86 : c === 's' ? .74 : 1;
+  let rhy = c === 's' ? 'R6' : gr.rhy; if (c === 'p' && (rhy === 'R7' || rhy === 'R10')) rhy = 'R1';
+  const pushes = S.segs.filter(g => g.s > A && g.s <= A + 128 && (g.c.push || g.rel === 10 || g.first) && g.s - 2 >= A).map(g => g.s);
+  const hit = (s, l, v, top2) => {
+    const g = kmSegAt(S, s), vv = vo.get(g); if (!vv || !vv.length) return;
+    const end = Math.min(g.s + g.l, A + 128), len = Math.min(l, end - s); if (len <= 0) return;
+    (top2 ? vv.slice(-2) : vv).forEach((p, j) => out.push({ s: s - A, p, l: len, v: kmCl(Math.round(v * vk - j), 1, 127) }));
+  };
+  for (let b = 0; b < 8; b++) {
+    const str = pr.call ? (b % 2 ? '..............X-' : KM_RHY.R9) : KM_RHY[rhy] || KM_RHY.R1;
+    for (let i = 0; i < 16; i++) {
+      const ch = str[i]; if (ch !== 'X' && ch !== 'x') continue;
+      let l = 1; while (i + l < 16 && str[i + l] === '-') l++;
+      const s = A + b * 16 + i; if (pushes.some(p => s >= p - 2 && s < p + 2)) continue;
+      hit(s, l + (ch === 'X' ? 0 : 0), ch === 'X' ? 96 + 3 * gr.ext + Math.floor(kmRand(S.h, s, 9) * 8) : 64, ch === 'x');
+    }
+  }
+  pushes.forEach(p => { const g = kmSegAt(S, p), vv = vo.get(g); if (vv) vv.forEach((q, j) => out.push({ s: p - 2 - A, p: q, l: Math.min(4, A + 128 - (p - 2)), v: kmCl(Math.round(104 * vk - j), 1, 127) })); });
+  return out;
+}
+// the arp pluck on the STAB lane: the chord's tones up and down in 16ths (F), the offbeat 8ths (p), one pacer note (s), in 55-67
+function kmArpBlock(S, blk, vo) {
+  const c = blk.col.ch; if (c === '.') return [];
+  const A = blk.a * 16, out = [], acc = [96, 56, 72, 60, 90, 58, 76, 62, 94, 56, 70, 60, 88, 58, 78, 64];
+  for (let s = 0; s < 128; s++) {
+    if (c === 'p' && s % 4 !== 2 && s % 8 !== 7) continue; if (c === 's' && s % 4 !== 2) continue;
+    const g = kmSegAt(S, A + s), vv = (vo.get(g) || []).map(p => kmFold(p, 55, 67)).sort((x, y) => x - y); if (!vv.length) continue;
+    const seq = vv.concat(vv.slice(1, -1).reverse()), p = c === 's' ? vv[vv.length - 1] : seq[kmMod(s, seq.length)];
+    out.push({ s, p, l: 1, v: kmCl(acc[s % 16] + (c === 's' ? -16 : 0), 1, 127) });
+  }
+  return out;
+}
+// the pad of a block: the PAD voicings held (F 4-5 voices, s the two lowest), or the drone: the root held, a 5th above in the peaks
+function kmPadBlock(S, blk, vo) {
+  const c = blk.col.pd; if (c === '.') return [];
+  const A = blk.a * 16, out = [], v0 = c === 'F' ? 76 : c === 'p' ? 66 : 58;
+  if (S.cls.PAD === 'drone') {
+    out.push({ s: 0, p: S.droneP, l: 128, v: v0 });
+    if (c === 'F' && /drop|final/.test(blk.sec)) out.push({ s: 0, p: S.droneP + 7, l: 128, v: v0 - 18 });
+    return out;
+  }
+  let run = null;
+  S.segs.filter(g => g.s < A + 128 && g.s + g.l > A).forEach(g => {
+    let vv = vo.get(g) || []; if (c === 's') vv = vv.slice(0, 2);
+    const s = Math.max(0, g.s - A), e = Math.min(128, g.s + g.l - A);
+    if (run && run.key === vv.join() && run.end === s) { run.notes.forEach(n => { n.l += e - s; }); run.end = e; return; }
+    run = { key: vv.join(), end: e, notes: vv.map(p => ({ s, p, l: e - s, v: v0 })) }; out.push(...run.notes);
+  });
+  return out;
+}
+// the FX lane: the chant chops (the call in bars 1, 3, 5, 7; they answer themselves when the lead rests) and the transitions
+function kmFxBlock(S, blk) {
+  const out = [], put = (b, s, p, v) => { if (p != null && p >= 0) out.push({ s: b * 16 + s, p, l: 1, v }); }, vx = blk.col.vx, D = S.mainDrop, A = blk.a;
+  if (S.hasVox && vx !== '.') {
+    const g = Math.floor(A / 16), call = [[[2, HFX.OH], [6, HFX.EH]], [[2, HFX.EH], [7, HFX.OH]], [[3, HFX.OH], [6, HFX.OHU]]][g % 3], ans = [[[10, HFX.AH], [14, HFX.OHU]], [[10, HFX.OHU], [14, HFX.OH]]][g % 2];
+    if (vx === 's') put(7, 12, HFX.OH, 88);
+    else for (let b = 0; b < 8; b += 2) {
+      if (vx === 'p' && b % 4) continue;
+      call.forEach(([s, p]) => put(b, s, p, 92 + (b % 4 ? 0 : 4)));
+      if (blk.col.ld === '.') ans.forEach(([s, p]) => put(b + 1, s, p, 96));
+    }
+  }
+  const prevCol = S.form.cols[blk.k - 1], next = S.form.cols[blk.k + 1];
+  if (A === D) { put(0, 0, HFX.IMPACT, 112); put(0, 0, HFX.CRASH, 100); }
+  else if (blk.col.dr === 'F' && prevCol && prevCol.dr !== 'F' && prevCol.sec !== blk.sec) put(0, 0, HFX.CRASH, 90);
+  if (A + 8 === D) { put(8 - S.riserBars, 0, HFX.RISER, 104); put(7, 0, HFX.UPLIFT, 96); }
+  if (next && next.sec === 'breakdown' && blk.sec !== 'breakdown') put(7, 8, HFX.SWELL, 96);
+  if (prevCol && blk.sec === 'breakdown' && prevCol.sec !== 'breakdown') put(0, 0, HFX.DOWNER, 100);
+  if (blk.fill === 'shakerSwell') put(7, 8, HFX.SWELL, 84);
+  if (blk.fill === 'chopFill' && S.hasVox) put(7, 12, HFX.HEY, 100);
+  return out;
+}
+
+// ---------- 10. one song ----------
+// a My MIDI loop (section 3z: the bound chords) as a progression of this engine: its tones, roots and bass notes, its lengths
+function kmMmProg(b, key) {
+  const ch = b.chordsA.map((c, i) => ({ mm: true, croot: c.croot != null ? c.croot : c.root, bassPc: b.chords[i] ? b.chords[i].root : c.root, tones: c.tones.map(t => ({ pc: t.pc, k: t.k })), name: c.name, l: c.mmL, f: 'mm' }));
+  ch.forEach(c => { c.r = kmMod(c.croot - key, 12); });
+  return { name: 'My MIDI: ' + (b.rec && b.rec.name ? String(b.rec.name).slice(0, 40) : 'progression'), scale: b.scale, ch, mm: true };
+}
+const KM_T = { DRUMS: 0, BREAK: 1, BASS: 2, SUB: 3, STAB: 4, PAD: 5, LEAD: 6, FX: 7 };
+// every clip of a Keine song: one scene row per 8-bar block (its own clip on each lane that plays), written after the house builder
+function kmWriteSong(P, st, rng) {
+  const id = st.id, sty = KM_STY[id], cur = typeof PAL === 'object' && PAL && PAL.cur && PAL.cur.id === id ? PAL.cur : null;
+  let ih = 2166136261; for (let k = 0; k < id.length; k++) ih = Math.imul(ih ^ id.charCodeAt(k), 16777619) >>> 0;
+  const seed = (rng.int(4294967296) ^ (cur ? cur.seed : 0) ^ ih) >>> 0, R = genRng(seed), v = cur ? cur.v : 'normal';
+  const tid = kmW(R, Object.entries(sty.tpl)), form = kmForm(tid, R, v, P.bpm), key = genKey(P), scale = genScaleId(P);
+  const S = { P, id, sty, rng: R, h: seed, form, key, scale, vl: [], mut: [], fills: [], layers: [], tpl: tid, progs: Object.assign({}, KM_PROGS) };
+  // the progressions: My MIDI's bound loop, or the style's (a generated one: built here from the seed), and the breakdown's reveal
+  const mm = typeof mmBound === 'function' ? mmBound(P) : null;
+  if (mm) { S.progs.mm = kmMmProg(mm, key); S.main = 'mm'; S.mm = true; }
+  else {
+    S.main = P.gen.prog;
+    if (kmHas(KM_GEN, S.main)) S.progs[S.main] = kmGenProg(KM_GEN[S.main].scale, R, key);
+    if (!kmHas(S.progs, S.main)) S.progs[S.main] = KM_PROGS['km-dor-vamp'];
+    const rv = (KM_BDOWN[scale] || KM_BDOWN.minor).filter(x => x !== S.main);
+    S.reveal = rv.length && form.secs.some(s => s.sec === 'breakdown') ? R.pick(rv) : null;
+    if (S.reveal) S.revealScale = S.progs[S.reveal].scale;
+  }
+  S.pedalOpt = R() < .5;
+  // the kick-out (one), the main drop after it, the HPF riser before it
+  const cols = form.cols, k0 = cols.findIndex(x => x.dr === '.'), k1 = k0 < 0 ? -1 : cols.findIndex((x, i) => i > k0 && x.dr !== '.');
+  const dIdx = k1 < 0 ? cols.findIndex(x => /drop|final/.test(x.sec)) : cols.findIndex((x, i) => i >= k1 && x.dr === 'F');
+  S.kickOut = k0 < 0 ? null : [k0 * 8, (k1 < 0 ? cols.length : k1) * 8]; S.mainDrop = Math.max(8, (dIdx < 0 ? Math.floor(cols.length / 2) : dIdx) * 8); S.riserBars = 2 + R.int(3);
+  S.groups = kmHarmPlan(S); S.segs = kmSegs(S);
+  // the instruments on the lanes (the palette may have drawn other ones)
+  const pre = t => (P.tracks[t].synth && P.tracks[t].synth.preset) || '';
+  S.cls = { STAB: kmClassOf(pre(4), 'STAB'), PAD: kmClassOf(pre(5), 'PAD'), LEAD: kmClassOf(pre(6), 'LEAD') };
+  const bank = (KM_MOTIF_OF[S.cls.LEAD] || KM_MOTIF_OF.lead).filter(m => !KM_MOTIFS[m].mode || KM_MOTIFS[m].mode === scale);
+  S.motif = R.pick(bank.length ? bank : ['M1']);
+  S.motifBd = S.cls.LEAD === 'onenote' ? null : S.revealScale === 'dorian' || scale === 'dorian' ? 'M4' : ['glide', 'flute'].includes(S.cls.LEAD) ? 'M7' : null;
+  S.motifIn = scale === 'phrygian' && S.cls.LEAD !== 'onenote' ? 'M5' : null;
+  const [lo, hi] = KM_REG[S.cls.LEAD] || KM_REG.lead; S.leadT = {};
+  Object.entries(KM_MOTIFS).forEach(([mid, M]) => { const ps = M.notes.map(n => n.d); let best = 0, bc = 1e9; [-24, -12, 0, 12, 24].forEach(o => { const t = kmRootIn(key, lo) + o, c = ps.reduce((a, d) => a + Math.max(0, lo - (t + d), t + d - hi), 0) + .01 * Math.abs(t - lo); if (c < bc) { bc = c; best = t; } }); S.leadT[mid] = best; });
+  S.droneP = kmRootIn(key, 52);
+  // the kits: kick and clap straight, the hand drums and rims a little late; the vox chops on the FX lane
+  S.kitD = genKitMap(P.tracks[0]); S.kitB = genKitMap(P.tracks[1]);
+  [[0, S.kitD], [1, S.kitB]].forEach(([t, kit]) => Object.entries(kit.roles).forEach(([role, idx]) => idx.forEach(i => { const pd = P.tracks[t].pads[i]; if (!pd) return;
+    if (role === 'K' || role === 'C' || role === 'C2') { pd.swing = 0; pd.hum = 0; } else if (kmHas(KM_OFFSET, role)) pd.offset = KM_OFFSET[role]; })));
+  const fxKit = genKitMap(P.tracks[7]); S.hasVox = !!(fxKit.roles.vox && fxKit.roles.vox.length);
+  // the patterns per section, the events and the fills in rotation, the layers every 16 bars
+  const gl = sty.grooves, main = gl[R.int(Math.min(2, gl.length))], alt = R.pick(gl.filter(x => x !== main)) || main;
+  S.pat = { main, alt }; S.events = ['pickup', 'tomDown', 'roll2', 'shaker'].sort(() => R() - .5);
+  const secPat = form.secs.map(s => s.sec === 'breakdown' ? 'ghost' : s.sec === 'bridge' ? (R() < .5 ? 'minimal' : 'ghost') : s.sec === 'groove2' ? alt
+    : s.sec === 'final' ? (gl.includes('step3') && R() < .6 ? 'step3' : alt) : s.sec === 'drop' && R() < .5 ? alt : main);
+  let prevFill = '', runK = 0, li = R.int(3);
+  const blocks = cols.map((col, k) => {
+    const secI = form.secs.findIndex(s => k * 8 >= s.a && k * 8 < s.a + s.bars);
+    runK = col.pc === 'F' && k > 0 && cols[k - 1].pc === 'F' ? runK + 1 : 0;
+    const pat = form.secs[secI].sec === 'intro' && (col.dr === 'k' || col.dr === '.') ? 'bed' : secPat[secI];
+    const blk = { k, a: k * 8, col, sec: col.sec, secI, runK, pat, layer: '', fill: '' };
+    if (col.pc === 'F' && k % 2 === 1 && !['intro', 'outro'].includes(col.sec)) { blk.layer = ['poly', 'trip', 'bell'][li++ % 3]; S.layers.push([blk.a, blk.layer]); }
+    if (col.dr !== '.' || col.pc !== '.') {
+      const pool = KM_FILLS.filter(f => f !== prevFill && (f !== 'chopFill' || S.hasVox) && !(f === 'tomRoll' && col.pc === '.'));
+      blk.fill = pool[R.int(pool.length)]; prevFill = blk.fill; S.fills.push([blk.a, blk.fill]);
+    }
+    return blk;
+  });
+  blocks.forEach((b, k) => { b.pairs = kmPairs(S, b, k ? blocks[k - 1].pairs : null); });
+  S.blocks = blocks;
+  // the rows: one per block
+  const n = Math.min(MAX_SCENES, blocks.length);
+  while (P.scenes.length < n) P.scenes.push({ name: 'SCENE ' + (P.scenes.length + 1) });
+  P.tracks.forEach(tr => { tr.clips = Array(P.scenes.length).fill(null); });
+  blocks.forEach(b => { if (b.k < n) P.scenes[b.k].name = `${KM_SEC_LBL[b.sec] || b.sec.toUpperCase()} ${b.a + 1}`.slice(0, 24); });
+  const voS = kmVoicings(S, 'STAB'), voP = kmVoicings(S, 'PAD');
+  const swD = Math.round(kmCl((sty.swingR - .5) * 3 + R() * .04, .18, .24) * 1000) / 1000, swB = Math.round(kmCl(swD + .06 + R() * .06, .24, .36) * 1000) / 1000;
+  const grooveOf = t => (t === 0 ? { swing: swD, on: 16, humanize: { t: .025, v: .3 } } : t === 1 ? { swing: swB, on: 16, humanize: { t: .025, v: .3 } }
+    : t === 7 ? { swing: 0, on: 16, humanize: { t: 0, v: .1 } } : t === 2 || t === 3 ? { swing: 0, on: 16, humanize: { t: 0, v: .08 } } : { swing: 0, on: 16, humanize: { t: .05, v: .12 } });
+  S.swing = { DRUMS: swD, BREAK: swB };
+  const put = (t, b, notes) => {
+    if (b.k >= n || !notes || !notes.length) return;
+    const ns = dedupe(genGrid(notes.filter(x => [x.s, x.p, x.l, x.v].every(Number.isFinite) && x.s >= 0 && x.s < 128).map(x => { const m = { s: x.s, p: kmCl(Math.round(x.p), 0, 127), l: Math.max(1 / 48, Math.min(x.l, 128 - x.s)), v: kmCl(Math.round(x.v), 1, 127) }; if (x.g > 0) m.g = x.g; return m; })))
+      .sort((x, y) => x.s - y.s || x.p - y.p);
+    if (ns.length) P.tracks[t].clips[b.k] = { name: `${KM_SEC_LBL[b.sec] || 'BLOCK'} ${b.a + 1} ${P.tracks[t].name}`.slice(0, 24), bars: 8, notes: ns, groove: grooveOf(t) };
+  };
+  S.kicks = []; S.bassOnKick = 0;
+  blocks.forEach(b => {
+    const d = kmDrumBlock(S, b); S.kicks.push(d.kicks);
+    put(0, b, d.D); put(1, b, d.B);
+    const bs = kmBassBlock(S, b, d.kicks), ld = kmLeadBlock(S, b);
+    // interlock: at most 2 shared onsets a bar with the lead (the bass ghosts give way), a shared onset never on one pitch class
+    for (let bar = 0; bar < 8; bar++) {
+      const on = new Set(ld.filter(x => Math.floor(x.s / 16) === bar).map(x => x.s)), sh = bs.mid.filter(x => Math.floor(x.s / 16) === bar && on.has(x.s));
+      if (sh.length > 2) sh.filter(x => x.v < 60).forEach(x => { bs.mid.splice(bs.mid.indexOf(x), 1); });
+      bs.mid.filter(x => on.has(x.s)).forEach(x => ld.filter(y => y.s === x.s && kmMod(y.p - x.p, 12) === 0).forEach(y => { y.p += y.p + 2 <= (KM_REG[S.cls.LEAD] || KM_REG.lead)[1] ? 2 : -3; }));
+    }
+    put(2, b, bs.mid); put(3, b, bs.sub);
+    put(4, b, S.cls.STAB === 'arp' ? kmArpBlock(S, b, voS) : kmStabBlock(S, b, voS)); put(5, b, kmPadBlock(S, b, voP)); put(6, b, ld); put(7, b, kmFxBlock(S, b));
+  });
+  // the bass never on a kick step: counted for the tests (0 by construction)
+  blocks.forEach((b, k) => [2, 3].forEach(t => { const c = P.tracks[t].clips[b.k]; if (c) c.notes.forEach(x => { const bar = Math.floor(x.s / 16); if (Number.isInteger(x.s) && S.kicks[k][bar] && S.kicks[k][bar].has(x.s % 16)) S.bassOnKick++; }); }));
+  const nm = [...new Set(S.segs.filter(g => g.prog === S.main).slice(0, 12).map(g => kmChordName(g.c, key, Math.max(1, g.lv))))].slice(0, 8);
+  P.gen.chords = nm; P.gen.marks = {}; P.gen.keine = { tpl: tid, v };
+  KM.cur = { P, S }; KM.lastS = S;
+  KM.last = { id, tpl: tid, tplName: KM_TPL[tid].name, moves: form.moves.slice(), bars: form.bars, secs: form.secs.map(s => [s.sec, s.a, s.bars]), main: S.main, mainName: S.progs[S.main].name, reveal: S.reveal,
+    chords: nm, kickOut: S.kickOut, mainDrop: S.mainDrop, riserBars: S.riserBars, groups: S.groups.map(g => ({ a: g.a, sec: g.sec, prog: g.prog, per: g.per, ext: g.ext, rhy: g.rhy, bass: g.bass, filt: g.filt, changed: g.changed.slice() })),
+    vl: S.vl, fills: S.fills, layers: S.layers, mut: S.mut, cls: S.cls, pat: S.pat, motif: S.motif, swing: S.swing, bassOnKick: S.bassOnKick, mm: !!S.mm, cols: cols.map(c => KM_LANES.map(x => c[x]).join('')) };
+  return S;
+}
+
+// ---------- 11. the arrangement and its automation ----------
+function kmLayout(P, S) {
+  const plan = S.form.secs.map(s => [s.sec, s.a, s.bars]);
+  P.tracks.forEach((tr, t) => { tr.arr = []; S.blocks.forEach(b => { if (tr.clips[b.k]) tr.arr.push({ start: b.a, slot: b.k, len: 8, off: 0 }); }); });
+  return plan;
+}
+const kmHz = hz => kmCl(Math.log(Math.max(20, hz) / 20) / Math.log(1000), 0, 1); // the track filter's 0..1 travel (20 Hz - 20 kHz)
+const kmPts = pts => { const m = new Map(); pts.filter(q => q.every(Number.isFinite) && q[0] >= 0).forEach(q => m.set(Math.round(q[0] * 48) / 48, [Math.round(q[0] * 48) / 48, kmCl(q[1], 0, 1), q[2] | 0])); return [...m.values()].sort((a, b) => a[0] - b[0]); };
+// the lanes: the bass LPF opening over 16-32 bars, the chords' reveal and darkening, the breakdown's reverb + delay macro (back at the
+// drop), delay throws on phrase tails, the HPF riser before the main drop (and the heartbeat kick high-passed), legato for the glide lead
+function kmAuto(P, S) {
+  if (typeof autoArrSet !== 'function' || typeof autoImpl !== 'function' || typeof autoDefault !== 'function') return [];
+  const done = [], cols = S.form.cols, bars = S.form.bars, D = S.mainDrop, K = S.kickOut, tr = n => P.tracks[KM_T[n]];
+  const lane = (t, id, pts) => { if (!t || !autoImpl(t, id) || pts.length < 2) return; autoArrSet(t, id, kmPts(pts)); done.push(t.name + ':' + id); };
+  const runs = key => { const r = []; cols.forEach((c, i) => { const on = key(c); if (on && (!r.length || r[r.length - 1][1] !== i)) r.push([i, i + 1]); else if (on) r[r.length - 1][1] = i + 1; }); return r.map(([a, b]) => [a * 8, b * 8]); };
+  // the bass filter
+  const B = tr('BASS'), bid = B && autoImpl(B, 'cut') ? 'cut' : 'tfreq';
+  if (B) {
+    const d = autoDefault(B, bid), lo = kmCl(d - .3, .02, 1), rr = runs(c => c.bs === 'p' || c.bs === 'F'), pts = [[0, lo, 2]];
+    rr.forEach(([a, e], i) => {
+      const first = i === 0, L = first ? Math.min(e - a, S.rng() < .5 ? 16 : 32) : Math.min(8, e - a);
+      pts.push([a * 16, first ? lo : kmCl(d - .12, .02, 1), 1], [(a + L) * 16, d, 0]);
+      if (K && e === K[0]) pts.push([(e - 8) * 16, d, 0], [e * 16 - 1, kmCl(d - .16, .02, 1), 2]); // darker into the break
+      if (cols[e / 8] == null || cols[e / 8 - 1].sec === 'outro') pts.push([Math.max(a + L, e - 16) * 16, d, 0], [e * 16 - 1, lo, 2]);
+    });
+    lane(B, bid, pts);
+  }
+  // the chords and the pad: the reveal over 16 bars, darker before the break, the break opening, the outro closing
+  ['STAB', 'PAD'].forEach(n => {
+    const t = tr(n); if (!t || !autoImpl(t, 'cut')) return;
+    const key = n === 'STAB' ? 'ch' : 'pd', d = autoDefault(t, 'cut'), rr = runs(c => c[key] !== '.'); if (!rr.length) return;
+    const pts = [[0, kmCl(d - .3, .02, 1), 2]];
+    pts.push([rr[0][0] * 16, kmCl(d - .3, .02, 1), 1], [(rr[0][0] + 16) * 16, d, 0]);
+    if (K) { pts.push([(K[0] - 8) * 16, d, 0], [K[0] * 16, kmCl(d - .15, .02, 1), 0], [D * 16 - 1, d, 2], [D * 16, d, 2]); }
+    S.groups.forEach(g => { if (g.filt && !(K && g.a >= K[0] && g.a < D)) pts.push([g.a * 16, kmCl(d - .05 + .02 * Math.min(g.filt, 4), .02, 1), 2]); }); // the slow evolution: a filter step a group
+    const last = rr[rr.length - 1]; pts.push([Math.max(last[0], last[1] - 16) * 16, d, 0], [last[1] * 16 - 1, kmCl(d - .3, .02, 1), 2]);
+    lane(t, 'cut', pts);
+  });
+  // the breakdown macro (reverb A + delay B together) on the chords, the pad, the lead and the chops; back to the knob at the drop
+  if (K) ['STAB', 'PAD', 'LEAD', 'FX'].forEach(n => {
+    const t = tr(n); if (!t) return;
+    [['sendA', .72], ['sendB', .58]].forEach(([id, cap]) => {
+      const d = autoDefault(t, id), m = x => d + x * Math.max(0, cap - d), pts = [[0, d, 2], [K[0] * 16, d, 0], [(D - 1) * 16, m(.65), 0], [D * 16 - 2, m(.8), 2], [D * 16, d, 2]];
+      // the second, short wash in the bridge (20 -> 60 %, cut at the next section)
+      S.form.secs.filter(s => s.sec === 'bridge' && s.a >= D).forEach(s => pts.push([s.a * 16, m(.2), 0], [(s.a + s.bars) * 16 - 2, m(.6), 2], [(s.a + s.bars) * 16, d, 2]));
+      // delay throws: the last beat of every 8-bar phrase the lead (or the chops) plays, outside the wash
+      if (id === 'sendB' && (n === 'LEAD' || n === 'FX')) S.blocks.forEach(b => {
+        const on = n === 'LEAD' ? b.col.ld === 'F' || b.col.ld === 'p' : b.col.vx === 'F' || b.col.vx === 'p', e = (b.a + 8) * 16;
+        if (on && !(b.a >= K[0] && b.a < D) && !S.form.secs.some(s => s.sec === 'bridge' && b.a >= s.a && b.a < s.a + s.bars) && e < bars * 16) pts.push([e - 4, Math.max(.45, d + .3), 2], [e, d, 2]);
+      });
+      lane(t, id, pts);
+    });
+  });
+  // the HPF riser 2-4 bars before the main drop on every lane but the bass and the sub (the master HPF of the references), off at
+  // the drop; the heartbeat kick (h) high-passed at 200 Hz
+  ['DRUMS', 'BREAK', 'STAB', 'PAD', 'LEAD'].forEach(n => {
+    const t = tr(n); if (!t || !t.fx) return;
+    if (t.fx.ftype !== 'highpass') { if (t.fx.ftype === 'lowpass' && !(t.fx.freq < 19000)) Object.assign(t.fx, { ftype: 'highpass', freq: 20, res: .7 }); else return; }
+    const lo = autoDefault(t, 'tfreq'), pts = [[0, lo, 2]];
+    if (n === 'DRUMS') runs(c => c.dr === 'h').forEach(([a, e]) => { pts.push([a * 16, Math.max(lo, kmHz(200)), 2], [e * 16, lo, 2]); });
+    const r0 = (D - S.riserBars) * 16, hb = n === 'DRUMS' && cols[(D - S.riserBars) / 8 | 0] && cols[(D - S.riserBars) / 8 | 0].dr === 'h';
+    pts.push([r0, hb ? Math.max(lo, kmHz(200)) : lo, 0], [D * 16 - 2, Math.max(lo, kmHz(220)), 2], [D * 16, lo, 2]);
+    lane(t, 'tfreq', pts);
+  });
+  // the percussion floats a little wetter in the break; the kick lane stays dry (a flat lane: the palette leaves it)
+  const Dr = tr('DRUMS'); if (Dr && autoImpl(Dr, 'sendA')) { const d = autoDefault(Dr, 'sendA'); autoArrSet(Dr, 'sendA', [[0, d, 2], [bars * 16, d, 2]]); done.push('DRUMS:sendA'); }
+  const Br = tr('BREAK'); if (Br && K) { const d = autoDefault(Br, 'sendA'); lane(Br, 'sendA', [[0, d, 2], [K[0] * 16, d, 0], [D * 16 - 1, kmCl(d + .18, 0, 1), 2], [D * 16, d, 2]]); }
+  const L = tr('LEAD'); if (L && S.cls.LEAD === 'glide' && typeof autoSetLegato === 'function') autoSetLegato(L, true, 90, 'ms');
+  S.auto = done;
+  if (KM.last) KM.last.auto = done.slice();
+  return done;
+}
+
+// ---------- 12. the hooks ----------
+if (typeof genHouseClips === 'function') {
+  const kmClips0 = genHouseClips;
+  genHouseClips = function (P, st, rng, snd) { // eslint-disable-line no-func-assign
+    const r = kmClips0.apply(this, arguments);
+    if (st && kmIs(st.id)) { try { kmWriteSong(P, st, rng); } catch (e) { console.error('[dnb808] keine writer', e); KM.cur = null; } }
+    return r;
+  };
+}
+if (typeof genHouseLayout === 'function') {
+  const kmLayout0 = genHouseLayout;
+  genHouseLayout = function (P, st, snd) { // eslint-disable-line no-func-assign
+    if (!(st && kmIs(st.id) && KM.cur && KM.cur.P === P)) return kmLayout0.apply(this, arguments);
+    const S = KM.cur.S, plan = kmLayout(P, S);
+    try { const cur = typeof PAL === 'object' && PAL ? PAL.cur : null; if (cur && cur.id === st.id) { cur.plan = plan; cur.secs = plan.map(([sec, , bars]) => ({ sec, bars, ptags: [] })); cur.tpl = 'km' + S.tpl; } } catch (e) { /* no palette */ }
+    return plan;
+  };
+}
+if (typeof genHouseAuto === 'function') {
+  const kmAuto0 = genHouseAuto;
+  genHouseAuto = function (P, st, plan) { // eslint-disable-line no-func-assign
+    if (!(st && kmIs(st.id) && KM.cur && KM.cur.P === P)) return kmAuto0.apply(this, arguments);
+    try { kmAuto(P, KM.cur.S); } catch (e) { console.error('[dnb808] keine automation', e); }
+    finally { KM.cur = null; }
+  };
+}
+// the palette: the old styles draw from the bank without these presets (their songs stay as they were)
+if (typeof palCatalog === 'function') {
+  const kmCat0 = palCatalog;
+  palCatalog = function () { // eslint-disable-line no-func-assign
+    const c = kmCat0.apply(this, arguments);
+    if (!KM.hide || !c || !Array.isArray(c.presets)) return c;
+    if (KM.viewOf !== c) { const presets = c.presets.filter(e => !KM_NAMES.includes(e.name)); KM.view = Object.assign({}, c, { presets, by: new Map(presets.map(x => [x.name, x])) }); KM.viewOf = c; }
+    return KM.view;
+  };
+}
+if (typeof palDrawSounds === 'function') {
+  const kmDraw0 = palDrawSounds;
+  palDrawSounds = function (P, st, cur) { // eslint-disable-line no-func-assign
+    const prev = KM.hide; KM.hide = !(st && kmIs(st.id));
+    try { return kmDraw0.apply(this, arguments); } finally { KM.hide = prev; }
+  };
+}
+// GENERATE SONG: the info line says the form, the loop and the groove
+if (typeof genSongGo === 'function') {
+  const kmGo0 = genSongGo;
+  genSongGo = function (id, groove) { // eslint-disable-line no-func-assign
+    KM.last = null;
+    const r = kmGo0.apply(this, arguments);
+    try {
+      const q = KM.last, mmq = typeof MM === 'object' && MM && MM.last && MM.last.used;
+      if (kmIs(id) && q && typeof P === 'object' && P && P.gen && P.gen.style === id && !mmq) {
+        const min = q.bars * 4 * 60 / P.bpm;
+        flash(`Generated "${P.name}": ${GEN_STYLES[id].name} at ${P.bpm} BPM, the ${q.tplName} form (${q.bars} bars, ${Math.floor(min / 60)}:${String(Math.round(min % 60)).padStart(2, '0')}), ${q.mainName} (${q.chords.join(' ')}), grooves ${q.pat.main} / ${q.pat.alt}, a scene per 8 bars. CTRL+Z goes back`);
+      }
+    } catch (e) { /* the message is optional */ }
+    return r;
+  };
+}
+
+// ===================== 3z. WARP ENGINE: warp markers, BEATS / TONES / COMPLEX, formants, long vocals, vocal tracks =====================
+// An Ableton-like warp for the audio clips of section 3g. Everything here wraps that section (and 3x GENERATE SONG); no other
+// file is edited. A clip's audio may now carry (only when not the default, so an old set saves as before):
+//   markers: [{ src (seconds in the file), beat (beats of the clip's warped timeline) }]: the warp map. Between two markers the
+//            file is stretched linearly; before the first and after the last it runs at the tempo of the next segment (no
+//            markers: BPM, as before). AUTO WARP puts one on every hit, snapped to the 1/16 grid of the detected tempo.
+//   loop: false (the audio plays once over the clip, then silence), formants: true (pitch shifts keep the vocal's spectral
+//   envelope), preserve: '1/16' | '1/8' (BEATS slices on the grid instead of the hits).
+// WARP modes: BEATS (slices at the hits, each at its own speed, an envelope over gaps and overlaps), TONES (the id stays
+// 'stretch', so every old set loads: a WSOLA whose grains lock onto the hits, a window for monophonic vocals), COMPLEX (a
+// phase vocoder with identity phase locking and a phase reset at the hits, for full mixes and pads), RE-PITCH (with markers:
+// a varispeed render), OFF. FORMANTS: the shift runs in the phase vocoder, the spectral envelope (cepstrum) put back.
+// Every render (analysis too) runs in one worker, in chunks of a few seconds (the source sent chunk by chunk, the result
+// copied into the clip's buffer), so an 8-minute acapella stretches without blocking the page; one cached buffer per tempo,
+// key and map (the cache of 3g, bounded by WARP_FIT_MB). The analysis (spectral flux hits, tempo by the autocorrelation of
+// the onset strength, key by chromagram and Krumhansl profiles, phrases by silence) is kept per file for this session.
+// audStep stays the one player of the live scheduler and of every offline render: the warped buffer replaces the file.
+// VOCAL TRACKS: + VOCAL TRACK (high-pass 100 Hz, gentle compression, a split-band de-esser built from native nodes, a little
+// saturation, reverb and delay sends, no sidechain), a pack file dragged onto the arrangement (or a vocal file from the disk)
+// lands at the drop bar with its tempo and key (name first, analysis after), TO KEY on; THROWS writes the delay and reverb
+// sends up on the last beat of each phrase (arrangement automation, section 3q). GENERATE SONG places whole phrases of the
+// user's vocal packs on a vocal track in the breakdowns and the drops, warped, with throws: no vocals loaded, nothing changes.
+const WARP_MAX_SEC = 510, WARP_MAX_DEC_MB = 200, WARP_MAX_FILE_MB = 250; // a full acapella: 8.5 minutes, 200 MB decoded (float, both channels)
+const WARP_MAX_BARS = 256, WARP_MAX_MARKS = 2048, WARP_FIT_MB = 460, WARP_CHUNK = 4; // chunk: seconds of output per message
+const WARP_SPB = [.004, 16]; // a marker segment: seconds of the file per beat of the clip (15000 down to 3.75 BPM)
+const WARP_PRESERVE = [['trans', 'TRANSIENTS'], ['1/16', '1/16'], ['1/8', '1/8']];
+const WARP_NAMES = { beats: 'BEATS', stretch: 'TONES', complex: 'COMPLEX', repitch: 'RE-PITCH', off: 'OFF' };
+const WARP = { ana: new Map(), anaBuf: new WeakMap(), anaJobs: new Map(), jobs: new Map(), prog: new Map(), w: undefined, wq: new Map(), J: {},
+  jid: 0, chain: Promise.resolve(), chainA: Promise.resolve(), sel: null, mkVocal: false, genOn: true, drawT: 0, pins: new Set(), bigWarn: false };
+
+// ---------- DSP: pure functions (their source also runs in the worker: no outside names in them) ----------
+// In-place radix-2 complex FFT (inv: the inverse, scaled by 1/n); tables kept per size
+function wFft(re, im, inv) {
+  const n = re.length, T = wFft.t || (wFft.t = {});
+  let tb = T[n];
+  if (!tb) {
+    let bits = 0; while ((1 << bits) < n) bits++;
+    const rev = new Uint32Array(n), cs = new Float64Array(n >> 1), sn = new Float64Array(n >> 1);
+    for (let i = 0; i < n; i++) { let r = 0; for (let k = 0; k < bits; k++) r |= ((i >> k) & 1) << (bits - 1 - k); rev[i] = r; }
+    for (let i = 0; i < n >> 1; i++) { cs[i] = Math.cos(2 * Math.PI * i / n); sn[i] = Math.sin(2 * Math.PI * i / n); }
+    tb = T[n] = { rev, cs, sn };
+  }
+  const rev = tb.rev, cs = tb.cs, sn = tb.sn, sg = inv ? 1 : -1;
+  for (let i = 0; i < n; i++) { const j = rev[i]; if (j > i) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; } }
+  for (let size = 2; size <= n; size <<= 1) {
+    const half = size >> 1, step = n / size;
+    for (let i = 0; i < n; i += size) {
+      for (let j = 0, k = 0; j < half; j++, k += step) {
+        const a = i + j, b = a + half, wr = cs[k], wi = sg * sn[k], xr = re[b] * wr - im[b] * wi, xi = re[b] * wi + im[b] * wr;
+        re[b] = re[a] - xr; im[b] = im[a] - xi; re[a] += xr; im[a] += xi;
+      }
+    }
+  }
+  if (inv) for (let i = 0; i < n; i++) { re[i] /= n; im[i] /= n; }
+}
+// The warp map m = { b: beats, s: seconds (both rising), lo, hi: seconds per beat before the first and after the last point }
+function wMapAt(m, b) {
+  const B = m.b, S = m.s, n = B.length;
+  if (b <= B[0]) return S[0] + (b - B[0]) * m.lo;
+  if (b >= B[n - 1]) return S[n - 1] + (b - B[n - 1]) * m.hi;
+  let lo = 0, hi = n - 1; while (hi - lo > 1) { const md = (lo + hi) >> 1; if (B[md] <= b) lo = md; else hi = md; }
+  return S[lo] + (b - B[lo]) * (S[hi] - S[lo]) / (B[hi] - B[lo]);
+}
+function wMapInv(m, s) {
+  const B = m.b, S = m.s, n = S.length;
+  if (s <= S[0]) return B[0] + (s - S[0]) / m.lo;
+  if (s >= S[n - 1]) return B[n - 1] + (s - S[n - 1]) / m.hi;
+  let lo = 0, hi = n - 1; while (hi - lo > 1) { const md = (lo + hi) >> 1; if (S[md] <= s) lo = md; else hi = md; }
+  return B[lo] + (s - S[lo]) * (B[hi] - B[lo]) / (S[hi] - S[lo]);
+}
+// Cubic (Catmull-Rom) read of channel c at fractional index x (outside: silence)
+function wCub(c, x) {
+  const j = Math.floor(x), f = x - j, n = c.length;
+  if (j >= 1 && j + 2 < n) { const p0 = c[j - 1], p1 = c[j], p2 = c[j + 1], p3 = c[j + 2]; return p1 + .5 * f * (p2 - p0 + f * (2 * p0 - 5 * p1 + 4 * p2 - p3 + f * (3 * (p1 - p2) + p3 - p0))); }
+  const g = k => (k >= 0 && k < n ? c[k] : 0), p0 = g(j - 1), p1 = g(j), p2 = g(j + 1), p3 = g(j + 2);
+  return p1 + .5 * f * (p2 - p0 + f * (2 * p0 - 5 * p1 + 4 * p2 - p3 + f * (3 * (p1 - p2) + p3 - p0)));
+}
+// Two cascaded 2-pole low-passes in place (before a read faster than the file: what lands above Nyquist goes)
+function wLow(c, fc, sr) {
+  const w = 2 * Math.PI * Math.min(fc, .45 * sr) / sr, cw = Math.cos(w), al = Math.sin(w) / (2 * .7071);
+  const b0 = (1 - cw) / 2 / (1 + al), b1 = (1 - cw) / (1 + al), a1 = -2 * cw / (1 + al), a2 = (1 - al) / (1 + al);
+  for (let pass = 0; pass < 2; pass++) { let x1 = 0, x2 = 0, y1 = 0, y2 = 0; for (let n = 0; n < c.length; n++) { const x = c[n], y = b0 * x + b1 * x1 + b0 * x2 - a1 * y1 - a2 * y2; x2 = x1; x1 = x; y2 = y1; y1 = y; c[n] = y; } }
+}
+
+// ---------- DSP: analysis (mono at sr, 22.05 kHz from the worker's feed) ----------
+// -> { onsets (s), str, bpm, phase (s: a beat of the grid), conf, key ('Am'), keyConf, phrases [[s, e]], peakDb }
+function wAna(x0, sr, setBpm) {
+  const PADN = 2048, x = new Float32Array(x0.length + PADN); x.set(x0, PADN); // silence before the file: a hit at 0 s is found too
+  const N = 1024, hop = 220, half = N >> 1, nf = x.length >= N ? Math.floor((x.length - N) / hop) + 1 : 0, fps = sr / hop;
+  const out = { onsets: [], str: [], bpm: 0, phase: 0, conf: 0, key: '', keyConf: 0, phrases: [], peakDb: -120 };
+  if (nf < 8) return out;
+  const win = new Float64Array(N); for (let n = 0; n < N; n++) win[n] = .5 - .5 * Math.cos(2 * Math.PI * n / N);
+  // SuperFlux: the rise of the log spectrum over the frame two hops before, max-filtered over +-3 bins (a vibrato is no hit)
+  const re = new Float64Array(N), im = new Float64Array(N), Y = [new Float64Array(half + 1), new Float64Array(half + 1), new Float64Array(half + 1)], flux = new Float32Array(nf), en = new Float32Array(nf);
+  let enMax = 1e-12;
+  for (let f = 0; f < nf; f++) {
+    const o = f * hop; for (let n = 0; n < N; n++) { re[n] = x[o + n] * win[n]; im[n] = 0; }
+    wFft(re, im, false);
+    const cur = Y[f % 3], old = Y[(f + 1) % 3]; let fl = 0, e = 0;
+    for (let k = 0; k <= half; k++) { const p = re[k] * re[k] + im[k] * im[k]; cur[k] = Math.log(1 + 100 * Math.sqrt(p)); e += p; }
+    if (f >= 2) for (let k = 2; k <= half; k++) { let m = old[k]; for (let q = Math.max(0, k - 3), Q = Math.min(half, k + 3); q <= Q; q++) if (old[q] > m) m = old[q]; const d = cur[k] - m; if (d > 0) fl += d; }
+    flux[f] = fl; en[f] = e; if (e > enMax) enMax = e;
+  }
+  // peak picking: a local maximum over the local mean plus a margin, a gate in silence, 45 ms apart
+  const srt = Array.from(flux).sort((a, b) => a - b), p95 = srt[Math.floor(srt.length * .95)] || 1e-9, med = srt[Math.floor(srt.length * .5)] || 0;
+  const delta = Math.max(.08 * p95, med * .5), gap = Math.round(.045 * fps), cand = [];
+  for (let f = 2; f < nf - 2; f++) {
+    const v = flux[f]; if (en[f] < enMax * 3e-6 && (f + 2 >= nf || en[f + 2] < enMax * 3e-6)) continue;
+    let mx = true; for (let g = Math.max(0, f - 3); g <= Math.min(nf - 1, f + 3); g++) if (g !== f && (flux[g] > v || (flux[g] === v && g < f))) { mx = false; break; }
+    if (!mx) continue;
+    let s = 0, c = 0; for (let g = Math.max(0, f - 12); g <= Math.min(nf - 1, f + 4); g++) { s += flux[g]; c++; }
+    if (v < s / c + delta) continue;
+    if (cand.length && f - cand[cand.length - 1].f < gap) { if (v > cand[cand.length - 1].v) cand[cand.length - 1] = { f, v: v - s / c }; continue; }
+    cand.push({ f, v: v - s / c });
+  }
+  // each hit on the sample: the steepest rise of a 7 ms envelope near it (a low voice's period is under 7 ms), back to the dip
+  // before it, then the first sample 20 % of the way up (in dB) from the dip to the peak
+  const blk = Math.max(1, Math.round(sr * .001)), nb = Math.floor(x.length / blk), e1 = new Float32Array(nb), env = new Float32Array(nb), edb = new Float32Array(nb);
+  for (let b = 0; b < nb; b++) { let m = 0; for (let j = b * blk, J = j + blk; j < J; j++) { const a = x[j] < 0 ? -x[j] : x[j]; if (a > m) m = a; } e1[b] = m; }
+  for (let b = 0; b < nb; b++) { let m = 0; for (let q = Math.max(0, b - 3), Q = Math.min(nb - 1, b + 3); q <= Q; q++) if (e1[q] > m) m = e1[q]; env[b] = m; edb[b] = 20 * Math.log10(m + 1e-7); }
+  const ons = [], str = [];
+  for (const c of cand) {
+    const tc = (c.f * hop + half) / sr, b0 = Math.max(2, Math.floor((tc - .045) * sr / blk)), b1 = Math.min(nb - 1, Math.ceil((tc + .03) * sr / blk));
+    if (b1 <= b0) continue;
+    let bm = b0, dm = -1e9; for (let b = b0; b <= b1; b++) { const dd = edb[b] - edb[b - 2]; if (dd > dm) { dm = dd; bm = b; } }
+    let bl = bm; while (bl > b0 - 2 && bl > 0 && edb[bl - 1] <= edb[bl] + .5) bl--;
+    let pk = bm; for (let b = bm, B = Math.min(nb - 1, bm + 15); b <= B; b++) if (env[b] > env[pk]) pk = b;
+    const fl = env[bl], pdb = edb[pk], fdb = Math.max(edb[bl], pdb - 40), thr = Math.pow(10, (fdb + .2 * (pdb - fdb)) / 20); // the floor: 40 dB under the peak at most
+    let b = bl; while (b < pk && env[b] < thr) b++;
+    let j = Math.max(bl, b - 3) * blk; const J = Math.min(x.length, (b + 4) * blk); while (j < J && Math.abs(x[j]) < thr) j++;
+    if (fl >= thr) j = bl * blk;
+    const t = Math.max(0, (j - PADN) / sr - .0003);
+    if (ons.length && t - ons[ons.length - 1] < .03) { if (c.v > str[str.length - 1]) { ons[ons.length - 1] = t; str[str.length - 1] = c.v; } continue; }
+    ons.push(t); str.push(c.v);
+  }
+  out.onsets = ons; out.str = str;
+  // tempo: the autocorrelation of the onset strength (above its local mean), a comb over 4 periods, 80-180 BPM
+  const od = new Float32Array(nf), W = Math.round(fps);
+  { let s = 0; for (let f = 0; f < nf; f++) { s += flux[f]; if (f >= W) s -= flux[f - W]; const m = s / Math.min(f + 1, W); od[f] = Math.max(0, flux[f] - m); } }
+  const lagMax = Math.min(nf - 1, Math.ceil(fps * 60 / 20)), ac = new Float32Array(lagMax + 2);
+  for (let l = Math.floor(fps * 60 / 400); l <= lagMax; l++) { let s = 0; for (let f = 0; f + l < nf; f++) s += od[f] * od[f + l]; ac[l] = s / (nf - l); }
+  const acAt = l => { if (l >= lagMax) return 0; const j = Math.floor(l), fr = l - j; return ac[j] * (1 - fr) + ac[j + 1] * fr; };
+  const comb = bpm => { const l = fps * 60 / bpm; let s = 0; for (let m = 1; m <= 4; m++) s += acAt(m * l) / m; return s; };
+  let best = 0, bb = 0;
+  for (let bpm = 80; bpm <= 180; bpm += .25) { const s = comb(bpm) * (1 + .15 * Math.exp(-.5 * Math.pow(Math.log2(bpm / 120) / .5, 2))); if (s > best) { best = s; bb = bpm; } }
+  if (bb && ons.length >= 4) {
+    const alt = bb < 90 ? bb * 2 : bb > 160 ? bb / 2 : 0; // the other octave inside 80-180: the one nearer the set
+    if (alt && comb(alt) > .6 * comb(bb) && Math.abs(Math.log2(alt / setBpm)) < Math.abs(Math.log2(bb / setBpm))) bb = alt;
+    // the fine tempo: the beat and the 8th of the grid that fit the hits best (circular statistics, 0.01 BPM)
+    const R = (T, q) => { let c = 0, s = 0; const w0 = 2 * Math.PI * q / T; for (let i = 0; i < ons.length; i++) { const a = w0 * ons[i], w = str[i]; c += w * Math.cos(a); s += w * Math.sin(a); } return [c, s]; };
+    const fit = bpm => { const T = 60 / bpm, a = R(T, 1), b = R(T, 2); return Math.hypot(a[0], a[1]) + .5 * Math.hypot(b[0], b[1]); };
+    let fb = bb, fv = -1;
+    for (let bpm = bb * .985; bpm <= bb * 1.015; bpm += .01) { const v = fit(bpm); if (v > fv) { fv = v; fb = bpm; } }
+    let tot = 0; for (const w of str) tot += w;
+    const T = 60 / fb, a = R(T, 1);
+    out.bpm = fb; out.conf = tot > 0 ? fv / (1.5 * tot) : 0;
+    out.phase = (((Math.atan2(a[1], a[0]) / (2 * Math.PI)) * T) % T + T) % T;
+    const dur = x0.length / sr, beats = dur * fb / 60, b4 = Math.round(beats / 4) * 4; // a loop of whole bars: its exact tempo
+    if (b4 >= 4 && b4 <= 256 && Math.abs(b4 - beats) / beats < .012) out.bpm = b4 * 60 / dur;
+  }
+  // key: a chromagram and the melody (each frame's strongest pitch by harmonic sum: a voice's upper harmonics are not
+  // notes) of 4096-point frames, against the Krumhansl-Kessler profiles
+  {
+    const K = 4096, kre = new Float64Array(K), kim = new Float64Array(K), kwin = new Float64Array(K), chroma = new Float64Array(12), mel = new Float64Array(12), mg = new Float64Array(K >> 1);
+    for (let n = 0; n < K; n++) kwin[n] = .5 - .5 * Math.cos(2 * Math.PI * n / K);
+    const pc = new Int8Array(K >> 1), k0 = Math.ceil(65 * K / sr), k1 = Math.min((K >> 1) - 1, Math.floor(2100 * K / sr)), HW = [1, .8, .6, .5, .4];
+    for (let k = k0; k <= k1; k++) pc[k] = ((Math.round(69 + 12 * Math.log2(k * sr / K / 440)) % 12) + 12) % 12;
+    const step = Math.max(K, Math.floor((x.length - K) / 600)); // at most 600 frames
+    let eMax = 0; const fr = [];
+    for (let o = 0; o + K <= x.length; o += step) {
+      for (let n = 0; n < K; n++) { kre[n] = x[o + n] * kwin[n]; kim[n] = 0; }
+      wFft(kre, kim, false);
+      const c = new Float64Array(12); let tot = 0;
+      for (let k = 0; k < K >> 1; k++) mg[k] = Math.sqrt(kre[k] * kre[k] + kim[k] * kim[k]);
+      for (let k = k0; k <= k1; k++) { const p = mg[k] * mg[k]; c[pc[k]] += p; tot += p; }
+      if (tot > 1e-9) for (let i = 0; i < 12; i++) chroma[i] += Math.sqrt(c[i] / tot);
+      let bs = 0, bp = -1;
+      for (let midi = 40; midi <= 84; midi++) {
+        const f = 440 * Math.pow(2, (midi - 69) / 12); let sal = 0;
+        for (let h = 1; h <= 5; h++) { const kk = Math.round(h * f * K / sr); if (kk + 1 >= K >> 1) break; sal += HW[h - 1] * Math.max(mg[kk - 1], mg[kk], mg[kk + 1]); }
+        if (sal > bs) { bs = sal; bp = midi % 12; }
+      }
+      if (bp >= 0) { fr.push([bp, tot]); if (tot > eMax) eMax = tot; }
+    }
+    fr.forEach(([q, e]) => { if (e > eMax * 1e-3) mel[q] += Math.sqrt(e / eMax); });
+    let cs = 0, ms = 0; for (let i = 0; i < 12; i++) { cs += chroma[i]; ms += mel[i]; }
+    for (let i = 0; i < 12; i++) chroma[i] = (cs > 0 ? chroma[i] / cs : 0) * .4 + (ms > 0 ? mel[i] / ms : 0);
+    const MAJ = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88], MIN = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
+    const corr = (p, r) => { let ma = 0, mb = 0; for (let i = 0; i < 12; i++) { ma += chroma[i]; mb += p[i]; } ma /= 12; mb /= 12; let s = 0, sa = 0, sb = 0; for (let i = 0; i < 12; i++) { const a = chroma[(i + r) % 12] - ma, b = p[i] - mb; s += a * b; sa += a * a; sb += b * b; } return s / Math.sqrt(sa * sb + 1e-12); };
+    const NM = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'], sc = [];
+    for (let r = 0; r < 12; r++) { sc.push([corr(MAJ, r), NM[r]]); sc.push([corr(MIN, r), NM[r] + 'm']); }
+    sc.sort((a, b) => b[0] - a[0]);
+    if (sc[0][0] > .3) { out.key = sc[0][1]; out.keyConf = sc[0][0] - sc[1][0]; }
+  }
+  // phrases: sound between silences of 250 ms or more (10 ms RMS, 35 dB under the peak, -50 dBFS at least)
+  {
+    const fr = Math.round(sr * .01), n = Math.floor(x0.length / fr), db = new Float32Array(n); let pk = -120;
+    for (let f = 0; f < n; f++) { let s = 0; for (let j = f * fr, J = j + fr; j < J; j++) s += x0[j] * x0[j]; db[f] = 10 * Math.log10(s / fr + 1e-12); if (db[f] > pk) pk = db[f]; }
+    out.peakDb = pk;
+    const thr = Math.max(-50, pk - 35), ph = []; let a = -1, quiet = 0;
+    for (let f = 0; f <= n; f++) {
+      const on = f < n && db[f] > thr;
+      if (on) { if (a < 0) a = f; quiet = 0; } else if (a >= 0) { quiet++; if (quiet >= 25 || f === n) { const e = f - quiet + 1; if (e - a >= 20) ph.push([+(a * .01).toFixed(3), +(e * .01).toFixed(3)]); a = -1; quiet = 0; } }
+    }
+    out.phrases = ph.slice(0, 512);
+  }
+  return out;
+}
+
+// ---------- DSP: the renderers (streaming: one state per job, chunk by chunk) ----------
+// j: { mode 'tones' | 'complex' | 'beats' | 'vari', sr, r (pitch ratio), bpm (the set's), m (warp map), trans (seconds),
+//      cuts / outs (BEATS: slice starts in the file and in the output, samples), formant, ch (channels), outLen }
+function wRInit(j) {
+  const st = { j, k: 0, n0: 0, ti: 0, prev: 0, acc: null, bk: 0 }, sr = j.sr, spb = 60 / j.bpm;
+  st.os = n => wMapAt(j.m, n / sr / spb) * sr; // output sample -> file sample
+  st.T = (j.trans || []).map(s => ({ s: s * sr, o: wMapInv(j.m, s) * spb * sr })).filter(t => t.o > -sr).sort((a, b) => a.o - b.o);
+  if (j.mode === 'tones') {
+    st.N = 2 * Math.round(sr * .0145); st.Hs = st.N >> 1; st.tol = Math.round(sr * .006);
+    st.win = new Float32Array(st.N); for (let n = 0; n < st.N; n++) st.win[n] = .5 - .5 * Math.cos(2 * Math.PI * n / st.N);
+  } else if (j.mode === 'complex') {
+    const N = st.N = j.formant && !j.full ? 2048 : 4096, half = N >> 1; st.Hs = N >> 2;
+    st.win = new Float64Array(N); for (let n = 0; n < N; n++) st.win[n] = .5 - .5 * Math.cos(2 * Math.PI * n / N);
+    st.re = new Float64Array(N); st.im = new Float64Array(N); st.zr = new Float64Array(N); st.zi = new Float64Array(N);
+    st.prevY = [new Float64Array(half + 1), new Float64Array(half + 1)];
+    st.mag = [new Float64Array(half + 2), new Float64Array(half + 2)]; st.phA = [new Float64Array(half + 2), new Float64Array(half + 2)]; st.adv = [new Float64Array(half + 2), new Float64Array(half + 2)];
+    st.Yr = [new Float64Array(half + 1), new Float64Array(half + 1)]; st.Yi = [new Float64Array(half + 1), new Float64Array(half + 1)];
+    st.peak = new Int32Array(half + 2); st.env = new Float64Array(half + 2); st.Q = Math.round(sr * .0011);
+    let w2 = 0; for (let n = 0; n < N; n++) w2 += st.win[n] * st.win[n]; st.norm = st.Hs / w2;
+  }
+  return st;
+}
+// One chunk: output samples n0..n1 from the file's samples off.. (d.chs, one array per channel). -> [Float32Array per channel]
+function wRChunk(st, d) {
+  const j = st.j, n0 = d.n0, n1 = d.n1, len = n1 - n0, off = d.off, chs = d.chs, nc = chs.length, r = j.r, sr = j.sr, outs = [];
+  for (let c = 0; c < nc; c++) outs.push(new Float32Array(len));
+  if ((j.mode === 'tones' || j.mode === 'beats') && r > 1.0001) chs.forEach(c => wLow(c, .45 * sr / r, sr));
+  if (j.mode === 'vari') {
+    for (let b = n0; b < n1; b += 64) {
+      const e = Math.min(n1, b + 64), g0 = st.os(b) - off, g1 = st.os(e) - off;
+      for (let n = b; n < e; n++) { const g = g0 + (g1 - g0) * (n - b) / (e - b); for (let c = 0; c < nc; c++) outs[c][n - n0] = wCub(chs[c], g); }
+    }
+    return outs;
+  }
+  if (j.mode === 'beats') { // each slice at its own speed from its hit: a 0.4 ms fade in, 4 ms out before the next one (or its end)
+    const P = j.cuts, O = j.outs, K = P.length - 1, Fi = Math.max(4, Math.round(sr * .0004)), F = Math.round(sr * .004);
+    while (st.bk < K - 1 && O[st.bk + 1] + F < n0) st.bk++;
+    for (let k = st.bk; k < K && O[k] < n1; k++) {
+      const play = Math.min((P[k + 1] - P[k]) / r, O[k + 1] - O[k] + F / 2), a = Math.max(n0, Math.ceil(O[k])), b = Math.min(n1, Math.floor(O[k] + play));
+      for (let n = a; n < b; n++) {
+        const t = n - O[k], g = P[k] + t * r - off, e = Math.min(1, t / Fi, (play - t) / F); if (e <= 0) continue;
+        for (let c = 0; c < nc; c++) outs[c][n - n0] += (r === 1 ? (chs[c][Math.round(g)] || 0) : wCub(chs[c], g)) * e;
+      }
+    }
+    return outs;
+  }
+  const N = st.N, Hs = st.Hs, T = st.T;
+  if (j.mode === 'tones') { // WSOLA grains (read r times faster for the pitch), overlap-added on the output timeline
+    if (!st.acc || st.acc[0].length < len + N) { const old = st.acc; st.acc = []; for (let c = 0; c < nc; c++) { const a = new Float32Array(len + N); if (old) a.set(old[c].subarray(0, Math.min(old[c].length, a.length))); st.acc.push(a); } }
+    const acc = st.acc, win = st.win, tol = st.tol, n = chs[0].length, mono = nc > 1 ? new Float32Array(n) : chs[0];
+    if (nc > 1) for (let i = 0; i < n; i++) mono[i] = chs[0][i] + chs[1][i];
+    const mo = q => { const i = Math.round(q) - off; return i >= 0 && i < n ? mono[i] : 0; };
+    for (; st.k * Hs < n1; st.k++) {
+      const o = st.k * Hs; let pos = st.os(o + N / 2) - N / 2 * r;
+      while (st.ti < T.length && T[st.ti].o < o - N / 4) st.ti++;
+      if (st.ti < T.length && T[st.ti].o < o + N) { const t = T[st.ti]; pos = t.s - (t.o - o) * r; } // the hit lands on its output time
+      else {
+        const nx = st.ti < T.length ? T[st.ti] : null, pv = st.ti > 0 ? T[st.ti - 1] : null;
+        let lo = pos - tol, hi = pos + tol;
+        if (nx) hi = Math.min(hi, nx.s - N * r); if (pv) lo = Math.max(lo, pv.s + N / 4 * r);
+        if (lo > hi) pos = (lo + hi) / 2; // two hits closer than the grain: between them
+        else if (st.k > 0) { // WSOLA: the grain that best continues the one before
+          const nat = st.prev + Hs * r; let en0 = 0; for (let i = 0; i < Hs; i += 8) { const v = mo(nat + i * r); en0 += v * v; }
+          if (en0 > 1e-7) {
+            let best = -Infinity, bq = pos;
+            const cor = q => { let s = 0, e = 1e-9; for (let i = 0; i < Hs; i += 4) { const a = mo(q + i * r); s += a * mo(nat + i * r); e += a * a; } return s / Math.sqrt(e); };
+            for (let q = Math.ceil(lo); q <= hi; q += 2) { const v = cor(q); if (v > best) { best = v; bq = q; } }
+            for (const q of [bq - 1, bq + 1]) if (q >= lo && q <= hi) { const v = cor(q); if (v > best) { best = v; bq = q; } }
+            pos = bq;
+          } else pos = Math.max(lo, Math.min(hi, pos));
+        } else pos = Math.max(lo, Math.min(hi, pos));
+      }
+      st.prev = pos;
+      const ao = o - n0;
+      for (let c = 0; c < nc; c++) {
+        const src = chs[c], A = acc[c], base = pos - off;
+        if (r === 1 && pos === Math.round(pos)) { const b0 = base | 0; for (let i = 0; i < N; i++) { const q = b0 + i; if (q >= 0 && q < n) A[ao + i] += src[q] * win[i]; } }
+        else for (let i = 0; i < N; i++) A[ao + i] += wCub(src, base + i * r) * win[i];
+      }
+    }
+    for (let c = 0; c < nc; c++) { outs[c].set(acc[c].subarray(0, len)); acc[c].copyWithin(0, len, len + N); acc[c].fill(0, N); }
+    return outs;
+  }
+  // the phase vocoder: a time-stretch on its own timeline tau = n * r, then read r times faster (the pitch). Identity phase
+  // locking (each bin keeps its offset to the peak it belongs to), a phase reset on the hits; FORMANTS: each bin times the
+  // envelope at r times its frequency over its own, so the resampling puts the envelope back where it was
+  const half = N >> 1, win = st.win, re = st.re, im = st.im, zr = st.zr, zi = st.zi, Q = st.Q, nsrc = chs[0].length, form = !!j.formant && Math.abs(r - 1) > 1e-4;
+  const need = Math.ceil(n1 * r) + 4;
+  if (st.f0 == null) st.f0 = 0;
+  if (!st.acc || st.acc[0].length < need - st.f0 + N + 8) { const old = st.acc, L = need - st.f0 + N + 4096; st.acc = []; for (let c = 0; c <= nc; c++) { const a = new Float32Array(L); if (old) a.set(old[c].subarray(0, Math.min(old[c].length, L))); st.acc.push(a); } }
+  const acc = st.acc, wac = acc[nc]; // wac: the sum of the windows actually laid (a frame cut at a hit lays less)
+  for (; st.k * Hs <= need; st.k++) {
+    const o = st.k * Hs, cen = o + half, cn = cen / r; // cn: the frame's centre on the output timeline
+    while (st.ti < T.length && T[st.ti].o < cn - half / r) st.ti++;
+    let sc = st.os(cn), reset = st.k === 0;
+    if (st.ti < T.length && T[st.ti].o < cn + half / r) { const t = T[st.ti]; sc = t.s + (cen - t.o * r); if (Math.abs(t.o * r - cen) < Hs / 2) reset = true; }
+    const a0 = Math.round(sc) - half;
+    // a hit ahead in this window is cut out of it (it comes in the frames after it): no pre-echo
+    let cutA = N, cutB = N;
+    for (let q = st.ti; q < T.length && T[q].o * r < cen + half; q++) { const d = Math.round(T[q].s) - a0; if (d > half) { cutA = Math.min(cutA, d); cutB = Math.min(cutB, d + Hs); break; } }
+    for (let c = 0; c < nc; c++) {
+      const s = chs[c];
+      for (let i = 0; i < N; i++) {
+        const qa = a0 + i - off, qb = qa - Hs, fa = i < cutA - 32 ? 1 : i >= cutA ? 0 : (cutA - i) / 32, fb = i < cutB - 32 ? 1 : i >= cutB ? 0 : (cutB - i) / 32;
+        re[i] = (qa >= 0 && qa < nsrc ? s[qa] : 0) * win[i] * fa; im[i] = (qb >= 0 && qb < nsrc ? s[qb] : 0) * win[i] * fb;
+      }
+      wFft(re, im, false);
+      const mag = st.mag[c], phA = st.phA[c], adv = st.adv[c];
+      for (let k = 0; k <= half; k++) {
+        const k2 = (N - k) & (N - 1), ar = (re[k] + re[k2]) / 2, ai = (im[k] - im[k2]) / 2, br = (im[k] + im[k2]) / 2, bi = -(re[k] - re[k2]) / 2;
+        mag[k] = Math.sqrt(ar * ar + ai * ai); phA[k] = Math.atan2(ai, ar);
+        const om = 2 * Math.PI * k * Hs / N; let dp = phA[k] - Math.atan2(bi, br) - om; dp -= 2 * Math.PI * Math.round(dp / (2 * Math.PI)); adv[k] = om + dp;
+      }
+      mag[half + 1] = 0;
+    }
+    if (form) { // the spectral envelope: a true envelope (iterated cepstrum, lifted under 3/4 of the pitch period)
+      const lg = st.lg || (st.lg = new Float64Array(half + 1)), env = st.env;
+      for (let k = 0; k <= half; k++) { let m = 0; for (let c = 0; c < nc; c++) m += st.mag[c][k]; lg[k] = Math.log(m / nc + 1e-9); }
+      let q = Q;
+      for (let it = 0; it < 4; it++) {
+        for (let k = 0; k <= half; k++) { const v = it ? Math.max(lg[k], env[k]) : lg[k]; re[k] = v; im[k] = 0; if (k && k < half) { re[N - k] = v; im[N - k] = 0; } }
+        wFft(re, im, true);
+        if (!it) { // the pitch period: the cepstral peak between 2 and 14 ms
+          let bq = 0, bv = 0; for (let i = Math.round(sr * .002), I = Math.min(half - 1, Math.round(sr * .014)); i <= I; i++) if (re[i] > bv) { bv = re[i]; bq = i; }
+          q = bq && bv > .05 ? Math.max(Q, Math.min(Math.round(sr * .006), Math.round(bq * .75))) : Q;
+        }
+        for (let i = q + 1; i < N - q; i++) re[i] = 0;
+        for (let i = 0; i < N; i++) im[i] = 0;
+        wFft(re, im, false);
+        for (let k = 0; k <= half; k++) env[k] = re[k];
+      }
+      env[half + 1] = env[half];
+    }
+    for (let c = 0; c < nc; c++) {
+      const mag = st.mag[c], phA = st.phA[c], adv = st.adv[c], pY = st.prevY[c], Yr = st.Yr[c], Yi = st.Yi[c], pk = st.peak;
+      const peaks = []; // the peaks, and for every bin the nearest one
+      for (let k = 1; k < half; k++) if (mag[k] > mag[k - 1] && mag[k] >= mag[k + 1] && (k < 2 || mag[k] > mag[k - 2]) && mag[k] >= mag[k + 2]) peaks.push(k);
+      if (!peaks.length) peaks.push(1);
+      const np = peaks.length;
+      for (let k = 0, p = 0; k <= half; k++) { while (p < np - 1 && Math.abs(peaks[p + 1] - k) < Math.abs(peaks[p] - k)) p++; pk[k] = peaks[p]; }
+      for (const p of peaks) pY[p] = reset ? phA[p] : pY[p] + adv[p];
+      for (let k = 0; k <= half; k++) {
+        const p = pk[k], ph = reset ? phA[k] : k === p ? pY[p] : pY[p] + phA[k] - phA[p];
+        let m = mag[k];
+        if (form) { const x = k * r, x0 = Math.min(half, Math.floor(x)), f = Math.min(1, x - x0), e1 = st.env[x0] * (1 - f) + st.env[Math.min(half + 1, x0 + 1)] * f; m *= Math.exp(Math.max(-6, Math.min(6, e1 - st.env[k]))); }
+        Yr[k] = m * Math.cos(ph); Yi[k] = m * Math.sin(ph);
+        if (k !== p) pY[k] = ph;
+      }
+    }
+    const YL = 0, YR = nc > 1 ? 1 : 0; // both channels in one inverse FFT (left real, right imaginary)
+    for (let k = 0; k <= half; k++) {
+      zr[k] = st.Yr[YL][k] - st.Yi[YR][k]; zi[k] = st.Yi[YL][k] + st.Yr[YR][k];
+      if (k && k < half) { zr[N - k] = st.Yr[YL][k] + st.Yi[YR][k]; zi[N - k] = -st.Yi[YL][k] + st.Yr[YR][k]; }
+    }
+    wFft(zr, zi, true);
+    const ao = o - st.f0;
+    for (let i = 0; i < N; i++) { const w = win[i], fa = i < cutA - 32 ? 1 : i >= cutA ? 0 : (cutA - i) / 32; acc[0][ao + i] += zr[i] * w; if (nc > 1) acc[1][ao + i] += zi[i] * w; wac[ao + i] += w * w * fa; }
+  }
+  // the overlap-add, divided by the windows laid (the steady state: a constant)
+  const lo = Math.max(0, Math.floor(n0 * r) - 3 - st.f0), hi = Math.min(wac.length, Math.ceil(n1 * r) + 3 - st.f0), floorW = .3 / st.norm;
+  for (let q = lo; q < hi; q++) { if (wac[q] < -1) continue; const wv = Math.max(wac[q], floorW); for (let c = 0; c < nc; c++) acc[c][q] /= wv; wac[q] = -1e30; } // done (a mark: the next chunk does not divide again)
+  for (let c = 0; c < nc; c++) {
+    const A = acc[c], O = outs[c];
+    if (r === 1) O.set(A.subarray(n0 - st.f0, n0 - st.f0 + len)); else for (let n = n0; n < n1; n++) O[n - n0] = wCub(A, n * r - st.f0);
+  }
+  const drop = Math.max(0, Math.floor(n1 * r) - 4 - st.f0);
+  if (drop) { for (let c = 0; c <= nc; c++) { acc[c].copyWithin(0, drop); acc[c].fill(0, acc[c].length - drop); } st.f0 += drop; }
+  return outs;
+}
+// The worker's (and the fallback's) message handler; J keeps the jobs
+function wHandle(d, J) {
+  if (d.op === 'a0') { J[d.jid] = { parts: [], n: 0, sr: d.sr }; return { res: true }; }
+  if (d.op === 'a1') { const q = J[d.jid]; q.parts.push(d.x); q.n += d.x.length; return { res: true }; }
+  if (d.op === 'a2') { const q = J[d.jid]; delete J[d.jid]; const x = new Float32Array(q.n); let o = 0; q.parts.forEach(p => { x.set(p, o); o += p.length; }); q.parts = null; return { res: wAna(x, q.sr, d.setBpm || 174) }; }
+  if (d.op === 'r0') { J[d.jid] = wRInit(d.job); return { res: true }; }
+  if (d.op === 'r1') { const out = wRChunk(J[d.jid], d); return { res: out, tr: out.map(c => c.buffer) }; }
+  if (d.op === 'r2') { delete J[d.jid]; return { res: true }; }
+  throw new Error('unknown op ' + d.op);
+}
+
+// A large file off the page: its key (SHA-256, as smpHash) and its record in the sampler's IndexedDB store (section 3b),
+// then the bytes go back for decoding. The page copies nothing.
+async function wStore(d) {
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', d.bytes)), id = 'user:' + Array.from(h.subarray(0, 10), x => x.toString(16).padStart(2, '0')).join('');
+  const kept = await new Promise(res => {
+    try {
+      const rq = indexedDB.open('dnb808.samples', 1);
+      rq.onupgradeneeded = () => rq.result.createObjectStore('smp'); rq.onerror = () => res(false); rq.onblocked = () => res(false);
+      rq.onsuccess = () => { const db = rq.result; try { const tx = db.transaction('smp', 'readwrite'); tx.objectStore('smp').put(Object.assign({}, d.rec, { bytes: d.bytes }), id); tx.oncomplete = () => { db.close(); res(true); }; tx.onerror = tx.onabort = () => { db.close(); res(false); }; } catch (e) { db.close(); res(false); } };
+    } catch (e) { res(false); }
+  });
+  return { res: { id, kept, bytes: d.bytes }, tr: [d.bytes] };
+}
+
+// ---------- main thread: the worker ----------
+const W_FNS = [wFft, wMapAt, wMapInv, wCub, wLow, wAna, wRInit, wRChunk, wHandle, wStore];
+function warpWorker() {
+  if (WARP.w !== undefined) return WARP.w;
+  WARP.w = null;
+  try {
+    if (typeof Worker !== 'function') return null;
+    const src = W_FNS.map(f => f.toString()).join('\n') + '\nvar J={};onmessage=function(e){var d=e.data;Promise.resolve().then(function(){return d.op==="store"?wStore(d):wHandle(d,J);}).then(function(r){postMessage({id:d.id,res:r.res},r.tr||[]);},function(err){postMessage({id:d.id,err:String(err&&err.message||err)});});};';
+    const w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+    w.onmessage = e => { const q = WARP.wq.get(e.data.id); if (!q) return; WARP.wq.delete(e.data.id); if (e.data.err) q.rej(new Error(e.data.err)); else q.res(e.data.res); };
+    w.onerror = e => { console.warn('[dnb808] the warp worker failed: warping runs on the page from now on', e && e.message); WARP.wq.forEach(q => q.rej(new Error('worker failed'))); WARP.wq.clear(); WARP.w = null; try { w.terminate(); } catch (er) { /* gone */ } };
+    WARP.w = w;
+  } catch (e) { WARP.w = null; }
+  return WARP.w;
+}
+// One message to the worker (or, without one, the same handler here, after a timeout so the page breathes between chunks)
+function warpCall(msg, transfer) {
+  const w = warpWorker();
+  if (!w) return new Promise((res, rej) => setTimeout(() => { try { res(wHandle(msg, WARP.J).res); } catch (e) { rej(e); } }, 0));
+  return new Promise((res, rej) => { const id = ++WARP.jid; WARP.wq.set(id, { res, rej }); w.postMessage(Object.assign({ id }, msg), transfer || []); });
+}
+
+// ---------- analysis: hits, tempo, key, phrases of a stored file (once per file and session) ----------
+function warpAnaFor(id, buf) {
+  if (!id || !buf) return Promise.resolve(null);
+  if (WARP.ana.has(id)) return Promise.resolve(WARP.ana.get(id));
+  let job = WARP.anaJobs.get(id); if (job) return job;
+  job = WARP.chainA = WARP.chainA.then(async () => {
+    if (WARP.ana.has(id)) return WARP.ana.get(id);
+    const jid = 'a' + (++WARP.jid), n = buf.length, L = buf.getChannelData(0), R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L, CH = 2 * Math.round(buf.sampleRate * 10);
+    await warpCall({ op: 'a0', jid, sr: buf.sampleRate / 2 });
+    for (let a = 0; a < n; a += CH) { // a mono copy at half the rate, ten seconds per message
+      const b = Math.min(n, a + CH), m = new Float32Array((b - a) >> 1);
+      for (let k = 0, q = a; k < m.length; k++, q += 2) m[k] = (L[q] + L[q + 1] + R[q] + R[q + 1]) * .25;
+      await warpCall({ op: 'a1', jid, x: m }, [m.buffer]);
+    }
+    const res = await warpCall({ op: 'a2', jid, setBpm: typeof P === 'object' && P ? +P.bpm || 174 : 174 });
+    res.dur = buf.duration; res.v = 1;
+    WARP.ana.set(id, res); WARP.anaBuf.set(buf, res);
+    if (WARP.ana.size > 96) WARP.ana.delete(WARP.ana.keys().next().value);
+    const meta = SMP.meta.get(id); // a long file has no sampler slices (smpOnsets skips it): the 16 strongest hits
+    if (meta && (!meta.slices || !meta.slices.length) && res.onsets.length >= 2) meta.slices = smpCleanSlices(res.onsets.map((t, i) => [t, res.str[i]]).sort((x, y) => y[1] - x[1]).slice(0, 16).map(x => x[0]), buf.duration);
+    if (AUD.ed && AUD.ed.clip && AUD.ed.clip.audio && AUD.ed.clip.audio.src === id) warpRedraw();
+    return res;
+  }).catch(e => { console.warn('[dnb808] audio analysis failed', e); return null; }).finally(() => WARP.anaJobs.delete(id));
+  WARP.anaJobs.set(id, job);
+  return job;
+}
+// the analysis of a buffer (the clip's file, or its reversed copy: the hits mirrored)
+function warpAnaOf(a) {
+  const r = a && a.src ? WARP.ana.get(a.src) : null; if (!r || !a.rev) return r;
+  if (r.revd) return r.revd;
+  const d = r.dur, ons = r.onsets.map(t => d - t).reverse(); // mirrored: the sharp edges stay where they are, the phrase ends become starts
+  return (r.revd = Object.assign({}, r, { onsets: ons, str: r.str.slice().reverse(), phrases: r.phrases.map(([s, e]) => [d - e, d - s]).reverse() }));
+}
+
+// ---------- the warp map of a clip ----------
+const warpHasMarks = a => !!(a && Array.isArray(a.markers) && a.markers.length && !a.rev);
+function warpMarksFix(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  list.slice(0, WARP_MAX_MARKS * 2).forEach(m => {
+    if (!m || typeof m !== 'object') return;
+    const s = +m.src, b = +m.beat; if (!Number.isFinite(s) || !Number.isFinite(b) || s < 0 || s > 3600 || b < -64 || b > 8192) return;
+    out.push({ src: Math.round(s * 1e5) / 1e5, beat: Math.round(b * 1e4) / 1e4 });
+  });
+  out.sort((x, y) => x.beat - y.beat);
+  // rising in both, and no segment steeper or flatter than WARP_SPB (seconds of the file per beat): a saved map with an
+  // extreme slope would render minutes of silence or squeeze the file into a click
+  const ok = []; out.forEach(m => { const l = ok[ok.length - 1]; if (!l) { ok.push(m); return; } const k = (m.src - l.src) / (m.beat - l.beat); if (m.beat > l.beat + 1e-4 && m.src > l.src + 1e-4 && k >= WARP_SPB[0] && k <= WARP_SPB[1]) ok.push(m); });
+  return ok.slice(0, WARP_MAX_MARKS);
+}
+// -> { b, s, lo, hi }: beats of the clip's warped timeline to seconds of the file (the reversed file has no markers)
+function warpMapOf(p, a) {
+  const spb = 60 / audOrigBpm(p, a);
+  if (!warpHasMarks(a)) return { b: [0], s: [0], lo: spb, hi: spb };
+  const M = a.markers, n = M.length, b = M.map(m => m.beat), s = M.map(m => m.src);
+  if (n === 1) return { b, s, lo: spb, hi: spb };
+  return { b, s, lo: (s[1] - s[0]) / (b[1] - b[0]), hi: (s[n - 1] - s[n - 2]) / (b[n - 1] - b[n - 2]) };
+}
+const warpHash = a => { let h = 2166136261; const mix = v => { h = Math.imul(h ^ (v | 0), 16777619) >>> 0; }; if (warpHasMarks(a)) a.markers.forEach(m => { mix(m.src * 1e5); mix(m.beat * 1e4); }); return h.toString(36); };
+// What a clip plays with: { kind 'file' | 'old' (3g as before) | 'warp', key, job } (the key names one cached buffer)
+function warpSpec(p, a) {
+  const ob = audOrigBpm(p, a), mk = warpHasMarks(a), mode = a.mode;
+  if (mode === 'off' || (mode === 'repitch' && !mk)) return { kind: 'old' };
+  const sem = mode === 'repitch' ? 0 : audSemis(p, a), same = Math.abs(p.bpm - ob) < 1e-3;
+  if (!mk && same && !sem) return { kind: 'file' };
+  const kind = mode === 'repitch' ? 'vari' : mode === 'beats' ? 'beats' : mode === 'complex' || (a.formants && sem) ? 'complex' : 'tones';
+  const key = ['w1', a.src, a.rev ? 1 : 0, kind, mode, ob.toFixed(4), (+p.bpm).toFixed(4), sem, a.formants && sem && kind === 'complex' ? 1 : 0, kind === 'beats' ? a.preserve || 'trans' : '', warpHash(a)].join('|');
+  return { kind: 'warp', key, wk: kind, sem, ob, full: mode === 'complex' };
+}
+function warpKeysOf(p) {
+  const out = new Set(); if (!p) return out;
+  try { audClipsOf(p).forEach(c => { const sp = warpSpec(p, c.audio); if (sp.kind === 'warp') out.add(sp.key); }); } catch (e) { /* a set being loaded */ }
+  return out;
+}
+
+// ---------- the warp render: chunk by chunk through the worker, into one buffer ----------
+// BEATS slices: the hits (or the 1/16, 1/8 grid of the warped timeline), as file and output samples
+function warpCuts(m, an, pres, dur, sr, spb) {
+  let S = [];
+  if (pres === '1/16' || pres === '1/8') {
+    const q = pres === '1/8' ? 2 : 4, b0 = Math.ceil(wMapInv(m, 0) * q) / q, b1 = wMapInv(m, dur);
+    for (let b = b0; b < b1 && S.length < 40000; b += 1 / q) S.push(wMapAt(m, b));
+  } else S = (an ? an.onsets : []).slice();
+  S = S.filter(t => t > .005 && t < dur - .005).sort((x, y) => x - y);
+  const P = [0]; S.forEach(t => { if (t - P[P.length - 1] > .025) P.push(t); }); P.push(dur);
+  return { cuts: P.map(t => t * sr), outs: P.map(t => wMapInv(m, t) * spb * sr) };
+}
+async function warpRender(job, b0, a, m, bpm, sp) {
+  const src = a.rev ? smpReversed(b0) : b0, sr = src.sampleRate, nc = src.numberOfChannels > 1 ? 2 : 1, spb = 60 / bpm, dur = src.duration;
+  await warpAnaFor(a.src, b0);
+  const an = warpAnaOf(a), r = sp.wk === 'vari' ? 1 : Math.pow(2, sp.sem / 12);
+  const outLen = Math.max(1, Math.min(sr * 60 * 16, Math.ceil(wMapInv(m, dur) * spb * sr) + 1));
+  const j = { mode: sp.wk, sr, r, bpm, m, trans: sp.wk === 'vari' ? [] : (an ? an.onsets : []), formant: sp.wk === 'complex' && !!a.formants && !!sp.sem, full: sp.full, outLen };
+  if (sp.wk === 'beats') Object.assign(j, warpCuts(m, an, a.preserve, dur, sr, spb));
+  const jid = 'r' + (++WARP.jid), chans = nc > 1 ? [src.getChannelData(0), src.getChannelData(1)] : [src.getChannelData(0)], n = src.length;
+  const os = x => wMapAt(m, x / sr / spb) * sr, pad = Math.round(sr * .4 * Math.max(1, r)) + 4096, CH = Math.round(sr * WARP_CHUNK);
+  const bs = (A, x) => { let lo = 0, hi = A.length - 1; if (x < A[0]) return -1; while (hi - lo > 1) { const md = (lo + hi) >> 1; if (A[md] <= x) lo = md; else hi = md; } return A[hi] <= x ? hi : lo; };
+  await warpCall({ op: 'r0', jid, job: j });
+  try {
+    const out = smpDctx().createBuffer(2, outLen, sr);
+    for (let n0 = 0; n0 < outLen; n0 += CH) {
+      if (!job.need && !warpKeysOf(P).has(job.key)) throw new Error('stale'); // the set moved on: the next plan starts another
+      const n1 = Math.min(outLen, n0 + CH); let lo, hi;
+      if (sp.wk === 'beats') { const k0 = Math.max(0, bs(j.outs, n0) - 1), k1 = Math.min(j.cuts.length - 1, bs(j.outs, n1) + 1); lo = j.cuts[k0] - sr * .02; hi = j.cuts[k1] + sr * .01; }
+      else { lo = os(n0 - 4096) - pad; hi = os(n1 + 4096) + pad; }
+      const s0 = Math.max(0, Math.min(n, Math.floor(lo))), s1 = Math.max(s0, Math.min(n, Math.ceil(hi)));
+      const chs = chans.map(c => c.slice(s0, s1));
+      const res = await warpCall({ op: 'r1', jid, n0, n1, off: s0, chs }, chs.map(c => c.buffer));
+      out.copyToChannel(res[0], 0, n0); out.copyToChannel(res[1] || res[0], 1, n0);
+      WARP.prog.set(job.key, n1 / outLen); warpRedrawInfo();
+    }
+    return out;
+  } finally { warpCall({ op: 'r2', jid }).catch(() => {}); }
+}
+// One job per key, one at a time (they are heavy). need: a render waits for it (it is never dropped as stale)
+function warpJob(p, a, sp, need) {
+  let job = WARP.jobs.get(sp.key);
+  if (job) { if (need) job.need++; return job.p; }
+  const b0 = a.src ? SMP.bufs.get(a.src) : null; if (!b0) return Promise.resolve(null);
+  const snap = { src: a.src, rev: !!a.rev, formants: !!a.formants, preserve: a.preserve || 'trans' }, m = warpMapOf(p, a), bpm = +p.bpm;
+  job = { key: sp.key, need: need ? 1 : 0, p: null };
+  WARP.jobs.set(sp.key, job); WARP.prog.set(sp.key, 0);
+  job.p = WARP.chain = WARP.chain.then(() => warpRender(job, b0, snap, m, bpm, sp)).then(buf => {
+    AUD.fits.set(sp.key, { buf, at: performance.now(), mb: buf.length * 8 / 1e6 });
+    audTrimFits(); warpRedrawInfo(true);
+    return buf;
+  }, err => { if (!/stale/.test(String(err && err.message))) console.warn('[dnb808] warp failed: the clip plays repitched', err); return null; })
+    .finally(() => { WARP.jobs.delete(sp.key); WARP.prog.delete(sp.key); });
+  return job.p;
+}
+
+// ---------- 3g wrapped: the plan, the fits, the cache, the key shift ----------
+if (typeof audPlan === 'function') {
+  const warpPlan0 = audPlan;
+  audPlan = function (p, a) { // eslint-disable-line no-func-assign
+    const sp = warpSpec(p, a); if (sp.kind === 'old') return warpPlan0(p, a);
+    const b0 = a.src ? SMP.bufs.get(a.src) : null;
+    if (!b0) { if (a.src && typeof smpState === 'function') smpState(a.src); return null; }
+    const src = a.rev ? smpReversed(b0) : b0, ob = audOrigBpm(p, a);
+    if (sp.kind === 'file') return { buf: src, rate: 1, per16: 15 / ob };
+    const f = AUD.fits.get(sp.key); if (f) { f.at = performance.now(); return { buf: f.buf, rate: 1, per16: 15 / p.bpm }; }
+    warpJob(p, a, sp, false);
+    return { buf: src, rate: p.bpm / ob, per16: 15 / ob, pending: true }; // until the warp is ready: the speed only
+  };
+  audFitFor = function (p, a) { // eslint-disable-line no-func-assign
+    const sp = warpSpec(p, a); if (sp.kind !== 'warp' || !a.src || !SMP.bufs.get(a.src)) return Promise.resolve(null);
+    const f = AUD.fits.get(sp.key); if (f) return Promise.resolve(f.buf);
+    return warpJob(p, a, sp, typeof P !== 'object' || p !== P); // a render (of a copy of the set) waits; the live prefetch may be dropped
+  };
+  // The cap is soft for the buffers in use: a key of the set (or of a set being rendered offline, WARP.pins) is never
+  // evicted, or the render would play it unwarped and the live set would warp it again in a loop. The others go, oldest first.
+  audTrimFits = function () { // eslint-disable-line no-func-assign
+    const used = warpKeysOf(typeof P === 'object' ? P : null); WARP.pins.forEach(s => s.forEach(k => used.add(k)));
+    let tot = 0, inUse = 0; AUD.fits.forEach((f, k) => { tot += f.mb; if (used.has(k)) inUse += f.mb; });
+    const old = [...AUD.fits.entries()].filter(x => !used.has(x[0])).sort((x, y) => x[1].at - y[1].at);
+    while (old.length && (AUD.fits.size > AUD_FIT_MAX || tot > WARP_FIT_MB)) { const [k, f] = old.shift(); AUD.fits.delete(k); tot -= f.mb; }
+    if (inUse > WARP_FIT_MB && !WARP.bigWarn) { // once, until the set is back under the cap
+      WARP.bigWarn = true;
+      flash(`The warped audio of this set takes ${Math.round(inUse)} MB of memory: long clips at a tempo far from their own are heavy. Fewer or shorter warped clips keep the browser light`);
+    } else if (inUse <= WARP_FIT_MB) WARP.bigWarn = false;
+  };
+  // an offline render (export, loop, reference, lesson) pins the warped buffers of its set while it runs
+  const warpPin = fn => async function (project, ...r) {
+    const pin = warpKeysOf(project); WARP.pins.add(pin);
+    try { return await fn.call(this, project, ...r); } finally { WARP.pins.delete(pin); audTrimFits(); }
+  };
+  if (typeof renderArrangementOffline === 'function') renderArrangementOffline = warpPin(renderArrangementOffline); // eslint-disable-line no-func-assign
+  if (typeof lessonRender === 'function') lessonRender = warpPin(lessonRender); // eslint-disable-line no-func-assign
+  const warpSemis0 = audSemis;
+  audSemis = function (p, a) { return a && (a.mode === 'complex' || a.mode === 'beats') ? warpSemis0(p, Object.assign({}, a, { mode: 'stretch' })) : warpSemis0(p, a); }; // eslint-disable-line no-func-assign
+}
+// the modes: STRETCH is TONES (its id stays, so old sets and every caller of 3g keep it)
+if (typeof AUD_MODES === 'object') {
+  AUD_MODES.length = 0; AUD_MODES.push(['beats', 'BEATS'], ['stretch', 'TONES'], ['complex', 'COMPLEX'], ['repitch', 'RE-PITCH'], ['off', 'OFF']);
+  Object.assign(AUD_MODE_INFO, {
+    beats: 'BEATS: the file is cut at its hits (or on the 1/16, 1/8 grid: PRESERVE) and each slice plays at its own speed from its place: drums and percussive loops keep their attack',
+    stretch: 'TONES: a time-stretch that keeps the pitch (moved to the set key when TO KEY is on), its grains locked on the hits: vocals, bass, leads',
+    complex: 'COMPLEX: a phase vocoder for full mixes, pads and textures: smooth stretches, every part at once (heavier to compute)',
+    repitch: 'RE-PITCH: the loop is sped up or slowed down to the set tempo, like a turntable: its pitch moves with it (with markers: a varispeed)' });
+  [64, 128, 256].forEach(b => { if (!AUD_BARS.includes(b)) AUD_BARS.push(b); });
+}
+// limits for a full acapella; the analysis runs right after the file is stored
+if (typeof audStore === 'function') {
+  audStore = async function (name, bytes) { // eslint-disable-line no-func-assign
+    if (bytes.byteLength > WARP_MAX_FILE_MB * 1e6) throw new Error(`larger than ${WARP_MAX_FILE_MB} MB`);
+    const rec = { name: String(name).slice(0, 60), type: 'audio/' + (String(name).split('.').pop() || 'wav').toLowerCase(), size: bytes.byteLength, added: Date.now() };
+    const check = b => {
+      if (b.duration > WARP_MAX_SEC) throw new Error('longer than 8 and a half minutes');
+      if (b.length * b.numberOfChannels * 4 > WARP_MAX_DEC_MB * 1e6) throw new Error(`more than ${WARP_MAX_DEC_MB} MB decoded`);
+      return b;
+    };
+    let id, kept;
+    if (bytes.byteLength > 8e6 && window.crypto && crypto.subtle && warpWorker()) { // a large file: hashed and stored by the worker
+      const r = await warpCall({ op: 'store', bytes, rec }, [bytes]); id = r.id; kept = r.kept;
+      if (!SMP.bufs.has(id)) {
+        let buf; try { buf = check(await smpDecode(r.bytes)); } catch (err) { smpDbDo('readwrite', st => st.delete(id)); throw err; } // the worker gave the bytes back: decoded in place
+        smpAdd(id, buf, { name: rec.name, kind: 'user', slices: smpOnsets(buf), credit: '', url: '' });
+      }
+    } else {
+      id = 'user:' + await smpHash(bytes);
+      if (!SMP.bufs.has(id)) {
+        const buf = check(await smpDecode(bytes.slice(0))); // decodeAudioData takes its input away: the original goes to the storage
+        smpAdd(id, buf, { name: rec.name, kind: 'user', slices: smpOnsets(buf), credit: '', url: '' });
+      }
+      kept = await smpDbPut(id, Object.assign(rec, { bytes }));
+    }
+    SMP.state.set(id, 'ok'); SMP.jobs.set(id, Promise.resolve());
+    const buf = SMP.bufs.get(id);
+    if (buf.duration > 20) flash(`Analysing ${name}: hits, tempo, key and phrases...`);
+    await warpAnaFor(id, buf);
+    return { id, buf, kept: kept !== false };
+  };
+}
+if (typeof smpOnsets === 'function') {
+  const warpOnsets0 = smpOnsets;
+  smpOnsets = function (buf) { return buf && buf.duration > 60 ? [] : warpOnsets0(buf); }; // eslint-disable-line no-func-assign
+}
+if (typeof audTempoOf === 'function') { // the name first, then the analysis (80-180 BPM, the octave nearer the set), then 3c's (voxTempo)
+  const warpTempo0 = audTempoOf;
+  audTempoOf = function (name, buf) { // eslint-disable-line no-func-assign
+    const nb = typeof voxNameBpm === 'function' ? voxNameBpm(name) : 0;
+    if (nb) { const b = warpTempo0(name, buf); return Math.abs(b / nb - 1) < .004 ? b : nb; } // a loop of whole beats: its exact tempo; a phrase with a tail: the name's
+    const an = buf ? WARP.anaBuf.get(buf) : null;
+    if (an && an.bpm > 0) return Math.round(clamp(an.bpm, 40, 300) * 1000) / 1000;
+    return warpTempo0(name, buf);
+  };
+}
+if (typeof audClipFor === 'function') { // the key from the analysis when the name has none; a long file or a phrase plays once
+  const warpClipFor0 = audClipFor;
+  audClipFor = function (name, id, buf, p) { // eslint-disable-line no-func-assign
+    const c = warpClipFor0(name, id, buf, p);
+    try {
+      const a = c.audio, an = WARP.ana.get(id); let re = false;
+      if (!a.key && an && an.key) { a.key = audKeyText(an.key); re = !!a.key; }
+      const bpm = a.bpm || +p.bpm || 174, bars = buf.duration * bpm / 60 / 4, loopy = bars <= 32 && Math.abs(bars - c.bars) / bars < .03;
+      if (!loopy && (bars > 32 || (typeof voxIsVocal === 'function' && voxIsVocal(name)) || WARP.mkVocal)) { a.loop = false; c.bars = clamp(Math.ceil(bars - 1e-3), 1, WARP_MAX_BARS); }
+      if (re) {
+        const word = typeof voxPadName === 'function' ? voxPadName(name) : String(name).replace(/\.[a-z0-9]+$/i, '').toUpperCase();
+        c.name = (word + (a.bpm ? ' ' + Math.round(a.bpm) : '') + (a.key ? ' ' + a.key : '')).slice(0, 24);
+      }
+    } catch (e) { /* the clip as 3g made it */ }
+    return c;
+  };
+}
+// the saved clip: markers, LOOP, FORMANTS, PRESERVE and any length up to 256 bars ('tones' is read as STRETCH)
+if (typeof audClipFix === 'function') {
+  const warpFix0 = audClipFix;
+  audClipFix = function (c) { // eslint-disable-line no-func-assign
+    let src = c;
+    try { if (c && c.audio && c.audio.mode === 'tones') src = Object.assign({}, c, { audio: Object.assign({}, c.audio, { mode: 'stretch' }) }); } catch (e) { src = c; }
+    const o = warpFix0(src); if (!o) return o;
+    try {
+      const a = c.audio, w = o.audio;
+      if (Number.isInteger(c.bars) && c.bars >= 1 && c.bars <= WARP_MAX_BARS) o.bars = c.bars;
+      if (a.loop === false) w.loop = false;
+      if (a.formants === true) w.formants = true;
+      if (a.preserve === '1/16' || a.preserve === '1/8') w.preserve = a.preserve;
+      const mk = warpMarksFix(a.markers); if (mk.length) w.markers = mk;
+    } catch (e) { /* the clip as 3g made it */ }
+    return o;
+  };
+}
+if (typeof audTracksFix === 'function') { // the vocal settings of an audio track (the de-esser)
+  const warpTracksFix0 = audTracksFix;
+  audTracksFix = function (list, nSc) { // eslint-disable-line no-func-assign
+    const out = warpTracksFix0(list, nSc);
+    try {
+      const src = Array.isArray(list) ? list.filter(audIsTrack).slice(0, AUD_MAX_TRACKS) : [];
+      out.forEach((t, k) => { const v = src[k] && src[k].warpVox; if (v && typeof v === 'object' && !Array.isArray(v)) t.warpVox = { deess: clamp(Number.isFinite(+v.deess) ? +v.deess : 0, 0, 1) }; });
+    } catch (e) { /* none */ }
+    return out;
+  };
+}
+
+// ---------- playback: LOOP off, the de-esser (the same for the live scheduler and the offline renders) ----------
+// The song step of this tick (stepTick runs before the tracks, live and offline)
+if (typeof Engine === 'function') {
+  const warpTick0 = Engine.prototype.stepTick;
+  Engine.prototype.stepTick = function (tick, time, sd) { this.wTick = tick; return warpTick0.call(this, tick, time, sd); };
+}
+// 16ths since the clip started (session: since its launch; arrangement: since its entry's start, plus its offset)
+function warpElapsed(E, i, tr, clip) {
+  const tick = E.wTick;
+  if (!E.offline && typeof RT !== 'undefined' && RT[i] && RT[i].playing && tr.clips[RT[i].playing.slot] === clip) return TR.tick - RT[i].playing.start;
+  const e = Number.isFinite(tick) ? arrEntryAt(tr, tick) : null;
+  return e ? tick - e.start * 16 + (e.off || 0) : 0;
+}
+// A split-band de-esser from native nodes (no latency): a Linkwitz-Riley crossover at 5.5 kHz, the high band's envelope
+// (rectified, 40 Hz low-pass) shaped into a gain cut of that band. One per engine and track, built when a vocal plays.
+function warpDeCurve(amt) {
+  const n = 1025, c = new Float32Array(n);
+  for (let k = 0; k < n; k++) { const x = k / (n - 1) * 2 - 1, e = Math.max(0, x), t = clamp((e - .012) / .08, 0, 1); c[k] = -amt * .82 * t * t * (3 - 2 * t); }
+  return c;
+}
+function warpDeIn(E, i, tr) {
+  const amt = tr.warpVox ? +tr.warpVox.deess || 0 : 0, T = E.t && E.t[i];
+  if (!(amt > 0) || !T) return null;
+  const D = E.wDe || (E.wDe = []); let d = D[i];
+  if (!d || d.T !== T) {
+    const c = E.ctx, bq = (type) => { const f = c.createBiquadFilter(); f.type = type; f.frequency.value = 5500; f.Q.value = .7071; return f; };
+    const inp = c.createGain(), l1 = bq('lowpass'), l2 = bq('lowpass'), h1 = bq('highpass'), h2 = bq('highpass'), hg = c.createGain(), out = c.createGain();
+    const rect = c.createWaveShaper(), sm = c.createBiquadFilter(), shp = c.createWaveShaper();
+    rect.curve = Float32Array.from({ length: 1025 }, (_, k) => Math.abs(k / 512 - 1)); sm.type = 'lowpass'; sm.frequency.value = 40; sm.Q.value = .5;
+    inp.connect(l1); l1.connect(l2); l2.connect(out); inp.connect(h1); h1.connect(h2); h2.connect(hg); hg.connect(out);
+    h2.connect(rect); rect.connect(sm); sm.connect(shp); shp.connect(hg.gain); out.connect(T.in);
+    d = D[i] = { T, inp, shp, amt: -1 };
+  }
+  if (d.amt !== amt) { d.shp.curve = warpDeCurve(amt); d.amt = amt; }
+  return d.inp;
+}
+if (typeof audStep === 'function') {
+  const warpStep0 = audStep;
+  audStep = function (E, i, clip, pos, grid, sd) { // eslint-disable-line no-func-assign
+    const tr = E.p && E.p.tracks[i];
+    if (clip && clip.audio && clip.audio.loop === false && tr && warpElapsed(E, i, tr, clip) >= clip.bars * 16) clip = null; // played once: silence
+    const de = clip && tr && E.t && E.t[i] ? warpDeIn(E, i, tr) : null;
+    if (!de) return warpStep0(E, i, clip, pos, grid, sd);
+    const T = E.t[i], keep = T.in; T.in = de; // the segments of this step go through the de-esser
+    try { return warpStep0(E, i, clip, pos, grid, sd); } finally { T.in = keep; }
+  };
+}
+
+// ---------- AUTO WARP: a marker on every hit, snapped to the 1/16 grid of the file's tempo ----------
+// the beat phase (seconds) of period T that the hits fit best
+function warpPhase(an, T) {
+  let c = 0, s = 0; an.onsets.forEach((t, i) => { const a = 2 * Math.PI * t / T, w = an.str[i] || 1; c += w * Math.cos(a); s += w * Math.sin(a); });
+  return (((Math.atan2(s, c) / (2 * Math.PI)) * T) % T + T) % T;
+}
+function warpAutoMarks(an, bpm) {
+  const T = 60 / bpm, ph = warpPhase(an, T), g0 = ph - T * Math.ceil((ph - .03) / T), mk = [];
+  an.onsets.forEach((t, i) => {
+    const q = (t - g0) / T * 4, qi = Math.round(q); if (Math.abs(q - qi) > .35) return; // between two 16ths: left free
+    const l = mk[mk.length - 1], b = qi / 4;
+    if (l && b <= l.beat) { if ((an.str[i] || 0) > l.w) mk[mk.length - 1] = { src: t, beat: b, w: an.str[i] || 0 }; return; }
+    mk.push({ src: t, beat: b, w: an.str[i] || 0 });
+  });
+  // no segment faster than twice or slower than half the file's tempo (a missed or a doubled hit)
+  const ok = []; mk.forEach(m => { const l = ok[ok.length - 1]; if (l) { const k = (m.src - l.src) / ((m.beat - l.beat) * T); if (k < .5 || k > 2) return; } ok.push(m); });
+  let out = ok;
+  if (out.length > WARP_MAX_MARKS) { const thr = out.map(m => m.w).sort((x, y) => y - x)[WARP_MAX_MARKS - 1]; out = out.filter(m => m.w >= thr).slice(0, WARP_MAX_MARKS); }
+  return warpMarksFix(out.map(m => ({ src: m.src, beat: m.beat })));
+}
+async function warpAuto(t, s) {
+  const clip = P.tracks[t] && P.tracks[t].clips[s], a = clip && clip.audio, b0 = a && SMP.bufs.get(a.src);
+  if (!b0) return flash('The file is not loaded: load it with FILE...');
+  if (a.rev) return flash('A reversed clip has no warp markers: turn REV off first');
+  flash(`AUTO WARP: analysing ${clip.name}...`);
+  const an = await warpAnaFor(a.src, b0);
+  if (P.tracks[t].clips[s] !== clip) return;
+  if (!an || an.onsets.length < 2) return flash(`AUTO WARP: no hits found in ${clip.name}`);
+  const bpm = a.bpm > 0 ? a.bpm : an.bpm; if (!(bpm > 0)) return flash('AUTO WARP: no steady tempo found: type the BPM in first');
+  const mk = warpAutoMarks(an, bpm); if (!mk.length) return flash('AUTO WARP: no hit is near the grid');
+  pushUndo();
+  a.markers = mk; a.bpm = Math.round(bpm * 1000) / 1000; if (a.mode === 'off') a.mode = 'stretch';
+  WARP.sel = null; save(); audPrefetch(); renderDetail();
+  flash(`AUTO WARP: ${mk.length} markers on the hits of ${clip.name}, snapped to the 1/16 grid at ${+bpm.toFixed(2)} BPM. Drag a marker to move it (ALT: off the grid). CTRL+Z to undo`);
+}
+function warpDelMark(clip, k) {
+  const a = clip.audio; if (!warpHasMarks(a) || !a.markers[k]) return;
+  pushUndo(); a.markers.splice(k, 1); if (!a.markers.length) delete a.markers;
+  const n = a.markers ? a.markers.length : 0; WARP.sel = n ? { clip, k: Math.min(k, n - 1) } : null; // the next marker (else the one before) stays selected
+  save(); audPrefetch(); warpRedraw(); flash('Warp marker removed. CTRL+Z to undo');
+}
+// An undo step taken before a gesture, pushed only when the gesture changes the set (as pushUndo keeps it)
+function warpUndoFrom(before) { HIST.undo.push(before); if (HIST.undo.length > 80) HIST.undo.shift(); HIST.redo.length = 0; }
+
+// ---------- the clip editor: markers on the waveform, the new controls ----------
+function warpRedrawInfo(force) {
+  if (!AUD.ed) return;
+  const now = performance.now(); if (!force && now - WARP.drawT < 150) return; WARP.drawT = now;
+  try { audDrawInfo(); } catch (e) { /* the panel changed */ }
+}
+function warpRedraw() { if (!AUD.ed) return; try { audDraw(); audDrawInfo(); } catch (e) { /* the panel changed */ } }
+if (typeof audDrawInfo === 'function') {
+  const warpInfo0 = audDrawInfo;
+  audDrawInfo = function () { // eslint-disable-line no-func-assign
+    const ed = AUD.ed; if (!ed || !ed.wv.isConnected) { AUD.ed = null; return; }
+    const a = ed.clip.audio, h = $('.aud-head', ed.wv); if (!h) return;
+    if (audStateOf(a) !== 'ok') return warpInfo0();
+    const ob = audOrigBpm(P, a), sem = a.mode === 'off' || a.mode === 'repitch' ? 0 : audSemis(P, a), sp = warpSpec(P, a), keyed = a.mode !== 'off' && a.mode !== 'repitch';
+    let wt = a.mode === 'off' ? 'OFF: own speed' : a.mode === 'repitch' ? `RE-PITCH ${(12 * Math.log2(P.bpm / ob) >= 0 ? '+' : '') + (12 * Math.log2(P.bpm / ob)).toFixed(1)} st`
+      : `${WARP_NAMES[a.mode] || a.mode.toUpperCase()}${sem ? ` ${sem > 0 ? '+' : ''}${sem} st` : ''}${a.formants && sem ? ' FORMANTS' : ''}`;
+    if (warpHasMarks(a)) wt += ` - ${a.markers.length} marker${a.markers.length === 1 ? '' : 's'}`;
+    if (a.loop === false) wt += ' - ONCE';
+    if (sp.kind === 'warp' && !AUD.fits.has(sp.key)) { const pr = WARP.prog.get(sp.key); wt += pr != null ? ` (warping ${Math.round(pr * 100)}%)` : ' (warping...)'; }
+    if (WARP.anaJobs.has(a.src)) wt += ' (analysing...)';
+    h.innerHTML = `<span>${esc(a.file || 'audio')}</span><span>${a.bpm ? (+a.bpm.toFixed(2)) : '?'} &#8594; ${P.bpm} BPM - ${esc(a.key || 'no key')}${a.key && keyed && a.toKey ? ` &#8594; ${NOTE_NAMES[P.key | 0]}${(SCALES[P.scale] || []).includes(3) ? 'm' : ''}` : ''} - ${wt}</span>`;
+  };
+}
+// the waveform on the bars of the set through the warp map; the hits (ticks) and the markers (yellow, a handle on top)
+if (typeof audDraw === 'function') {
+  const warpDraw0 = audDraw;
+  audDraw = function () { // eslint-disable-line no-func-assign
+    const ed = AUD.ed; if (!ed || !ed.wv.isConnected) return;
+    const a = ed.clip.audio; if (a.mode === 'off') { ed.view = null; return warpDraw0(); }
+    const cv = $('.aud-cv', ed.wv), ov = $('.aud-ov', ed.wv), dpr = Math.min(2, devicePixelRatio || 1), color = P.tracks[ed.t] ? P.tracks[ed.t].color : '#fff';
+    [cv, ov].forEach(c => { c.width = Math.max(1, Math.round(c.clientWidth * dpr)); c.height = Math.max(1, Math.round(c.clientHeight * dpr)); });
+    const g = cv.getContext('2d'), w = cv.width, h = cv.height, L = ed.clip.bars * 16, o = ov.getContext('2d');
+    g.fillStyle = '#1b1b1b'; g.fillRect(0, 0, w, h); o.fillStyle = '#141414'; o.fillRect(0, 0, ov.width, ov.height);
+    const step = L > 512 ? 16 : L > 128 ? 4 : 1;
+    for (let k = 0; k < L; k += step) { g.fillStyle = k % 16 === 0 ? '#555' : k % 4 === 0 ? '#333' : '#262626'; if (k % 4 === 0 || L <= 32) g.fillRect(Math.round(k / L * w), 0, 1, h); }
+    const bA = a.start / 4, bB = (a.start + L) / 4; ed.view = { bA, bB };
+    const b0 = SMP.bufs.get(a.src); if (!b0) return;
+    if (!WARP.ana.has(a.src) && !WARP.anaJobs.has(a.src)) warpAnaFor(a.src, b0).then(() => warpRedraw());
+    const buf = a.rev ? smpReversed(b0) : b0, sr = buf.sampleRate, m = warpMapOf(P, a), dur = buf.duration;
+    const ch0 = buf.getChannelData(0), ch1 = buf.numberOfChannels > 1 ? buf.getChannelData(1) : ch0, n = buf.length;
+    const col = (c, W, H, frameAt, fill, cache) => { // peaks of the frames under each of W columns (the overview's kept per buffer and width)
+      let pk = cache && cache.W === W ? cache.pk : null, top = cache && pk ? cache.top : 1e-4;
+      if (!pk) {
+        pk = new Float32Array(W * 2);
+        for (let x = 0; x < W; x++) {
+          const a0 = Math.max(0, Math.floor(frameAt(x))), a1 = Math.min(n, Math.floor(frameAt(x + 1))), stp = Math.max(1, Math.floor((a1 - a0) / 256));
+          let lo = 0, hi = 0; for (let j = a0; j < a1; j += stp) { const v = (ch0[j] + ch1[j]) * .5; if (v < lo) lo = v; if (v > hi) hi = v; }
+          pk[2 * x] = lo; pk[2 * x + 1] = hi; top = Math.max(top, -lo, hi);
+        }
+        if (cache) Object.assign(cache, { W, pk, top });
+      }
+      for (let x = 0; x < W; x++) { const fr = frameAt(x + .5); if (fr >= n || fr < 0) continue; c.fillStyle = fill(fr); const y0 = Math.round(H / 2 - pk[2 * x + 1] / top * H * .47), y1 = Math.round(H / 2 - pk[2 * x] / top * H * .47); c.fillRect(x, y0, 1, Math.max(1, y1 - y0)); }
+    };
+    const fAt = x => wMapAt(m, bA + (bB - bA) * x / w) * sr;
+    col(g, w, h, fAt, () => color);
+    const xOf = b => (b - bA) / (bB - bA) * w;
+    const xEnd = xOf(wMapInv(m, dur)), x0 = xOf(wMapInv(m, 0));
+    g.fillStyle = 'rgba(0,0,0,.45)'; if (xEnd < w) g.fillRect(Math.max(0, Math.round(xEnd)), 0, w, h); if (x0 > 0) g.fillRect(0, 0, Math.round(x0), h);
+    const an = warpAnaOf(a);
+    if (an) { g.fillStyle = 'rgba(255,255,255,.35)'; for (const t0 of an.onsets) { const x = xOf(wMapInv(m, t0)); if (x >= 0 && x < w) g.fillRect(Math.round(x), 0, 1, Math.round(h * .16)); } }
+    if (warpHasMarks(a)) {
+      const sel = WARP.sel && WARP.sel.clip === ed.clip ? WARP.sel.k : -1, hh = Math.round(7 * dpr);
+      a.markers.forEach((mk, k) => {
+        const x = Math.round(xOf(mk.beat)); if (x < -hh || x > w + hh) return;
+        g.fillStyle = k === sel ? '#fff' : 'rgba(255,212,0,.85)'; g.fillRect(x, 0, Math.max(1, Math.round(dpr)), h);
+        g.beginPath(); g.moveTo(x - hh, 0); g.lineTo(x + hh + 1, 0); g.lineTo(x + .5, hh * 1.3); g.closePath(); g.fill();
+      });
+    }
+    const sa = wMapAt(m, bA) * sr, sb = wMapAt(m, bB) * sr;
+    const oc = WARP.ovc || (WARP.ovc = new WeakMap()); if (!oc.has(buf)) oc.set(buf, {});
+    col(o, ov.width, ov.height, x => x / ov.width * n, fr => (fr >= sa && fr < sb ? color : '#555'), oc.get(buf));
+    o.strokeStyle = '#fff'; o.lineWidth = 1; o.strokeRect(Math.round(Math.max(0, sa) / n * ov.width) + .5, .5, Math.max(2, Math.round((Math.min(sb, n) - Math.max(0, sa)) / n * ov.width)), ov.height - 1);
+  };
+}
+// marker editing on the waveform: drag (1/16 snap, ALT free), double-click adds, right-click or DEL removes
+function warpMountMarks(ed) {
+  const wv = ed.wv, cv = $('.aud-cv', wv), clip = ed.clip, a = clip.audio; if (!cv) return;
+  const beatAt = cx => { const r = cv.getBoundingClientRect(), v = ed.view || { bA: 0, bB: 1 }; return v.bA + (v.bB - v.bA) * clamp((cx - r.left) / Math.max(1, r.width), 0, 1); };
+  const hit = cx => {
+    if (!warpHasMarks(a) || !ed.view) return -1;
+    const r = cv.getBoundingClientRect(), v = ed.view; let best = -1, bd = 6;
+    a.markers.forEach((m, k) => { const d = Math.abs(r.left + (m.beat - v.bA) / (v.bB - v.bA) * r.width - cx); if (d < bd) { bd = d; best = k; } });
+    return best;
+  };
+  wv.addEventListener('pointermove', e => { if (e.target === cv && !e.buttons) cv.style.cursor = hit(e.clientX) >= 0 ? 'col-resize' : ''; });
+  wv.addEventListener('pointerdown', e => {
+    if (e.target !== cv || e.button !== 0) return;
+    const k = hit(e.clientX);
+    if (k < 0) { if (WARP.sel) { WARP.sel = null; audDraw(); } return; } // the waveform drag of 3g moves START
+    e.stopPropagation(); e.preventDefault();
+    WARP.sel = { clip, k }; cv.setPointerCapture(e.pointerId);
+    const before = JSON.stringify(P); // the undo step: pushed on the first move (a click only selects)
+    const M = a.markers, lo = k ? M[k - 1].beat + 1 / 64 : -64, hi = k < M.length - 1 ? M[k + 1].beat - 1 / 64 : 8192; let moved = false;
+    const move = ev => { let b = beatAt(ev.clientX); if (!ev.altKey) b = Math.round(b * 4) / 4; b = Math.round(clamp(b, lo, hi) * 1e4) / 1e4; if (b !== M[k].beat) { if (!moved) warpUndoFrom(before); M[k].beat = b; moved = true; audDraw(); } };
+    const up = () => { cv.removeEventListener('pointermove', move); cv.removeEventListener('pointerup', up); cv.removeEventListener('pointercancel', up); if (moved) { save(); audPrefetch(); } warpRedraw(); };
+    cv.addEventListener('pointermove', move); cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+    flash(`Warp marker ${k + 1}: beat ${+(M[k].beat + 1).toFixed(3)} of the clip, ${M[k].src.toFixed(3)} s in the file. Drag it (ALT: off the grid), right-click or DEL removes it`);
+  }, true);
+  cv.addEventListener('dblclick', e => {
+    if (a.rev) return flash('A reversed clip has no warp markers: turn REV off first');
+    const b0 = SMP.bufs.get(a.src); if (!b0) return;
+    let b = beatAt(e.clientX); if (!e.altKey) b = Math.round(b * 4) / 4;
+    const src = wMapAt(warpMapOf(P, a), b); if (!(src >= 0 && src <= b0.duration)) return flash('Outside the file: no marker there');
+    if (warpHasMarks(a) && a.markers.length >= WARP_MAX_MARKS) return flash(`A clip has ${WARP_MAX_MARKS} markers at most`);
+    pushUndo();
+    a.markers = warpMarksFix((a.markers || []).concat([{ src, beat: b }])); if (!a.markers.length) delete a.markers;
+    const k = a.markers ? a.markers.findIndex(m => Math.abs(m.beat - b) < 1e-3) : -1; WARP.sel = k >= 0 ? { clip, k } : null;
+    save(); warpRedraw(); flash('Warp marker added: drag it to move its beat. Right-click or DEL removes it. CTRL+Z to undo');
+  });
+  cv.addEventListener('contextmenu', e => { const k = hit(e.clientX); if (k < 0) return; e.preventDefault(); warpDelMark(clip, k); });
+}
+window.addEventListener('pointerdown', e => { // a press outside the waveform editor ends the marker selection (DEL is the clip's or the item's again)
+  if (!WARP.sel) return;
+  const ed = AUD.ed; if (ed && ed.wv && ed.wv.isConnected && e.target && ed.wv.contains(e.target)) return;
+  WARP.sel = null; if (ed && ed.wv && ed.wv.isConnected) try { audDraw(); } catch (er) { /* the panel changed */ }
+}, true);
+window.addEventListener('keydown', e => { // DEL removes the selected marker (not the clip)
+  if (!WARP.sel || !AUD.ed || !AUD.ed.wv || !AUD.ed.wv.isConnected || AUD.ed.clip !== WARP.sel.clip || (e.key !== 'Delete' && e.key !== 'Backspace')) return;
+  if (!WARP.sel.clip.audio || !warpHasMarks(WARP.sel.clip.audio) || !WARP.sel.clip.audio.markers[WARP.sel.k]) { WARP.sel = null; return; } // no such marker any more (an undo): DEL is the clip's
+  const tg = e.target; if (tg && (tg.tagName === 'INPUT' || tg.tagName === 'SELECT' || tg.tagName === 'TEXTAREA' || tg.isContentEditable)) return;
+  e.preventDefault(); e.stopImmediatePropagation(); warpDelMark(WARP.sel.clip, WARP.sel.k);
+}, true);
+if (typeof audClipDetail === 'function') {
+  const warpDetail0 = audClipDetail;
+  audClipDetail = function (body) { // eslint-disable-line no-func-assign
+    warpDetail0(body);
+    try { warpEditor(body); } catch (e) { console.warn('[dnb808] warp editor', e); }
+  };
+}
+function warpEditor(body) {
+  const ed = AUD.ed; if (!ed || !body.contains(ed.wv)) return;
+  const { t, s, clip } = ed, a = clip.audio, left = $('.cb-left', body); if (!left) return;
+  if (WARP.sel && WARP.sel.clip !== clip) WARP.sel = null;
+  const ls = $('select[data-a="bars"]', left);
+  if (ls && !AUD_BARS.includes(clip.bars)) { ls.insertAdjacentHTML('beforeend', `<option value="${clip.bars}">${clip.bars} BARS</option>`); ls.value = String(clip.bars); }
+  const mrow = $('select[data-a="mode"]', left), anchor = mrow && mrow.closest('.cb-row'); if (!anchor) return;
+  const on = (k, v) => `<button class="btn ${v ? 'on' : ''}" data-w="${k}"`;
+  const html = (a.mode === 'beats' ? `<div class="cb-row"><span>PRESERVE</span><select data-w="preserve" data-info="BEATS: where the file is cut. TRANSIENTS = at its hits; 1/16 or 1/8 = on that grid of the warped clip (for material without clear hits)">${WARP_PRESERVE.map(([v, n]) => `<option value="${v}" ${(a.preserve || 'trans') === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div>` : '')
+    + `<div class="cb-row">${on('loop', a.loop !== false)} data-info="LOOP: on = the clip repeats over its length; off = the audio plays once from the clip's start, then silence (a full vocal, a phrase)">LOOP</button>${on('formants', a.formants)} data-info="FORMANTS: a key shift keeps the voice's spectral envelope (phase vocoder plus a cepstral envelope), so a transposed vocal does not turn into a chipmunk or a giant. TONES and COMPLEX">FORMANTS</button></div>`
+    + `<div class="cb-row"><span>START</span><input type="number" data-w="startb" min="0" step="0.25" value="${+(a.start / 4).toFixed(3)}" style="flex:1;min-width:0" data-info="Where the clip starts in its warped timeline, in beats (0 = the file's first beat; with markers: marker beat 0)"><button class="btn" data-w="fit" style="flex:none;padding:0 5px" data-info="FIT: the clip's length to the rest of the file from START (whole bars, up to ${WARP_MAX_BARS})">FIT</button></div>`
+    + `<div class="cb-row"><button class="btn go" data-w="auto" data-info="AUTO WARP: find the hits and the tempo of the file, put a warp marker on every hit snapped to the 1/16 grid: a loosely timed vocal lands on the grid. CTRL+Z undoes it">AUTO WARP</button><button class="btn" data-w="reset" data-info="RESET: remove every warp marker (the clip follows its BPM again)"${warpHasMarks(a) ? '' : ' disabled'}>RESET</button></div>`;
+  anchor.insertAdjacentHTML('afterend', html);
+  const setInfo = (sel, txt) => { const e = $(sel, left); if (e) e.dataset.info = txt; }; // 3g's texts name STRETCH: the key shift is TONES, COMPLEX and BEATS now
+  setInfo('[data-a="toKey"]', 'TO KEY: shift the clip into the key of the set (TONES, COMPLEX and BEATS; FORMANTS keeps a voice natural)');
+  setInfo('[data-a="semi-"]', 'Transpose down a semitone (TONES, COMPLEX and BEATS)'); setInfo('[data-a="semi+"]', 'Transpose up a semitone (TONES, COMPLEX and BEATS)');
+  setInfo('select[data-a="key"]', 'The key of the file (from its name, else detected: chromagram and melody against the Krumhansl profiles). With TO KEY on, the clip moves into the key of the set');
+  setInfo('select[data-a="bars"]', `Length of the clip, in bars of the set (up to ${WARP_MAX_BARS}; FIT: the rest of the file)`);
+  const hint = $('.cb-hint', left);
+  if (hint) hint.textContent = 'Drag the waveform to move the start. Yellow lines: warp markers. Drag one to move its beat (1/16 snap, ALT: free), double-click adds one, right-click or DEL removes it. Ticks: the hits.';
+  const done = () => { save(); audPrefetch(); WARP.busyUI = true; try { renderDetail(); } finally { WARP.busyUI = false; } }; // the input's blur in the re-render is no second change
+  left.addEventListener('click', e => {
+    const b = e.target.closest('[data-w]'); if (!b || b.tagName === 'SELECT' || b.tagName === 'INPUT') return;
+    const k = b.dataset.w;
+    if (k === 'auto') return warpAuto(t, s);
+    if (k !== 'loop' && k !== 'formants' && k !== 'reset' && k !== 'fit') return;
+    const b0 = SMP.bufs.get(a.src);
+    if (k === 'fit' && !b0) return flash('The file is not loaded: load it with FILE...'); // nothing changes: no undo step
+    pushUndo();
+    if (k === 'loop') { if (a.loop === false) delete a.loop; else a.loop = false; }
+    else if (k === 'formants') { if (a.formants) delete a.formants; else a.formants = true; }
+    else if (k === 'reset') { delete a.markers; WARP.sel = null; flash(`${clip.name}: warp markers removed. CTRL+Z to undo`); }
+    else if (k === 'fit') {
+      const left16 = wMapInv(warpMapOf(P, a), b0.duration) * 4 - a.start; clip.bars = clamp(Math.ceil(left16 / 16 - 1e-3), 1, WARP_MAX_BARS);
+      flash(`${clip.name}: ${clip.bars} bar${clip.bars > 1 ? 's' : ''}, the rest of the file`);
+    }
+    done();
+  });
+  left.addEventListener('change', e => {
+    const k = e.target.dataset.w; if (!k || WARP.busyUI) return;
+    if (k === 'preserve') { pushUndo(); if (e.target.value === 'trans') delete a.preserve; else a.preserve = e.target.value; }
+    else if (k === 'startb') {
+      const v = +e.target.value, st = Number.isFinite(v) ? clamp(Math.round(v * 4 * 1000) / 1000, 0, 8192) : a.start;
+      if (st === a.start) { e.target.value = String(+(a.start / 4).toFixed(3)); return; } // no change: no undo step, the field shows START again
+      pushUndo(); a.start = st;
+    } else return;
+    done();
+  });
+  warpMountMarks(ed);
+  audDraw(); audDrawInfo();
+}
+// the arrangement: each audio clip's waveform through its warp map; a clip that plays once is silent after its end
+if (typeof audArrWaves === 'function') {
+  audArrWaves = function () { // eslint-disable-line no-func-assign
+    $$('#a-scroll .aclip.aud').forEach(box => {
+      const tr = P.tracks[+box.dataset.t], e = tr && tr.arr[+box.dataset.k], c = e && tr.clips[e.slot], a = c && c.audio, b0 = a && SMP.bufs.get(a.src);
+      if (!b0) return;
+      const buf = a.rev ? smpReversed(b0) : b0, ob = audOrigBpm(P, a), L = c.bars * 16, ch0 = buf.getChannelData(0), n = buf.length, sr = buf.sampleRate, m = warpMapOf(P, a);
+      const cv = el('canvas', 'aud-aw'), W = Math.min(2048, Math.max(4, Math.round(box.clientWidth))), H = Math.max(8, box.clientHeight - 2);
+      cv.width = W; cv.height = H; box.prepend(cv);
+      const g = cv.getContext('2d'), steps = e.len * 16, off = a.mode === 'off';
+      const secAt = p0 => (off ? a.start * 15 / ob + p0 * 15 / P.bpm : wMapAt(m, (a.start + p0) / 4));
+      g.fillStyle = 'rgba(0,0,0,.42)';
+      for (let x = 0; x < W; x++) {
+        const s0 = x / W * steps, s1 = (x + 1) / W * steps, el0 = (e.off || 0) + s0; if (a.loop === false && el0 >= L) continue;
+        const p0 = el0 % L, f0 = Math.floor(secAt(p0) * sr), span = Math.max(1, Math.floor((secAt(p0 + s1 - s0) - secAt(p0)) * sr));
+        let pk = 0; for (let j = 0; j < 48; j++) { const k = f0 + Math.floor(j * span / 48); if (k >= 0 && k < n) pk = Math.max(pk, Math.abs(ch0[k])); }
+        const hh = Math.min(1, pk * 1.1) * H / 2; g.fillRect(x, H / 2 - hh, 1, Math.max(1, hh * 2));
+      }
+    });
+  };
+}
+
+// ---------- VOCAL TRACKS ----------
+// The chain of a vocal: high-pass 100 Hz (24 dB), the de-esser, gentle compression, a little saturation, reverb (A) and delay (B) sends, no sidechain
+function warpVocalPreset(tr) {
+  Object.assign(tr.fx, { eq: true, eqHp: 100, eqHpS: 24, comp: .3, sat: .06, sc: 0 });
+  Object.assign(tr.mix, { vol: .74, sendA: .16, sendB: .1 });
+  tr.warpVox = { deess: .5 };
+  if (typeof fxSanitize === 'function') fxSanitize(tr.fx);
+  return tr;
+}
+function warpVocalName(p) { const used = new Set(p.tracks.map(t => t.name)); let k = 1, nm = 'VOCAL'; while (used.has(nm)) nm = 'VOCAL ' + (++k); return nm; }
+let warpAdd0 = null;
+if (typeof audAddTrack === 'function') {
+  warpAdd0 = audAddTrack;
+  audAddTrack = function (quiet) { // eslint-disable-line no-func-assign
+    const i = warpAdd0(quiet);
+    if (i >= 0 && WARP.mkVocal) { const tr = P.tracks[i]; tr.name = warpVocalName(P); warpVocalPreset(tr); if (E) E.applyAll(); }
+    return i;
+  };
+}
+// + VOCAL TRACK. quiet: no undo step, no render (the caller does them)
+function warpAddVocal(quiet) {
+  if (audCount(P) >= AUD_MAX_TRACKS) { flash(`A set has ${AUD_MAX_TRACKS} audio tracks at most`); return -1; }
+  const before = quiet ? null : JSON.stringify(P);
+  const i = (warpAdd0 || audAddTrack)(true); if (i < 0) return -1;
+  if (before) warpUndoFrom(before); // the undo step only when the track is there
+  const tr = P.tracks[i]; tr.name = warpVocalName(P); warpVocalPreset(tr);
+  if (E) E.applyAll();
+  if (!quiet) {
+    renderAll(); select(i, UI.sel.s, 'clip'); save();
+    flash(`${tr.name} added: a vocal chain (high-pass 100 Hz, de-esser, gentle compression, a little saturation, reverb and delay sends, no sidechain). Drag a vocal from the browser onto its lane in ARRANGE, or drop a file there. CTRL+Z to undo`);
+  }
+  return i;
+}
+// vocal files dropped on a MIDI lane make a vocal track (not a plain audio track)
+if (typeof audFilesInto === 'function') {
+  const warpFiles0 = audFilesInto;
+  audFilesInto = async function (t, where, files) { // eslint-disable-line no-func-assign
+    const list = Array.from(files || []).filter(f => audIsAudioName(f.name)), tr = P.tracks[t];
+    WARP.mkVocal = !!list.length && (audIsTrack(tr) ? !!tr.warpVox : list.every(f => typeof voxIsVocal === 'function' && voxIsVocal(f.name)));
+    try { return await warpFiles0(t, where, files); } finally { WARP.mkVocal = false; }
+  };
+}
+if (typeof audUseStored === 'function') { // a stored file into a slot: analysed first (tempo and key when its name has none)
+  const warpUse0 = audUseStored;
+  audUseStored = async function (id, name) { // eslint-disable-line no-func-assign
+    if (!SMP.bufs.has(id)) await smpUserLoad(id);
+    const b = SMP.bufs.get(id), tr = P.tracks[UI.sel.t];
+    if (b) { if (b.duration > 20) flash(`Analysing ${name}...`); await warpAnaFor(id, b); }
+    WARP.mkVocal = !!(tr && tr.warpVox);
+    try { return await warpUse0(id, name); } finally { WARP.mkVocal = false; }
+  };
+}
+// A stored file (dragged from the browser) onto a lane in ARRANGE (at the drop bar) or a slot: a MIDI lane gets a new vocal track
+async function warpDropStored(tg, f) {
+  if (AUD.busy) return flash('Still loading the files before: wait a moment');
+  AUD.busy = true;
+  try {
+    if (!SMP.bufs.has(f.id)) await smpUserLoad(f.id);
+    const buf = SMP.bufs.get(f.id); if (!buf) return flash(`${f.name} is not in the storage of this browser any more: load it again`);
+    if (buf.duration > 20) flash(`Analysing ${f.name}...`);
+    await warpAnaFor(f.id, buf);
+    const before = JSON.stringify(P); let undone = false; // the undo step: pushed before the first change (a drop that changes nothing has none)
+    const mark = () => { if (!undone) { undone = true; warpUndoFrom(before); } };
+    let t = tg.t, made = '';
+    if (!audIsTrack(P.tracks[t])) {
+      const was = P.tracks[t] ? P.tracks[t].name : '';
+      t = warpAddVocal(true); if (t < 0) return;
+      mark(); made = `${was} is a MIDI track: the new vocal track ${P.tracks[t].name} holds it`;
+    }
+    const tr = P.tracks[t]; WARP.mkVocal = !!tr.warpVox;
+    let s, c;
+    try {
+      if (tg.bar == null) { s = clamp(tg.s | 0, 0, tr.clips.length - 1); const nc = audClipFor(f.name, f.id, buf, P); mark(); c = tr.clips[s] = nc; }
+      else {
+        s = audFreeSlot(tr); if (s < 0) return flash(`${tr.name} has no free slot for another clip`);
+        const nc = audClipFor(f.name, f.id, buf, P); mark(); c = tr.clips[s] = nc;
+        const bar = clamp(tg.bar | 0, 0, 511), len = Math.min(c.bars, 512 - bar);
+        carve(tr, bar, bar + len); tr.arr.push({ start: bar, slot: s, len, off: 0 });
+        P.arr.len = Math.min(512, Math.max(P.arr.len, bar + len)); UI.arrSel = { t, k: tr.arr.length - 1 };
+      }
+    } finally { WARP.mkVocal = false; }
+    c.audio.toKey = true;
+    if (E) E.applyAll();
+    renderSession(); renderArrIfVisible(); select(t, s, 'clip'); save(); audPrefetch();
+    const a = c.audio;
+    flash(`${c.name} on ${tr.name}${tg.bar != null ? `, from bar ${tg.bar + 1}` : `, ${sceneLabel(s)}`}: ${c.bars} bar${c.bars > 1 ? 's' : ''}${a.loop === false ? ' (plays once)' : ''}, ${a.bpm ? Math.round(a.bpm * 10) / 10 + ' BPM' : 'no tempo found (WARP OFF)'}${a.key ? ', ' + a.key + ' (TO KEY on)' : ''}` + (made ? `. ${made}` : '') + '. CTRL+Z to undo');
+  } catch (err) { flash(`Could not place ${f.name}: ${(err && err.message) || err}`); }
+  finally { AUD.busy = false; }
+}
+const WARP_DRAG = 'application/x-dnb808-audio';
+const warpDragged = e => !!(e.dataTransfer && Array.from(e.dataTransfer.types || []).includes(WARP_DRAG));
+function warpInitDrag() {
+  document.addEventListener('dragstart', e => {
+    const b = e.target && e.target.closest && e.target.closest('[data-aud="file"]'); if (!b || !e.dataTransfer) return;
+    e.dataTransfer.setData(WARP_DRAG, JSON.stringify({ id: b.dataset.id, name: b.dataset.name || 'audio' })); e.dataTransfer.effectAllowed = 'copy';
+  }, true);
+  window.addEventListener('dragover', e => {
+    if (!P || !warpDragged(e)) return;
+    const tg = audDropTarget(e); if (!tg) return;
+    e.preventDefault(); e.dataTransfer.dropEffect = 'copy';
+    if (typeof midiDropHilite === 'function') midiDropHilite(tg.el);
+  }, true);
+  window.addEventListener('drop', e => {
+    if (!P || !warpDragged(e)) return;
+    const tg = audDropTarget(e); if (typeof midiDropHilite === 'function') midiDropHilite(null);
+    let f = null; try { f = JSON.parse(e.dataTransfer.getData(WARP_DRAG)); } catch (er) { f = null; }
+    if (!tg || !f || typeof f.id !== 'string' || !/^user:[0-9a-f]{8,64}$/i.test(f.id)) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    warpDropStored(tg, { id: f.id, name: String(f.name || 'audio').slice(0, 60) });
+  }, true);
+}
+// the browser: + Vocal track; the stored files can be dragged onto the arrangement
+if (typeof audBrowserHtml === 'function') {
+  const warpBr0 = audBrowserHtml;
+  audBrowserHtml = function (tr) { // eslint-disable-line no-func-assign
+    let h = warpBr0(tr);
+    const full = audCount(P) >= AUD_MAX_TRACKS;
+    h = h.replace(/(<button class="br-item" data-aud="add"[^>]*>[\s\S]*?<\/button>)/, `$1
+    <button class="br-item" data-aud="vocal" data-info="Add a vocal track: an audio track with a vocal chain (high-pass 100 Hz, de-esser, gentle compression, a little saturation, reverb and delay sends, no sidechain). Drag a vocal file onto its lane in ARRANGE"${full ? ' disabled' : ''}><span>+ Vocal track</span></button>`);
+    return h.replace(/data-aud="file" /g, 'data-aud="file" draggable="true" ').replace(/(data-aud="file"[^>]*data-info="Put [^"]*)"/g, '$1. Or drag it onto a lane in ARRANGE: a clip from that bar"');
+  };
+  const warpBrClick0 = audBrowserClick;
+  audBrowserClick = function (b) { if (b.dataset.aud === 'vocal') return warpAddVocal(); return warpBrClick0(b); }; // eslint-disable-line no-func-assign
+}
+
+// ---------- THROWS: the delay and reverb sends up on the last beat of each phrase (arrangement lanes, section 3q) ----------
+function warpThrows(p, t) {
+  const tr = p.tracks[t]; if (!audIsTrack(tr) || typeof autoArrSet !== 'function' || typeof autoDefault !== 'function') return 0;
+  const ends = [];
+  tr.arr.forEach(e => {
+    const c = tr.clips[e.slot], a = c && c.audio; if (!a || !a.src) return;
+    const b = SMP.bufs.get(a.src), an = warpAnaOf(a), m = warpMapOf(p, a), ob = audOrigBpm(p, a), L = c.bars * 16, s0 = e.start * 16, s1 = s0 + e.len * 16;
+    const phr = an && an.phrases.length ? an.phrases : b ? [[0, b.duration]] : [];
+    const pe = phr.map(([, x]) => (a.mode === 'off' ? (x - a.start * 15 / ob) * p.bpm / 15 : wMapInv(m, x) * 4 - a.start)).filter(q => q > 0 && q <= L);
+    for (let pass = 0; pass < 512; pass++) {
+      const base = s0 - (e.off || 0) + pass * L; if (base >= s1 || (pass && a.loop === false)) break;
+      pe.forEach(q => { const x = base + q; if (x > s0 && x <= s1) ends.push(x); });
+    }
+  });
+  if (!ends.length) return 0;
+  ends.sort((x, y) => x - y);
+  const uniq = []; ends.forEach(x => { if (!uniq.length || x - uniq[uniq.length - 1] >= 8) uniq.push(x); });
+  [['sendB', .45, .35], ['sendA', .3, .18]].forEach(([id, min, add]) => {
+    const d = autoDefault(tr, id), hi = clamp(Math.max(min, d + add), 0, 1), pts = [[0, d, 2]];
+    uniq.forEach(x => { const b = Math.max(0, Math.ceil(x / 4) * 4 - 4); pts.push([b, hi, 2], [b + 4, d, 2]); });
+    autoArrSet(tr, id, pts);
+  });
+  return uniq.length;
+}
+async function warpThrowsGo(i) {
+  const tr = P.tracks[i]; if (!audIsTrack(tr)) return;
+  const ids = [...new Set(tr.arr.map(e => tr.clips[e.slot]).filter(c => c && c.audio && c.audio.src).map(c => c.audio.src))];
+  if (ids.some(id => !WARP.ana.has(id))) flash('THROWS: analysing the phrases...');
+  for (const id of ids) { if (!SMP.bufs.has(id)) await smpUserLoad(id); if (SMP.bufs.has(id)) await warpAnaFor(id, SMP.bufs.get(id)); }
+  const before = JSON.stringify(P), n = warpThrows(P, i); // warpThrows changes nothing when it finds no phrase end
+  if (n) warpUndoFrom(before);
+  if (!n) { return flash(`THROWS: no phrase ends on ${tr.name}: put its vocal clips in the arrangement first`); }
+  save(); renderArrIfVisible(); renderDetail();
+  flash(`THROWS: ${n} phrase end${n === 1 ? '' : 's'} of ${tr.name}: the delay (B) and the reverb (A) sends go up on the last beat of each (arrangement automation). CTRL+Z to undo`);
+}
+function warpThrowsClear(i) {
+  const tr = P.tracks[i]; if (!tr || !Array.isArray(tr.autoArr) || !tr.autoArr.some(l => l.target === 'sendA' || l.target === 'sendB')) return flash('No send automation on this track');
+  pushUndo(); autoArrSet(tr, 'sendA', null); autoArrSet(tr, 'sendB', null); save(); renderArrIfVisible(); renderDetail();
+  flash(`${tr.name}: the send automation is gone. CTRL+Z to undo`);
+}
+// the device view of an audio track gets a VOCAL device: DE-ESS, THROWS, the vocal chain
+if (typeof audDeviceDetail === 'function') {
+  const warpDev0 = audDeviceDetail;
+  audDeviceDetail = function (body) { // eslint-disable-line no-func-assign
+    warpDev0(body);
+    try {
+      const i = UI.sel.t, tr = P.tracks[i], ch = body.querySelector('.devchain'); if (!ch || !audIsTrack(tr)) return;
+      const d = device('VOCAL', tr.color, null, 'The vocal tools of this audio track: a de-esser on its input, the throws (delay and reverb sends up on the last beat of each phrase) and the vocal chain');
+      const vx = tr.warpVox || { deess: 0 };
+      const kn = bindKnob(vx, 'deess', { label: 'DE-ESS', min: 0, max: 1, def: 0, size: 'sm', color: tr.color, fmt: v => Math.round(v * 100) + '%', info: 'DE-ESS: turns the sibilants (S, SH, T over 5.5 kHz) down when they get loud; the rest of the voice is untouched. 0 = off' }, () => { tr.warpVox = vx; });
+      const mk = (txt, info, fn) => { const b = el('button', 'btn', txt); b.dataset.info = info; b.style.cssText = 'height:22px;padding:0 8px'; b.onclick = fn; return b; };
+      d.body.append(kgroup('', [kn]), kgroup('', [
+        mk('THROWS', `THROWS: the delay send (B) and the reverb send (A) of ${tr.name} go up on the last beat of each vocal phrase in the arrangement (phrase ends found by silence), as arrangement automation. CTRL+Z undoes it`, () => warpThrowsGo(i)),
+        mk('CLEAR', `Remove the send automation (A and B) of ${tr.name}`, () => warpThrowsClear(i)),
+        mk('VOCAL CHAIN', `Set the chain of ${tr.name} for a vocal: high-pass 100 Hz, de-esser, gentle compression, a little saturation, reverb and delay sends, no sidechain`, () => { pushUndo(); warpVocalPreset(tr); if (E) E.applyAll(); save(); renderDetail(); flash(`${tr.name}: the vocal chain is on. CTRL+Z to undo`); })]));
+      ch.insertBefore(d.el, ch.children[1] || null);
+    } catch (e) { console.warn('[dnb808] vocal device', e); }
+  };
+}
+
+// ---------- GENERATE SONG: whole phrases of the user's vocal packs on a vocal track, warped, with throws ----------
+const WARP_GEN_KEY = 'dnb808.warpGenVox';
+try { WARP.genOn = localStorage.getItem(WARP_GEN_KEY) !== 'off'; } catch (e) { WARP.genOn = true; }
+function warpGenFiles() {
+  if (typeof PAL !== 'object' || !PAL || !PAL.voxReady || !Array.isArray(PAL.vox)) return [];
+  const shot = typeof palVoxShot === 'function' ? palVoxShot : f => f.dur < 2.5;
+  return PAL.vox.filter(f => SMP.bufs.has(f.id) && !shot(f) && SMP.bufs.get(f.id).duration <= WARP_MAX_SEC);
+}
+function warpGenVox(p, plan, id, seed) {
+  if (!Array.isArray(plan) || !plan.length || audCount(p) >= AUD_MAX_TRACKS) return 0;
+  const files = warpGenFiles(); if (!files.length) return 0;
+  const secs = plan.filter(x => Array.isArray(x) && /drop|bdown|break/i.test(String(x[0])) && x[2] > 0); if (!secs.length) return 0;
+  const st = typeof GEN_STYLES === 'object' && GEN_STYLES[id] ? Object.assign({ id }, GEN_STYLES[id]) : { id };
+  let h = 2166136261; const sk = String(p.gen && p.gen.pal ? p.gen.pal.seed : seed != null ? seed : p.name); for (let k = 0; k < sk.length; k++) h = Math.imul(h ^ sk.charCodeAt(k), 16777619) >>> 0;
+  const rng = genRng((h ^ 0x5eed7a11) >>> 0);
+  const tempo = f => { const b = SMP.bufs.get(f.id), an = WARP.ana.get(f.id), nb = typeof voxNameBpm === 'function' ? voxNameBpm(f.name) : 0; return nb || (an && an.bpm) || (b.duration <= 60 ? audTempoOf(f.name, b) : 0); };
+  const pool = files.map(f => [f, (typeof palVoxScore === 'function' ? palVoxScore(f, p, st) : 0) + rng() * 1.5]).sort((x, y) => y[1] - x[1]).map(x => x[0]).filter(f => tempo(f) > 0).slice(0, 2);
+  if (!pool.length) return 0;
+  const tr = audNewTrack(audCount(p), p.scenes.length); tr.name = warpVocalName(p); tr.color = '#ffd36b'; warpVocalPreset(tr);
+  const used = new Set(), clipOf = new Map(), rows = typeof GEN_SONG_ROWS === 'object' ? GEN_SONG_ROWS : {};
+  const slotFor = sec => { const r = rows[sec] ? rows[sec][0] : -1; if (r >= 0 && r < tr.clips.length && !used.has(r)) return r; for (let k = tr.clips.length - 1; k >= 0; k--) if (!used.has(k)) return k; return -1; };
+  const prevMk = WARP.mkVocal; WARP.mkVocal = true;
+  try {
+    secs.forEach(([sec, a0, n]) => {
+      const f = /drop/i.test(sec) ? pool[pool.length > 1 ? 1 : 0] : pool[0];
+      let s = clipOf.get(f.id);
+      if (s == null) {
+        s = slotFor(sec); if (s < 0) return; used.add(s);
+        const b = SMP.bufs.get(f.id), c = audClipFor(f.name, f.id, b, p);
+        if (!c.audio.bpm) { c.audio.bpm = Math.round(tempo(f) * 1000) / 1000; c.audio.mode = 'stretch'; }
+        c.audio.toKey = true; c.audio.loop = false;
+        c.bars = clamp(Math.ceil(b.duration * c.audio.bpm / 240 - 1e-3), 1, WARP_MAX_BARS);
+        tr.clips[s] = c; clipOf.set(f.id, s);
+      }
+      const c = tr.clips[s], len = Math.min(c.bars, n);
+      tr.arr.push({ start: a0, slot: s, len, off: 0 });
+      if (c.bars * 2 <= n) tr.arr.push({ start: a0 + Math.floor(n / 2), slot: s, len: Math.min(c.bars, n - Math.floor(n / 2)), off: 0 }); // call and response
+    });
+  } finally { WARP.mkVocal = prevMk; }
+  if (!tr.arr.length) return 0;
+  tr.arr.sort((x, y) => x.start - y.start);
+  p.tracks.push(tr);
+  warpThrows(p, p.tracks.length - 1);
+  WARP.genLast = { name: tr.name, n: tr.arr.length, files: pool.map(f => f.name) };
+  return tr.arr.length;
+}
+if (typeof genSong === 'function') {
+  const warpGen0 = genSong;
+  genSong = function (id, o = {}) { // eslint-disable-line no-func-assign
+    o = o && typeof o === 'object' ? o : {};
+    const out = o.out && typeof o.out === 'object' ? o.out : {}, p = warpGen0(id, Object.assign({}, o, { out }));
+    WARP.genLast = null;
+    try { if (p && WARP.genOn && o.vocals !== false) warpGenVox(p, out.plan, id, o.seed); } catch (e) { console.error('[dnb808] generator vocals', e); }
+    return p;
+  };
+}
+if (typeof genSongGo === 'function') {
+  const warpGo0 = genSongGo;
+  genSongGo = function (...args) { // eslint-disable-line no-func-assign
+    const r = warpGo0.apply(this, args);
+    const g = WARP.genLast;
+    if (g && P && P.tracks.some(t => t.name === g.name)) { audPrefetch(); setTimeout(() => flash(`${g.name}: ${g.n} vocal phrase${g.n === 1 ? '' : 's'} of your packs (${g.files.join(', ')}) in the breakdowns and the drops, warped to ${P.bpm} BPM and the key, with delay and reverb throws`), 2800); }
+    return r;
+  };
+}
+if (typeof genSongOpen === 'function') { // the dialog: VOCAL PHRASES on or off (only when the user's packs have some)
+  const warpOpen0 = genSongOpen;
+  genSongOpen = function (...args) { // eslint-disable-line no-func-assign
+    const r = warpOpen0.apply(this, args);
+    try {
+      const files = warpGenFiles(), ov = $('#gensong-dialog'), anchor = ov && (ov.querySelector('.gs-snd') || ov.querySelector('.gs-groove'));
+      files.slice(0, 12).forEach(f => warpAnaFor(f.id, SMP.bufs.get(f.id)));
+      if (files.length && anchor && !ov.querySelector('#gs-wvox')) {
+        const lb = el('label', 'gs-groove gs-wvox'); lb.dataset.info = `VOCAL PHRASES: On = whole phrases of your vocal packs (${files.length} found) on a vocal track in the breakdowns and the drops, warped to the song's tempo and key, with delay and reverb throws on their last beats. Off = none`;
+        lb.innerHTML = `Vocal phrases <select id="gs-wvox"><option value="on"${WARP.genOn ? ' selected' : ''}>On</option><option value="off"${WARP.genOn ? '' : ' selected'}>Off</option></select>`;
+        lb.querySelector('select').addEventListener('change', e => { WARP.genOn = e.target.value !== 'off'; try { localStorage.setItem(WARP_GEN_KEY, WARP.genOn ? 'on' : 'off'); } catch (er) { /* private */ } });
+        anchor.after(lb);
+      }
+    } catch (e) { /* the dialog changed */ }
+    return r;
+  };
+}
+if (typeof window !== 'undefined' && typeof document !== 'undefined') warpInitDrag();
 
 // ===================== 9. MIDI IMPORT =====================
 // Reads a Standard MIDI File (format 0 or 1, PPQ timing) and turns it into a new set:
