@@ -3,7 +3,7 @@
   "framework": null,
   "buildCommand": null,
   "outputDirectory": ".",
-  "installCommand": "echo \"static site - no install\"",
+  "installCommand": "npm install --omit=dev --no-audit --no-fund",
   "cleanUrls": true,
   "redirects": [
     { "source": "/game", "destination": "/", "permanent": true },
