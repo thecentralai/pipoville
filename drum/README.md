@@ -868,6 +868,39 @@ harmony families, sounds and growl feel, loops in the loop library and a song te
   private Vercel Blob store through /api/vox, one file at a time, and keeps it in this browser. Production answers 404
   and the audio is never in this repository
 
+## Pro mix, FX, inserts and drones
+
+- PUMP: a tempo-synced curve ducker per lane (bass, sub, pads, chords, lead, reverb and delay returns), deeper for
+  French touch styles and lighter for afro; a global PUMP knob; user curves are never overwritten
+- Lead bus: high-pass, drive, parallel compression, presence, de-harsh and a mono core with a wide support layer;
+  master glue preset towards -13 LUFS and -1 dBTP; MIX FIT runs at stop and never undoes your own changes
+- Synthesized FX and fillers per genre: risers, impacts, sub drops, reverse cymbals and swells, snare rolls, tape
+  stops, air and vinyl; inserts in the style of Madeon and Zedd (chops, stutters, gates, pitch throws) in key and only
+  where the lead rests
+- Drones and organic melodies for afro house: root and fifth drones from bar 1, humanized timing and velocity,
+  counter-melodies and organic doubles. No song starts with an empty bar
+- GENERATE options: Pro mix + FX (style, all styles or off) and Organic
+
+## Long phrases (16 and 32 bars)
+
+- Phrases: Auto / Long / Short in GENERATE SONG. Long writes lead melodies as real 16 and 32-bar phrases (periods,
+  sentences, AABA, ABAC) with one climax around two thirds in, cadences, motif development and pickups
+- Chords over 16 and 32 bars: varied 4th and 8th chords, faster harmony at phrase ends, borrowed chords, pedals,
+  reharmonized repeats and voicings that climb; long automation curves follow the melodic arc and reset on the
+  section boundary. Short gives exactly the classic songs
+
+## Vocal insert, vocal story and COMPLEX PRO
+
+- + VOCAL on every vocal track (session header, mixer strip, arrangement lane, device panel, right-click): a picker
+  of every loaded vocal file with search, filters and a preview fitted to the song; INSERT puts the file on the line
+  at the chosen bar, warped and in key; AUTO FILL fills the drops and breakdowns
+- Vocal story (GENERATE option, default On): one main hook, one singer and one theme per song, read from the file
+  names; the same hook in every drop, verse phrases in the breakdowns, a pre-hook stutter in the build, the hook's
+  tail in the outro; MC and crowd only in styles where they fit
+- COMPLEX PRO warp mode (default for new vocal clips): a spectral stretcher with formant preservation, based on
+  Signalsmith Stretch (MIT, drum/vendor/signalsmith-stretch). Old clips keep their mode; without the library the
+  clip plays with TONES and a notice says why
+
 ## Warp and vocal tracks
 
 - AUTO WARP finds the tempo, the transients, the key and the phrases of an audio clip and puts warp markers on the
