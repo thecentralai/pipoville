@@ -868,6 +868,27 @@ harmony families, sounds and growl feel, loops in the loop library and a song te
   private Vercel Blob store through /api/vox, one file at a time, and keeps it in this browser. Production answers 404
   and the audio is never in this repository
 
+## Style upgrade, dynamics, vocal space, loops, timing and piano
+
+- Style upgrade (GENERATE option, default On): every style opts into the pro engines with settings for its genre and a
+  measured mix table (levels, EQ, master tone), with a CPU estimate that lightens heavy styles so all of them play in
+  real time. Off and saved sets play as before
+- Dynamics: Expressive (default) or Classic. Velocity changes the tone (brighter, more attack) on drums, samples and the
+  Polar and Tidal synths; new layered kits (kick with click, snare with clap, clap stacks), round-robin on hats,
+  shakers, ghosts and hand percussion; accents, ghost notes, rolls in crescendo and phrase dynamics
+- Vocal space: a vocal bus with EQ, de-esser and compression, three own returns (room/plate, plate/hall with synced
+  pre-delay, filtered delay) ducked by the voice, music ducked in the vocal band while the voice sings, level ride
+  and LEVEL FIT. Presets per genre; knobs SPACE, SIZE, DELAY, DUCK, AIR, RIDE and DUCK MUSIC
+- Splice loops: the owner's loops from a loops/ folder of the private store (or LOAD LOOPS...) placed tactically by
+  GENERATE: tops and percussion in the grooves and drops, one FX per transition ending on the downbeat, textures,
+  fills; in key and in tempo, never over the vocal phrases
+- Timing: Tight (default) aligns every lane to the kick by compensating the latency of each chain, swings only the
+  drums (a little more in afro), and starts slow attacks earlier; Classic keeps the old timing
+- Piano: Auto / Off / Accompany / Lead. An expressive piano part per genre (house stabs, afro chords with a top line,
+  liquid jazzy electric piano, deep pads, a two-hand ballad in intros and breakdowns) on a STAB or PAD lane, with
+  voice leading, a louder top voice, ghost notes, chord rolls and phrase arcs; Lead carries the main melody
+- The GENERATE dialog keeps the style cards on screen and moves the options into an ADVANCED section
+
 ## Pro mix, FX, inserts and drones
 
 - PUMP: a tempo-synced curve ducker per lane (bass, sub, pads, chords, lead, reverb and delay returns), deeper for
